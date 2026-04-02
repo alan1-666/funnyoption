@@ -1,0 +1,184 @@
+.panel {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.copy {
+  margin: 10px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.candleWrap {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)),
+    rgba(0, 0, 0, 0.18);
+}
+
+.candleHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.candleMeta {
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--font-mono), monospace;
+}
+
+.candleChart {
+  width: 100%;
+  height: 136px;
+  display: block;
+}
+
+.candleEmpty {
+  min-height: 92px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+}
+
+.candleUp .wick,
+.candleUp .body {
+  stroke: rgba(92, 255, 148, 0.9);
+  fill: rgba(92, 255, 148, 0.32);
+}
+
+.candleDown .wick,
+.candleDown .body {
+  stroke: rgba(255, 111, 111, 0.92);
+  fill: rgba(255, 111, 111, 0.34);
+}
+
+.wick {
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.body {
+  stroke-width: 1.5;
+}
+
+.title {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.title h3 {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(1.5rem, 2vw, 2rem);
+  line-height: 0.95;
+  text-transform: uppercase;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.stat {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.label {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-family: var(--font-mono), monospace;
+}
+
+.ladder {
+  display: grid;
+  gap: 8px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.events {
+  display: grid;
+  gap: 10px;
+}
+
+.event {
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.eventHead {
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+@media (max-width: 940px) {
+  .grid,
+  .stats {
+    grid-template-columns: 1fr;
+  }
+
+  .candleChart {
+    height: 120px;
+  }
+}

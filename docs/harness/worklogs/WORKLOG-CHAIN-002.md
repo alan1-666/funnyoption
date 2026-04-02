@@ -1,0 +1,76 @@
+# WORKLOG-CHAIN-002
+
+### 2026-04-02 00:40 Asia/Shanghai
+
+- read:
+  - `PLAN-2026-04-01-master.md`
+  - `docs/architecture/direct-deposit-session-key.md`
+  - `docs/operations/local-offchain-lifecycle.md`
+  - `WORKLOG-ADMIN-001.md`
+  - `TASK-CHAIN-001.md`
+- changed:
+  - created the next chain hardening task focused on truthful deposit-listener proof
+- validated:
+  - task, handshake, ownership, and acceptance criteria now live in repo
+  - scope stays narrowly on deposit truthfulness rather than widening into withdrawals, claims, or admin auth
+- blockers:
+  - none yet; execution worker must determine whether the proof path can be fully local or needs a testnet-backed env
+- next:
+  - launch a worker against `TASK-CHAIN-002`
+
+### 2026-04-02 12:46 Asia/Shanghai
+
+- read:
+  - `cmd/local-lifecycle/main.go`
+  - `internal/chain/service/listener.go`
+  - `internal/chain/service/processor.go`
+  - `internal/chain/service/claim_processor.go`
+  - `docs/operations/local-offchain-lifecycle.md`
+  - `docs/operations/local-lifecycle-runbook.md`
+  - `migrations/001_init.sql`
+  - `migrations/003_wallet_sessions_and_deposits.sql`
+  - `migrations/006_chain_withdrawals.sql`
+- changed:
+  - replaced the lifecycle command's simulated deposit step with an embedded listener-driven proof path in `cmd/local-lifecycle/**`
+  - added a local proof environment that deploys an ephemeral proof vault on an in-process go-ethereum simulated chain and submits a real wallet-signed deposit tx
+  - normalized stored chain tx hashes to 64-char lowercase hex without `0x` inside `internal/chain/service/**`
+  - shortened deterministic listener-generated deposit ids so they fit legacy `VARCHAR(64)` local schemas
+  - updated local lifecycle docs to describe the real proof environment and proof evidence
+- validated:
+  - `go test -mod=mod ./cmd/local-lifecycle`
+  - `go test ./internal/chain/...`
+  - local stack held alive in a long-lived shell with:
+    - `/Users/zhangza/code/funnyoption/scripts/dev-up.sh`
+  - reproducible lifecycle proof command:
+    - `cd /Users/zhangza/code/funnyoption`
+    - `set -a; source .env.local; set +a`
+    - `go run ./cmd/local-lifecycle`
+  - proof environment used by the successful run:
+    - `mode=listener-driven-local-proof`
+    - `chain_id=1337`
+    - `chain_name=simulated`
+    - `network_name=local-proof`
+    - `vault_address=0xf0c28109605671777067dd6c54cd51dc66c166c8`
+    - `listener_start_block=2`
+    - `listener_confirmations=0`
+  - tx / deposit / balance evidence from the successful run:
+    - market id `1775105062980`
+    - deposit tx hash `0xed7afb142dde13e43a58fe1347437ff7b0182a91fc918a2a3df5d4d107b7ef9b`
+    - deposit id `dep_e24ae82b8c9f83a573070502f7294af5`
+    - deposit log index `0`, block number `2`, status `CREDITED`
+    - lifecycle summary showed buyer `USDT` `989219 -> 994219` after deposit, then `991939` after resolution/payout
+    - `GET /api/v1/deposits?user_id=1001&limit=5` returned the credited row with:
+      - `deposit_id=dep_e24ae82b8c9f83a573070502f7294af5`
+      - `tx_hash=ed7afb142dde13e43a58fe1347437ff7b0182a91fc918a2a3df5d4d107b7ef9b`
+      - `amount=5000`
+      - `chain_name=simulated`
+      - `network_name=local-proof`
+      - `vault_address=0xf0c28109605671777067dd6c54cd51dc66c166c8`
+    - `GET /api/v1/balances?user_id=1001&limit=20` returned `USDT available=991939 frozen=5100`
+    - `GET /api/v1/markets/1775105062980` returned `status=RESOLVED`, `resolved_outcome=YES`, `runtime.trade_count=1`, `runtime.payout_count=1`, `runtime.completed_payout_count=1`
+- blockers:
+  - no blocker remains for a truthful listener-driven local proof
+  - residual risk: the running local DB still behaved like an older schema with `VARCHAR(64)` limits for deposit identifiers / tx hashes, even though current repo migrations declare `VARCHAR(128)` for `chain_deposits.tx_hash`; this worker stayed in scope by normalizing tx hashes and shortening deterministic deposit ids inside `internal/chain/service/**`
+- next:
+  - commander can treat `TASK-CHAIN-002` as complete for the local listener-truthfulness lane
+  - if desired, reconcile local database schema drift separately so older local databases no longer require the compatibility workaround

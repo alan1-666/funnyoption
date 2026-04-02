@@ -1,0 +1,165 @@
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+  gap: 18px;
+}
+
+.heroMain,
+.block,
+.queue,
+.metric {
+  padding: 24px;
+}
+
+.title {
+  margin: 16px 0 0;
+  max-width: 10ch;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(3rem, 8vw, 6rem);
+  line-height: 0.93;
+  text-transform: uppercase;
+}
+
+.copy {
+  margin: 18px 0 0;
+  color: var(--muted);
+  line-height: 1.7;
+  max-width: 68ch;
+}
+
+.side {
+  display: grid;
+  gap: 14px;
+}
+
+.label {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-family: var(--font-mono), monospace;
+}
+
+.metric strong {
+  display: block;
+  margin-top: 12px;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(2.2rem, 4vw, 4.2rem);
+  line-height: 0.9;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 20px;
+}
+
+.blockHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-end;
+}
+
+.blockTitle {
+  margin: 14px 0 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(1.8rem, 4vw, 3rem);
+  line-height: 0.95;
+  text-transform: uppercase;
+}
+
+.marketList,
+.topology,
+.queueTable {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.marketRow,
+.topologyItem,
+.queueRow {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.marketRow,
+.queueRow {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: flex-start;
+}
+
+.marketTitle {
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.marketMeta {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.topologyItem {
+  grid-template-columns: auto 1fr;
+  gap: 14px;
+}
+
+.topologyItem strong {
+  font-family: var(--font-display), sans-serif;
+  font-size: 1.8rem;
+  color: var(--salmon);
+}
+
+.topologyItem p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.queue {
+  margin-top: 20px;
+}
+
+.queueState {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.queueState span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (max-width: 1080px) {
+  .hero,
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .heroMain,
+  .block,
+  .queue,
+  .metric {
+    padding: 20px;
+  }
+
+  .marketRow,
+  .queueRow {
+    grid-template-columns: 1fr;
+  }
+
+  .queueState {
+    justify-items: start;
+  }
+}

@@ -1,0 +1,3 @@
+{
+  "/api/operator/markets/[marketId]/first-liquidity/route": "app/api/operator/markets/[marketId]/first-liquidity/route.js"
+}

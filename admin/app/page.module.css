@@ -1,0 +1,260 @@
+.pageShell {
+  display: grid;
+  gap: 24px;
+}
+
+.topbar,
+.hero,
+.adminGrid,
+.snapshotGrid,
+.feedGrid {
+  display: grid;
+  gap: 18px;
+}
+
+.topbar {
+  grid-template-columns: minmax(0, 1.3fr) auto;
+  align-items: end;
+}
+
+.brandBlock {
+  display: grid;
+  gap: 12px;
+}
+
+.title {
+  margin: 0;
+  max-width: 15ch;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(3.1rem, 8vw, 5.7rem);
+  line-height: 0.92;
+  text-transform: uppercase;
+}
+
+.topbarActions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.linkCard {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 18px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+}
+
+.hero {
+  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+}
+
+.heroPrimary,
+.heroSide,
+.snapshotCard,
+.feedCard {
+  padding: 24px;
+}
+
+.heroPrimary {
+  display: grid;
+  gap: 18px;
+  background:
+    radial-gradient(circle at top left, rgba(128, 247, 255, 0.12), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(255, 200, 87, 0.12), transparent 25%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
+}
+
+.heroCopy,
+.sideCopy,
+.sideMeta {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.metricGrid,
+.statGrid,
+.detailGrid {
+  display: grid;
+  gap: 14px;
+}
+
+.metricGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metricCard,
+.statBlock,
+.detailBlock {
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.metricCard {
+  padding: 18px;
+}
+
+.metricLabel,
+.detailLabel {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-family: var(--font-mono), monospace;
+}
+
+.heroSide {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  background:
+    radial-gradient(circle at top right, rgba(255, 122, 89, 0.16), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
+}
+
+.sideTitle,
+.snapshotTitle {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(1.8rem, 4vw, 3.1rem);
+  line-height: 0.95;
+  text-transform: uppercase;
+}
+
+.command {
+  display: block;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.24);
+  color: var(--cyan);
+  overflow-x: auto;
+  font-family: var(--font-mono), monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.adminGrid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-end;
+}
+
+.snapshotGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.snapshotCard {
+  display: grid;
+  gap: 18px;
+}
+
+.snapshotHeader,
+.feedHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.statGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.statBlock,
+.detailBlock {
+  padding: 14px 16px;
+  display: grid;
+  gap: 6px;
+}
+
+.statBlock span,
+.detailBlock p {
+  color: var(--muted);
+}
+
+.statBlock strong {
+  font-family: var(--font-display), sans-serif;
+  font-size: 2rem;
+  line-height: 0.95;
+}
+
+.detailGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detailBlock p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.feedGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.feedCard {
+  display: grid;
+  gap: 16px;
+}
+
+.feedList {
+  display: grid;
+  gap: 12px;
+}
+
+.feedRow,
+.emptyState {
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 14px 16px;
+}
+
+.feedRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.feedRow strong {
+  color: var(--text);
+}
+
+.emptyState {
+  color: var(--muted);
+}
+
+@media (max-width: 1180px) {
+  .hero,
+  .snapshotGrid,
+  .feedGrid,
+  .metricGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 920px) {
+  .topbar,
+  .sectionHeader {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+  }
+
+  .sectionHeader {
+    display: grid;
+  }
+}

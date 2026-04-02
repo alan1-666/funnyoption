@@ -1,0 +1,87 @@
+# WORKLOG-ADMIN-004
+
+### 2026-04-02 14:10 Asia/Shanghai
+
+- read:
+  - `PLAN-2026-04-01-master.md`
+  - `WORKLOG-ADMIN-002.md`
+  - `WORKLOG-OFFCHAIN-009.md`
+  - `WORKLOG-ADMIN-003.md`
+- changed:
+  - created a follow-up backend hardening task after commander review of the converged admin runtime
+- validated:
+  - `TASK-ADMIN-003` closed the split-runtime problem and put first-liquidity behind the wallet-gated admin lane
+  - shared backend endpoints are still callable directly:
+    - `POST /api/v1/markets`
+    - `POST /api/v1/markets/:market_id/resolve`
+    - `POST /api/v1/admin/markets/:market_id/first-liquidity`
+- blockers:
+  - none yet; worker should choose the narrowest backend auth model that protects privileged endpoints without reopening the runtime split
+- next:
+  - launch `TASK-ADMIN-004`
+
+### 2026-04-02 15:12 Asia/Shanghai
+
+- read:
+  - `AGENTS.md`
+  - `PLAN.md`
+  - `docs/harness/README.md`
+  - `docs/harness/roles/WORKER.md`
+  - `docs/harness/PROJECT_MAP.md`
+  - `docs/harness/THREAD_PROTOCOL.md`
+  - `docs/architecture/direct-deposit-session-key.md`
+  - `WORKLOG-ADMIN-002.md`
+  - `WORKLOG-OFFCHAIN-009.md`
+  - `WORKLOG-ADMIN-003.md`
+  - `TASK-ADMIN-004.md`
+  - `HANDSHAKE-ADMIN-004.md`
+  - `WORKLOG-ADMIN-004.md`
+  - `internal/api/handler/order_handler.go`
+  - `internal/api/handler/order_handler_test.go`
+  - `internal/api/dto/order.go`
+  - `internal/shared/auth/session.go`
+  - `internal/shared/config/config.go`
+  - `internal/api/server.go`
+  - `admin/lib/operator-auth.ts`
+  - `admin/lib/operator-server.ts`
+  - `admin/app/api/operator/markets/route.ts`
+  - `admin/app/api/operator/markets/[marketId]/resolve/route.ts`
+  - `admin/app/api/operator/markets/[marketId]/first-liquidity/route.ts`
+  - `admin/README.md`
+- changed:
+  - added shared core-API operator proof verification for privileged market actions using the existing wallet-signature model instead of a narrower trusted-forwarder-only shortcut
+  - protected `POST /api/v1/markets`, `POST /api/v1/markets/:market_id/resolve`, and `POST /api/v1/admin/markets/:market_id/first-liquidity` behind an allowlisted `personal_sign` proof verified again inside the Go API
+  - extended DTOs and request message builders so the core API can reconstruct the exact signed create/resolve/first-liquidity payloads it expects
+  - updated the Next admin routes to forward operator proof in the snake_case JSON shape the Go API binds:
+    - `operator.wallet_address`
+    - `operator.requested_at`
+    - `operator.signature`
+  - moved create-market audit persistence deeper:
+    - the shared API now stamps `created_by` from `FUNNYOPTION_DEFAULT_OPERATOR_USER_ID`
+    - verified operator identity is written into market metadata as `operatorWalletAddress`, `operatorRequestedAt`, and `operatorService=shared-api`
+  - added focused handler tests for:
+    - missing operator proof rejection on create
+    - missing operator proof rejection on resolve
+    - missing operator proof rejection on first-liquidity
+    - authorized resolve publish path
+- validated:
+  - `go test ./internal/api/handler ./internal/api/dto`
+  - `cd /Users/zhangza/code/funnyoption/admin && npm run build`
+  - runtime unauthorized proof on a temporary hardened API instance:
+    - started `go run ./cmd/api` with `FUNNYOPTION_API_HTTP_ADDR=:8083`
+    - set `FUNNYOPTION_OPERATOR_WALLETS=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266`
+    - direct `POST http://127.0.0.1:8083/api/v1/markets` without operator proof returned `401 {"error":"operator proof is required for privileged actions"}`
+  - runtime authorized proof through the dedicated admin service:
+    - started `npm run dev -- --hostname 127.0.0.1 --port 3012` in `/Users/zhangza/code/funnyoption/admin`
+    - pointed it at `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8083`
+    - allowlisted wallet `0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266`
+    - signed `POST http://127.0.0.1:3012/api/operator/markets`
+    - received `201` and created market `1775113807022`
+    - response metadata confirmed `operatorWalletAddress=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266`, `operatorRequestedAt=1775113769163`, `operatorService=shared-api`
+- blockers:
+  - none at this task boundary
+  - one narrow residual gap remains intentionally out of scope:
+    - `/api/v1/orders` still uses the older trust model, including the first sell-order submit that follows explicit first-liquidity issuance
+- next:
+  - commander can treat `TASK-ADMIN-004` as complete
+  - if deeper operator or audit hardening is required later, the next task should focus specifically on `/api/v1/orders` or on recording operator identity beyond market-create metadata

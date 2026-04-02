@@ -1,0 +1,13 @@
+/bin/
+/dist/
+/.idea/
+/.vscode/
+*.log
+*.out
+*.test
+.env
+.env.*
+coverage.out
+vendor/
+.logs/
+.run/

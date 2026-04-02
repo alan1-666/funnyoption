@@ -1,0 +1,77 @@
+# WORKLOG-OFFCHAIN-003
+
+### 2026-04-01 19:53 Asia/Shanghai
+
+- read:
+  - active master plan
+  - off-chain umbrella task
+  - current regression task and local control surface references
+- changed:
+  - created a follow-up task for query/read cleanup and operator visibility after local regression closeout
+- validated:
+  - dependency on `TASK-OFFCHAIN-002` is explicit in task and handshake files
+- blockers:
+  - cannot begin until `TASK-OFFCHAIN-002` produces real local regression results
+- next:
+  - worker thread should start this task only after the current regression path is verified
+
+### 2026-04-01 21:43 Asia/Shanghai
+
+- read:
+  - `docs/architecture/order-flow.md`
+  - `docs/architecture/ledger-service.md`
+  - `docs/sql/schema.md`
+  - `TASK-OFFCHAIN-002.md`
+  - `HANDSHAKE-OFFCHAIN-002.md`
+  - `WORKLOG-OFFCHAIN-002.md`
+  - `TASK-OFFCHAIN-004.md`
+  - `HANDSHAKE-OFFCHAIN-004.md`
+  - `WORKLOG-OFFCHAIN-004.md`
+  - `internal/api/handler/sql_store.go`
+  - `internal/api/server.go`
+  - `web/app/page.tsx`
+  - `web/app/markets/[marketId]/page.tsx`
+  - `web/app/control/page.tsx`
+  - `web/components/live-market-panel.tsx`
+  - `web/components/chain-task-board.tsx`
+  - `web/lib/api.ts`
+  - `web/lib/types.ts`
+- changed:
+  - `internal/api/dto/order.go`
+  - `internal/api/handler/sql_store.go`
+  - `internal/api/handler/sql_store_runtime_test.go`
+  - `internal/api/server.go`
+  - `web/lib/api.ts`
+  - `web/lib/types.ts`
+  - `web/lib/session-client.ts`
+  - `web/lib/mock.ts`
+  - `web/app/page.tsx`
+  - `web/app/markets/[marketId]/page.tsx`
+  - `web/app/control/page.tsx`
+  - `web/components/live-market-panel.tsx`
+  - `web/components/chain-task-board.tsx`
+  - `docs/harness/handshakes/HANDSHAKE-OFFCHAIN-003.md`
+- validated:
+  - `go test ./internal/api/...`
+  - `cd /Users/zhangza/code/funnyoption/web && npm run build`
+  - targeted API checks:
+    - `GET /api/v1/markets?limit=3` now returns `runtime` plus runtime-merged `metadata` for homepage/control consumers
+    - `GET /api/v1/markets/220140402` now returns truthful resolved odds (`yesOdds=1`, `noOdds=0`) with zero matched flow instead of empty metadata
+    - `GET /api/v1/markets/1101` now exposes real runtime state (`trade_count=4`, `matched_notional=5036`, `active_order_count=2`, `payout_count=1`)
+    - `GET /api/v1/chain-transactions?limit=20` with `Origin: http://127.0.0.1:3000` now returns `Access-Control-Allow-Origin` and a truthful empty queue payload
+  - browser smoke via Playwright:
+    - homepage `/`: lead CTA moved to open `market_id=1003`; resolved cards now render runtime-derived `100¢ / 0¢` odds; copy no longer mentions mock warm-up
+    - detail `/markets/220140402`: PASS; live panel shows explicit empty quote/depth/candle states, no synthetic ladders, and the order ticket defaults to the resolved `YES` price
+    - control `/control`: PASS; SSR board and client refresh both show real queue-empty state, completed payouts, and per-market runtime summary after the API CORS fix
+  - pass/fail matrix:
+    - `homepage`: PASS
+    - `detail page`: PASS
+    - `control page`: PASS
+- blockers:
+  - no blocker remains for the read/query cleanup itself
+  - remaining truthful gaps surfaced by the local DB:
+    - `market_id=1101` still shows `runtime.active_order_count=2` on a `RESOLVED` market because the reused local DB contains historical residue outside this task's scope
+    - browser smoke still shows a `/favicon.ico` 404 on the Next.js dev server; this is cosmetic and did not affect page data or queue polling
+- next:
+  - commander can treat `TASK-OFFCHAIN-003` as complete
+  - if local DB hygiene matters before chain work starts, route a separate off-chain cleanup task for historical stale orders / freezes / regression residue now visible on the operator board

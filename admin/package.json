@@ -1,0 +1,11 @@
+{
+  "name": "funnyoption-admin",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "link-deps": "ln -sfn ../web/node_modules ./node_modules",
+    "dev": "npm run link-deps >/dev/null && NODE_PATH=../web/node_modules node ../web/node_modules/next/dist/bin/next dev",
+    "build": "npm run link-deps >/dev/null && NODE_PATH=../web/node_modules node ../web/node_modules/next/dist/bin/next build",
+    "start": "npm run link-deps >/dev/null && NODE_PATH=../web/node_modules node ../web/node_modules/next/dist/bin/next start"
+  }
+}

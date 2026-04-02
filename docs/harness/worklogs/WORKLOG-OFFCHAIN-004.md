@@ -1,0 +1,112 @@
+# WORKLOG-OFFCHAIN-004
+
+### 2026-04-01 20:55 Asia/Shanghai
+
+- read:
+  - `WORKLOG-OFFCHAIN-002.md`
+  - `HANDSHAKE-OFFCHAIN-002.md`
+  - `internal/api/handler/order_handler.go`
+  - `internal/matching/service/sql_store.go`
+  - `internal/settlement/service/processor.go`
+- changed:
+  - created a focused follow-up task for resolved-market finality
+- validated:
+  - the blocker is grounded in both worker evidence and current code paths
+- blockers:
+  - resolved markets still accept new orders and restored resting orders can still match after settlement
+- next:
+  - launch a worker against `TASK-OFFCHAIN-004`
+
+### 2026-04-01 20:56 Asia/Shanghai
+
+- read:
+  - `docs/architecture/order-flow.md`
+  - `docs/architecture/ledger-service.md`
+  - `docs/sql/schema.md`
+  - `internal/api/handler/order_handler.go`
+  - `internal/api/handler/order_handler_test.go`
+  - `internal/matching/model/types.go`
+  - `internal/matching/service/consumer.go`
+  - `internal/matching/service/sql_store.go`
+  - `internal/account/service/balance_book.go`
+  - `internal/account/service/balance_book_test.go`
+  - `internal/settlement/service/processor.go`
+  - `internal/settlement/service/sql_store.go`
+  - `internal/settlement/service/store.go`
+- changed:
+  - `internal/api/handler/order_handler.go`
+  - `internal/api/handler/order_handler_test.go`
+  - `internal/matching/model/types.go`
+  - `internal/matching/service/consumer.go`
+  - `internal/matching/service/consumer_test.go`
+  - `internal/matching/service/sql_store.go`
+  - `internal/account/service/balance_book.go`
+  - `internal/account/service/balance_book_test.go`
+  - `internal/settlement/service/processor.go`
+  - `internal/settlement/service/processor_test.go`
+  - `internal/settlement/service/sql_store.go`
+  - `internal/settlement/service/store.go`
+- validated:
+  - targeted tests:
+    - `go test ./internal/api/...`
+    - `go test ./internal/matching/...`
+    - `go test ./internal/account/service`
+    - `go test ./internal/settlement/...`
+  - local regression setup:
+    - `./scripts/dev-down.sh`
+    - `./scripts/dev-up.sh`
+    - `./scripts/dev-status.sh`
+    - `dev-up` still reported services as down in this thread environment, so the actual regression ran with manual core-service boots:
+    - `set -a; source /Users/zhangza/code/funnyoption/.env.local; set +a; /Users/zhangza/code/funnyoption/.run/dev/bin/account`
+    - `set -a; source /Users/zhangza/code/funnyoption/.env.local; set +a; /Users/zhangza/code/funnyoption/.run/dev/bin/matching`
+    - `set -a; source /Users/zhangza/code/funnyoption/.env.local; set +a; /Users/zhangza/code/funnyoption/.run/dev/bin/settlement`
+    - `set -a; source /Users/zhangza/code/funnyoption/.env.local; set +a; /Users/zhangza/code/funnyoption/.run/dev/bin/api`
+  - first resolve pass exposed one in-scope freeze terminality bug and then was re-run after the fix:
+    - `POST /api/v1/markets` `market_id=220140401` -> HTTP `201`
+    - `POST /api/v1/orders` buy `user_id=1001 market_id=220140401 outcome=YES price=61 quantity=10` -> HTTP `202`, `order_id=ord_1775047965741_6fa8d3ddcdde`, `freeze_id=frz_1775047965762_8a7d25779fde`
+    - `POST /api/v1/markets/220140401/resolve {"outcome":"YES"}` -> HTTP `202`
+    - observations before the account patch:
+    - `orders.status=CANCELLED`, `cancel_reason=MARKET_RESOLVED`, no active `NEW/PARTIALLY_FILLED` orders, no trades for `market_id=220140401`
+    - `freeze_records.status=RELEASED` but `remaining_amount=610`, which revealed `BalanceBook.ReleaseFreeze` was not zeroing the persisted remainder
+  - final clean regression after patching `ReleaseFreeze`:
+    - baseline for `user_id=1002`: `account_balances.available=1013360`, `frozen=0`
+    - `POST /api/v1/markets` `market_id=220140402` -> HTTP `201`
+    - `POST /api/v1/orders` buy `user_id=1002 market_id=220140402 outcome=YES price=44 quantity=7` -> HTTP `202`, `order_id=ord_1775048079527_112f29d596a0`, `freeze_id=frz_1775048079532_51c8130d1cfb`, `amount=308`
+    - pre-resolve DB state:
+    - `account_balances` for `user_id=1002 asset=USDT` -> `available=1013052`, `frozen=308`
+    - `orders` row -> `status=NEW`, `remaining_quantity=7`
+    - `freeze_records` row -> `status=ACTIVE`, `remaining_amount=308`
+    - `POST /api/v1/markets/220140402/resolve {"outcome":"YES"}` -> HTTP `202`
+    - post-resolve DB state:
+    - `markets.status=RESOLVED`, `resolved_outcome=YES`
+    - `orders` row -> `status=CANCELLED`, `cancel_reason=MARKET_RESOLVED`, `remaining_quantity=7`
+    - `freeze_records` row -> `status=RELEASED`, `remaining_amount=0`
+    - `account_balances` for `user_id=1002 asset=USDT` -> back to `available=1013360`, `frozen=0`
+    - `trades` for `market_id=220140402` -> zero rows
+    - active orders for `market_id=220140402` -> zero rows
+  - cold restart proof:
+    - stopped and restarted `account` / `matching` / `settlement` / `api`
+    - matching cold-start log: `restored_trade_sequence=6 restored_resting_orders=0 book_count=0`
+    - pre-retry DB state after restart: `markets.status=RESOLVED`, active orders for `market_id=220140402` still zero, `freeze_records` count for `user_id=1002` remained `4`
+    - `POST /api/v1/orders` buy `user_id=1002 market_id=220140402 outcome=YES price=44 quantity=1` -> HTTP `409`, body `{"error":"market is not tradable"}`
+    - post-retry DB state:
+    - `orders` count for `market_id=220140402` remained `1`
+    - only order for `market_id=220140402` remained `CANCELLED/MARKET_RESOLVED`
+    - `trades` for `market_id=220140402` remained zero rows
+    - `freeze_records` count for `user_id=1002` remained `4`
+    - `account_balances` for `user_id=1002 asset=USDT` remained `available=1013360`, `frozen=0`
+  - pass/fail matrix:
+    - `reject POST /api/v1/orders on RESOLVED market`: PASS
+    - `resolve cancels active resting order`: PASS
+    - `resolve releases remaining freeze through order-event flow`: PASS
+    - `cold restart rehydrates no tradable resting book`: PASS
+    - `post-restart order attempt creates no trade`: PASS
+- blockers:
+  - resolved-market finality is fixed for the tested path
+  - historical stale-freeze cleanup still needs a separate reconciliation task:
+    - `user_id=1001 asset=USDT` still shows `frozen=5100` from pre-fix corruption in the reused local DB
+    - older released rows, such as `frz_1775036086382_5762c323fb07` for `user_id=1002`, still carry non-zero `remaining_amount` from pre-patch data
+    - the new post-fix regression row `frz_1775048079532_51c8130d1cfb` now releases to `remaining_amount=0`, so no backfill was done in this task
+- next:
+  - commander can unblock `TASK-OFFCHAIN-003`
+  - if local DB hygiene matters, route a separate reconciliation/backfill task for historical stale freeze rows

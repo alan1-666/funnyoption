@@ -1,0 +1,138 @@
+.card {
+  display: grid;
+  gap: 16px;
+  padding: 0;
+  min-height: 100%;
+  color: inherit;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--card-accent) 18%, transparent), transparent 35%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.025));
+  transition: transform 0.25s ease, border-color 0.25s ease, background 0.25s ease;
+}
+
+.card:hover {
+  transform: translateY(-6px);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.visual {
+  display: flex;
+  justify-content: space-between;
+  flex-direction: column;
+  min-height: 188px;
+  padding: 16px;
+  background:
+    linear-gradient(180deg, rgba(9, 9, 11, 0.1), rgba(9, 9, 11, 0.76)),
+    linear-gradient(135deg, rgba(128, 247, 255, 0.26), rgba(185, 255, 66, 0.16));
+  background-size: cover;
+  background-position: center;
+}
+
+.sheen {
+  align-self: flex-end;
+  width: 52%;
+  height: 78px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.16), transparent 68%);
+  filter: blur(12px);
+  pointer-events: none;
+}
+
+.meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-family: var(--font-mono), monospace;
+}
+
+.meta span {
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: rgba(9, 9, 11, 0.38);
+  backdrop-filter: blur(12px);
+}
+
+.title {
+  margin: 0 20px;
+  font-size: clamp(1.45rem, 2vw, 2.2rem);
+  line-height: 1;
+  text-transform: uppercase;
+  font-family: var(--font-display), sans-serif;
+}
+
+.description {
+  margin: 0 20px;
+  color: var(--muted);
+  line-height: 1.6;
+  min-height: 4.8em;
+}
+
+.odds {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 20px;
+}
+
+.oddsCard {
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.oddsLabel {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-family: var(--font-mono), monospace;
+}
+
+.oddsValue {
+  font-size: 1.8rem;
+  font-family: var(--font-display), sans-serif;
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin: 0 20px 20px;
+}
+
+.volume {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+@media (max-width: 760px) {
+  .card {
+    gap: 14px;
+  }
+
+  .footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .visual {
+    min-height: 168px;
+  }
+
+  .title,
+  .description,
+  .odds,
+  .footer {
+    margin-left: 16px;
+    margin-right: 16px;
+  }
+}

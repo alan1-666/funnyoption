@@ -1,0 +1,77 @@
+# WORKLOG-API-001
+
+### 2026-04-02 13:19 Asia/Shanghai
+
+- read:
+  - `PLAN.md`
+  - `PLAN-2026-04-01-master.md`
+  - `internal/api/server.go`
+  - `internal/api/handler/routes.go`
+  - `internal/shared/auth/session.go`
+- changed:
+  - created a follow-up API hardening task focused on Gin best practices, auth/rate-limit middleware, and modular route registration
+- validated:
+  - current API runtime still uses a minimal stack: `gin.Recovery()`, `gin.Logger()`, and a custom CORS middleware
+  - route registration is still centralized in one mixed `RegisterRoutes` block
+  - adding this task after `TASK-ADMIN-004` avoids overlapping edits on the same auth-sensitive API surface
+- blockers:
+  - none yet; worker should build on the backend auth model chosen in `TASK-ADMIN-004`
+- next:
+  - launch `TASK-ADMIN-004` first
+  - then launch `TASK-API-001`
+
+### 2026-04-02 15:27 Asia/Shanghai
+
+- read:
+  - `AGENTS.md`
+  - `PLAN.md`
+  - `docs/harness/README.md`
+  - `docs/harness/roles/WORKER.md`
+  - `docs/harness/PROJECT_MAP.md`
+  - `docs/harness/THREAD_PROTOCOL.md`
+  - `docs/architecture/direct-deposit-session-key.md`
+  - `docs/topics/kafka-topics.md`
+  - `docs/harness/worklogs/WORKLOG-ADMIN-004.md`
+  - `docs/harness/tasks/TASK-API-001.md`
+  - `docs/harness/handshakes/HANDSHAKE-API-001.md`
+  - `docs/harness/worklogs/WORKLOG-API-001.md`
+  - `internal/api/server.go`
+  - `internal/api/handler/order_handler.go`
+  - `internal/api/handler/operator_auth.go`
+  - `internal/api/handler/sql_store.go`
+  - `internal/api/dto/order.go`
+  - `internal/api/dto/operator_auth.go`
+  - `internal/shared/config/config.go`
+  - `admin/app/api/operator/markets/[marketId]/first-liquidity/route.ts`
+  - `admin/README.md`
+- changed:
+  - replaced the mixed `internal/api/handler/RegisterRoutes` entrypoint with module-oriented route registration inside `internal/api`
+  - introduced an explicit global Gin middleware stack:
+    - recovery
+    - structured request logging
+    - CORS
+  - added per-route-group rate limiting for session create/revoke, order write, claim write, and privileged operator/admin writes
+  - added middleware boundary checks so:
+    - privileged routes reject missing operator proof before handler logic
+    - trade writes now pass through an explicit session-or-transitional-bootstrap envelope gate instead of falling straight out of one mixed router
+  - added router-level tests covering:
+    - public reads
+    - session-backed order writes
+    - missing operator proof rejection
+    - repeated session-create throttling
+  - deleted the old mixed route-registration file:
+    - `internal/api/handler/routes.go`
+- validated:
+  - `gofmt -w /Users/zhangza/code/funnyoption/internal/api/server.go /Users/zhangza/code/funnyoption/internal/api/router.go /Users/zhangza/code/funnyoption/internal/api/routes_meta.go /Users/zhangza/code/funnyoption/internal/api/routes_reads.go /Users/zhangza/code/funnyoption/internal/api/routes_auth.go /Users/zhangza/code/funnyoption/internal/api/middleware.go /Users/zhangza/code/funnyoption/internal/api/router_test.go`
+  - `go test ./internal/api/...`
+  - router-level proof now exists in tests for:
+    - `GET /api/v1/markets` returning public data
+    - authorized session-signed `POST /api/v1/orders` succeeding
+    - unauthorized `POST /api/v1/markets` without operator proof returning `401`
+    - repeated `POST /api/v1/sessions` from the same client returning `429`
+- blockers:
+  - full session-only enforcement for `POST /api/v1/orders` is still coupled to the dedicated admin service's first-liquidity bootstrap call, which currently posts a direct sell order without a session payload
+  - that caller lives outside this task's owned files, so this task made the legacy lane explicit and rate-limited instead of silently leaving it buried in one mixed router
+- next:
+  - commander can review `TASK-API-001` as implemented with one explicit residual follow-up:
+    - migrate the admin bootstrap order caller onto a privileged or session-backed order path, then remove the transitional `user_id` fallback at the trade-write boundary

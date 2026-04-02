@@ -1,0 +1,80 @@
+# WORKLOG-ADMIN-003
+
+### 2026-04-02 13:20 Asia/Shanghai
+
+- read:
+  - `PLAN-2026-04-01-master.md`
+  - `WORKLOG-CHAIN-002.md`
+  - `WORKLOG-ADMIN-002.md`
+  - `WORKLOG-OFFCHAIN-009.md`
+- changed:
+  - created a follow-up admin convergence task after commander review of the completed deposit-proof, admin-service, and first-liquidity threads
+- validated:
+  - `TASK-CHAIN-002` closed the listener-driven deposit truth gap
+  - `TASK-ADMIN-002` established a wallet-gated Next-based admin runtime for create/resolve
+  - `TASK-OFFCHAIN-009` removed hidden lifecycle seeding with an explicit first-liquidity path
+  - combined review also found a new product inconsistency:
+    - `admin/` now exposes two runtime shapes
+    - first-liquidity/bootstrap currently lives on the ungated runtime instead of the wallet-gated admin lane
+- blockers:
+  - none yet; worker should pick the narrowest convergence path that leaves one supported admin runtime in local dev
+- next:
+  - launch `TASK-ADMIN-003`
+
+### 2026-04-02 13:11 Asia/Shanghai
+
+- read:
+  - `AGENTS.md`
+  - `PLAN.md`
+  - `docs/harness/README.md`
+  - `docs/harness/roles/WORKER.md`
+  - `docs/harness/PROJECT_MAP.md`
+  - `docs/harness/THREAD_PROTOCOL.md`
+  - `docs/architecture/direct-deposit-session-key.md`
+  - `docs/operations/local-offchain-lifecycle.md`
+  - `WORKLOG-CHAIN-002.md`
+  - `WORKLOG-ADMIN-002.md`
+  - `WORKLOG-OFFCHAIN-009.md`
+  - `TASK-ADMIN-003.md`
+  - `HANDSHAKE-ADMIN-003.md`
+  - `WORKLOG-ADMIN-003.md`
+  - `admin/README.md`
+  - `admin/app/page.tsx`
+  - `admin/components/operator-access-provider.tsx`
+  - `admin/components/operator-access-card.tsx`
+  - `admin/components/market-studio.tsx`
+  - `admin/components/admin-market-ops.tsx`
+  - `admin/lib/operator-auth.ts`
+  - `admin/lib/operator-server.ts`
+  - `scripts/dev-up.sh`
+  - `web/app/admin/page.tsx`
+- changed:
+  - added a wallet-gated Next admin bootstrap route at `admin/app/api/operator/markets/[marketId]/first-liquidity/route.ts`
+  - extended the shared operator-signature model so create, resolve, and first-liquidity all use the same allowlist and message-verification lane inside `admin/lib/operator-auth.ts`, `admin/lib/operator-server.ts`, and `admin/components/operator-access-provider.tsx`
+  - added a new `admin/components/market-bootstrap.tsx` UI with paired-inventory + first-sell-order bootstrap controls and explicit operator identity/status on the dedicated admin page
+  - updated dedicated admin copy/docs so the supported runtime is clearly the Next.js service and the public `web/app/admin/page.tsx` remains only a migration pointer
+  - demoted the old Go/template admin runtime by replacing `admin/main.go` with a deprecation shim and removing `admin/templates/index.html`
+  - updated `docs/operations/local-offchain-lifecycle.md`, `admin/README.md`, and `scripts/dev-up.sh` so local startup/docs all point at the same supported admin runtime
+- validated:
+  - `go test ./admin`
+  - `cd /Users/zhangza/code/funnyoption/admin && npm run build`
+  - `cd /Users/zhangza/code/funnyoption/web && npm run build`
+  - local dev stack proof:
+    - `./scripts/dev-up.sh`
+    - stack reported frontend `http://127.0.0.1:3000`, admin `http://127.0.0.1:3001`, api `http://127.0.0.1:8080`, ws `http://127.0.0.1:8081`
+  - authorized admin-runtime proof on a temporary allowlisted admin instance at `http://127.0.0.1:3011`:
+    - allowlisted wallet `0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266`
+    - `POST /api/operator/markets` created market `1775106639302`
+    - `POST /api/operator/markets/1775106639302/first-liquidity` returned `202` with first-liquidity `liq_1775106644428_f467fd12c1d0` and order `ord_1775106644668_7aaafd4f5849`
+    - `GET /api/v1/positions?user_id=1002&market_id=1775106639302&limit=10` returned paired `YES` / `NO` inventory rows with quantity `40`
+    - `GET /api/v1/orders?user_id=1002&market_id=1775106639302&limit=10` returned one resting `SELL YES` order with `remaining_quantity=40`
+  - unauthorized proof on the same route:
+    - wallet `0x14791697260e4c9a71f18484c9f997b308e59325`
+    - `POST /api/operator/markets/1775106639302/first-liquidity` returned `403 {"error":"wallet is not authorized for operator actions"}`
+- blockers:
+  - no blocker remains for runtime convergence at this task boundary
+  - residual risk remains below the admin boundary:
+    - shared backend endpoints still trust direct callers without the admin-service wallet signature check
+- next:
+  - commander can treat `TASK-ADMIN-003` as complete
+  - if stricter backend auth is required later, move the signature/allowlist verification deeper than the dedicated admin-service boundary without reintroducing a second operator runtime

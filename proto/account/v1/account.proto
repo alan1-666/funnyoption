@@ -1,0 +1,85 @@
+syntax = "proto3";
+
+package funnyoption.account.v1;
+
+option go_package = "funnyoption/internal/gen/accountv1;accountv1";
+
+service AccountService {
+  rpc PreFreeze(PreFreezeRequest) returns (PreFreezeResponse);
+  rpc ReleaseFreeze(ReleaseFreezeRequest) returns (ReleaseFreezeResponse);
+  rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
+  rpc CreditBalance(CreditBalanceRequest) returns (CreditBalanceResponse);
+  rpc DebitBalance(DebitBalanceRequest) returns (DebitBalanceResponse);
+}
+
+message PreFreezeRequest {
+  int64 user_id = 1;
+  string asset = 2;
+  string ref_type = 3;
+  string ref_id = 4;
+  int64 amount = 5;
+}
+
+message PreFreezeResponse {
+  string freeze_id = 1;
+  int64 user_id = 2;
+  string asset = 3;
+  string ref_type = 4;
+  string ref_id = 5;
+  int64 amount = 6;
+}
+
+message ReleaseFreezeRequest {
+  string freeze_id = 1;
+}
+
+message ReleaseFreezeResponse {
+  string freeze_id = 1;
+}
+
+message GetBalanceRequest {
+  int64 user_id = 1;
+  string asset = 2;
+}
+
+message GetBalanceResponse {
+  int64 user_id = 1;
+  string asset = 2;
+  int64 available = 3;
+  int64 frozen = 4;
+  int64 total = 5;
+}
+
+message CreditBalanceRequest {
+  int64 user_id = 1;
+  string asset = 2;
+  int64 amount = 3;
+  string ref_type = 4;
+  string ref_id = 5;
+}
+
+message CreditBalanceResponse {
+  int64 user_id = 1;
+  string asset = 2;
+  int64 available = 3;
+  int64 frozen = 4;
+  int64 total = 5;
+  bool applied = 6;
+}
+
+message DebitBalanceRequest {
+  int64 user_id = 1;
+  string asset = 2;
+  int64 amount = 3;
+  string ref_type = 4;
+  string ref_id = 5;
+}
+
+message DebitBalanceResponse {
+  int64 user_id = 1;
+  string asset = 2;
+  int64 available = 3;
+  int64 frozen = 4;
+  int64 total = 5;
+  bool applied = 6;
+}

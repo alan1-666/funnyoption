@@ -1,0 +1,247 @@
+.backLinkWrap {
+  margin-bottom: 12px;
+}
+
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.92fr);
+  gap: 18px;
+}
+
+.main,
+.sidebar {
+  display: grid;
+  gap: 18px;
+}
+
+.hero {
+  padding: 24px;
+}
+
+.heroTop,
+.blockHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.heroPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.title {
+  margin: 16px 0 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(2.3rem, 6.2vw, 5rem);
+  line-height: 0.92;
+  text-transform: uppercase;
+}
+
+.copy {
+  margin: 18px 0 0;
+  max-width: 70ch;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.heroMedia {
+  position: relative;
+  overflow: hidden;
+  margin-top: 20px;
+  min-height: 240px;
+  border-radius: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background:
+    radial-gradient(circle at top right, rgba(185, 255, 66, 0.18), transparent 32%),
+    rgba(255, 255, 255, 0.03);
+}
+
+.heroImage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 240px;
+  object-fit: cover;
+}
+
+.heroImageScrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(7, 9, 12, 0.06), rgba(7, 9, 12, 0.72));
+}
+
+.heroImageMeta {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 18px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  color: #f7fbff;
+}
+
+.heroImageMeta span {
+  color: rgba(247, 251, 255, 0.78);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-family: var(--font-mono), monospace;
+}
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.statCard {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.label {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-family: var(--font-mono), monospace;
+}
+
+.statCard strong,
+.sideMetrics strong {
+  font-size: 1.1rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.block,
+.sidePanel {
+  padding: 20px;
+}
+
+.blockTitle {
+  margin: 14px 0 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  line-height: 0.95;
+  text-transform: uppercase;
+}
+
+.routeList,
+.tradeTable,
+.sideMetrics {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.routeItem {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.routeItem strong {
+  font-family: var(--font-display), sans-serif;
+  font-size: 1.6rem;
+  color: var(--cyan);
+}
+
+.routeItem p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.tradeRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.tradeRow:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.tradeHead {
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.tradeSub {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tradeNums {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.tradeNums span {
+  color: var(--muted);
+}
+
+.sideMetrics > div {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+@media (max-width: 1260px) {
+  .layout,
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1040px) {
+  .statsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .hero,
+  .block,
+  .sidePanel {
+    padding: 20px;
+  }
+
+  .statsGrid {
+    grid-template-columns: 1fr;
+  }
+}

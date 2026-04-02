@@ -1,0 +1,8 @@
+{
+  "/api/operator/markets/[marketId]/first-liquidity/route": "app/api/operator/markets/[marketId]/first-liquidity/route.js",
+  "/api/operator/markets/[marketId]/resolve/route": "app/api/operator/markets/[marketId]/resolve/route.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/operator/markets/route": "app/api/operator/markets/route.js",
+  "/api/polymarket/route": "app/api/polymarket/route.js",
+  "/page": "app/page.js"
+}

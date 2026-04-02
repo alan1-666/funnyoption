@@ -1,0 +1,99 @@
+# WORKLOG-OFFCHAIN-002
+
+### 2026-04-01 18:20 Asia/Shanghai
+
+- read:
+  - off-chain umbrella task and current active plan
+- changed:
+  - created a narrower task for local regression closeout
+- validated:
+  - task, handshake, and ownership are explicit
+- blockers:
+  - none yet; execution thread must verify current code state
+- next:
+  - worker should run full local regression and write back results here
+
+### 2026-04-01 20:34 Asia/Shanghai
+
+- read:
+  - `docs/architecture/order-flow.md`
+  - `docs/architecture/ledger-service.md`
+  - `docs/topics/kafka-topics.md`
+  - `docs/sql/schema.md`
+  - `scripts/dev-up.sh`
+  - `scripts/dev-down.sh`
+  - `scripts/dev-status.sh`
+  - `internal/matching/**`
+  - `internal/account/**`
+  - `web/app/page.tsx`
+  - `web/app/markets/[marketId]/page.tsx`
+  - `web/components/live-market-panel.tsx`
+  - `web/components/order-ticket.tsx`
+- changed:
+  - `internal/matching/engine/engine.go`
+  - `internal/matching/engine/engine_test.go`
+  - `internal/matching/service/server.go`
+  - `internal/matching/service/sql_store.go`
+  - `internal/account/service/order_state.go`
+  - `internal/account/service/sql_store.go`
+  - `internal/account/service/balance_book.go`
+  - `internal/account/service/event_processor.go`
+  - `internal/account/service/event_processor_test.go`
+- validated:
+  - `go test ./internal/matching/...`
+  - `go test ./internal/account/service`
+  - `go test ./...`
+  - `cd /Users/zhangza/code/funnyoption/web && npm run build`
+  - repeated `scripts/dev-down.sh -> scripts/dev-up.sh -> scripts/dev-status.sh`
+  - homepage render via `curl http://127.0.0.1:3000` and screenshot `output/playwright/homepage.png`
+  - detail page render via `curl http://127.0.0.1:3000/markets/1101` and screenshots `output/playwright/market-1101.png` / `output/playwright/market-1101-resolved.png`
+  - restart recovery in matching log:
+    - `restored_trade_sequence=2 restored_resting_orders=2` after first recovery fix validation
+    - `restored_trade_sequence=3 restored_resting_orders=2` after second cold restart
+    - `restored_trade_sequence=4 restored_resting_orders=2` after final cold restart
+  - reproducible local regression flow actually executed:
+    - `scripts/dev-down.sh`
+    - `scripts/dev-up.sh`
+    - `curl http://127.0.0.1:8080/healthz`
+    - `curl http://127.0.0.1:8081/healthz`
+    - `curl http://127.0.0.1:3000`
+    - `curl http://127.0.0.1:3000/markets/1101`
+    - subscribe `ws://127.0.0.1:8081/ws?stream=depth&book_key=1101:YES`
+    - subscribe `ws://127.0.0.1:8081/ws?stream=ticker&book_key=1101:YES`
+    - subscribe `ws://127.0.0.1:8081/ws?stream=candle&book_key=1101:YES`
+    - `POST /api/v1/orders` buy `market_id=1101 outcome=YES price=61 quantity=10 user_id=1001`
+    - observed `trd_3`, candle/depth/ticker push, and restored maker order `ord_1775043564270_9ac8ca2289ad` fill against cold-start-restored book
+    - cold restart again, then `POST /api/v1/orders` buy `market_id=1101 outcome=YES price=61 quantity=5 user_id=1001`
+    - observed `trd_4`, seller freeze `frz_1775043564283_ecec3bc52f40` move `120 -> 115`, seller `POSITION:1101:YES frozen 120 -> 115`
+    - subscribe `ws://127.0.0.1:8081/ws?stream=market&market_id=1101`
+    - `POST /api/v1/markets/1101/resolve {"outcome":"YES"}`
+    - observed `market.event` and `settlement.completed`
+    - verified payout `evt_settlement_1101_1001_YES`, `POSITION:1101:YES settled_quantity=135`, settlement ledger entry, detail page status `RESOLVED`
+    - final runtime spot-check on current account fix:
+    - `POST /api/v1/orders` sell `market_id=1001 outcome=YES price=60 quantity=10 user_id=1002`
+    - `POST /api/v1/orders` buy `market_id=1001 outcome=YES price=63 quantity=10 user_id=1001`
+    - observed `trd_5`
+    - verified buyer freeze `frz_1775046823514_abd42010a270` ended `remaining_amount=0 status=RELEASED`
+    - verified buyer USDT `987160 -> 986560` which confirms the extra `30` cents/contract price-improvement reserve was released instead of staying frozen
+  - pass/fail matrix:
+    - `homepage`: PASS
+    - `detail page`: PASS
+    - `matching`: PASS
+    - `settlement`: FAIL
+    - `candle push`: PASS
+- blockers:
+  - high severity finality blocker remains:
+    - after `market 1101` was already `RESOLVED` and payout was completed, the stack still restored two resting orders for that market on the next cold start
+    - probe command `POST /api/v1/orders {"user_id":1001,"market_id":1101,"outcome":"yes","side":"buy","type":"limit","time_in_force":"gtc","price":61,"quantity":1}` returned HTTP `202`
+    - the resolved market then produced `trd_6` against the previously restored maker order, which means resolved markets are not terminal and settlement finality is broken
+  - impact:
+    - off-chain local regression cannot be called closed while resolved markets can still accept and match new orders
+    - payout correctness can be invalidated by post-resolution trading
+  - secondary residual risk:
+    - this reused local DB still carries historical pre-fix active freezes from earlier filled BUY orders (`1001` frozen `5100`) because there is no backfill/reconciliation pass for already-corrupted rows
+    - new post-fix orders release price-improvement surplus correctly, but old leftovers remain unless cleaned manually or repaired by a future reconciliation task
+- next:
+  - commander should route a follow-up task to enforce resolved-market finality:
+    - reject `POST /api/v1/orders` when market status is not tradable
+    - cancel or ignore resting orders on resolution so matching restart does not rehydrate them
+    - decide whether to add one-time reconciliation for pre-fix stale freezes in existing local DBs

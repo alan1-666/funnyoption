@@ -1,0 +1,110 @@
+.panel {
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(185, 255, 66, 0.12), transparent 26%),
+    radial-gradient(circle at bottom right, rgba(128, 247, 255, 0.14), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-end;
+}
+
+.title {
+  margin: 14px 0 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(1.9rem, 4vw, 3.2rem);
+  line-height: 0.94;
+  text-transform: uppercase;
+  text-wrap: balance;
+}
+
+.copy {
+  margin: 12px 0 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.badges,
+.allowlist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.identityCard {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.label {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-family: var(--font-mono), monospace;
+}
+
+.value,
+.valueOk,
+.valueDanger {
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
+  line-height: 0.96;
+}
+
+.valueOk {
+  color: var(--ok);
+}
+
+.valueDanger {
+  color: #ffd0bf;
+}
+
+.meta,
+.status {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+}
+
+.primary {
+  min-height: 48px;
+  padding: 0 20px;
+  border-radius: 16px;
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, var(--lime), #e8ffac);
+  color: #09090b;
+  font-weight: 800;
+}
+
+@media (max-width: 960px) {
+  .header,
+  .actions,
+  .grid {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "/api/operator/markets/[marketId]/first-liquidity/route": "/api/operator/markets/[marketId]/first-liquidity",
+  "/api/operator/markets/[marketId]/resolve/route": "/api/operator/markets/[marketId]/resolve",
+  "/_not-found/page": "/_not-found",
+  "/api/operator/markets/route": "/api/operator/markets",
+  "/api/polymarket/route": "/api/polymarket",
+  "/page": "/"
+}

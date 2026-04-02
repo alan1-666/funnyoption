@@ -3,7 +3,7 @@ export const OPERATOR_SIGNATURE_WINDOW_MS = 5 * 60 * 1000;
 export interface CreateMarketDraft {
   title: string;
   description: string;
-  category: string;
+  categoryKey: string;
   coverImage: string;
   sourceUrl: string;
   sourceSlug: string;
@@ -14,6 +14,15 @@ export interface CreateMarketDraft {
   openAt: number;
   closeAt: number;
   resolveAt: number;
+  options: MarketOptionDraft[];
+}
+
+export interface MarketOptionDraft {
+  key: string;
+  label: string;
+  shortLabel?: string;
+  sortOrder: number;
+  isActive: boolean;
 }
 
 export interface ResolveMarketDraft {
@@ -54,7 +63,7 @@ export function normalizeCreateMarketDraft(input: CreateMarketDraft): CreateMark
   return {
     title: cleanText(input.title),
     description: cleanText(input.description),
-    category: cleanText(input.category) || "Polymarket",
+    categoryKey: normalizeCategoryKey(input.categoryKey),
     coverImage: input.coverImage.trim(),
     sourceUrl: input.sourceUrl.trim(),
     sourceSlug: cleanText(input.sourceSlug),
@@ -64,7 +73,8 @@ export function normalizeCreateMarketDraft(input: CreateMarketDraft): CreateMark
     collateralAsset: cleanText(input.collateralAsset).toUpperCase() || "USDT",
     openAt: Math.max(0, Math.floor(input.openAt || 0)),
     closeAt: Math.max(0, Math.floor(input.closeAt || 0)),
-    resolveAt: Math.max(0, Math.floor(input.resolveAt || 0))
+    resolveAt: Math.max(0, Math.floor(input.resolveAt || 0)),
+    options: normalizeMarketOptions(input.options)
   };
 }
 
@@ -98,7 +108,7 @@ action: CREATE_MARKET
 wallet: ${walletAddress}
 title: ${market.title}
 description: ${market.description}
-category: ${market.category}
+category: ${market.categoryKey}
 source_kind: ${market.sourceKind}
 source_url: ${market.sourceUrl}
 source_slug: ${market.sourceSlug}
@@ -110,7 +120,45 @@ open_at: ${market.openAt}
 close_at: ${market.closeAt}
 resolve_at: ${market.resolveAt}
 requested_at: ${Math.floor(input.requestedAt)}
+options: ${buildMarketOptionSignatureFragment(market.options)}
 `;
+}
+
+export function normalizeCategoryKey(value: string) {
+  const normalized = cleanText(value).toUpperCase();
+  if (normalized === "SPORTS" || normalized === "体育") {
+    return "SPORTS";
+  }
+  return "CRYPTO";
+}
+
+export function normalizeMarketOptions(input: MarketOptionDraft[]) {
+  if (!Array.isArray(input) || input.length === 0) {
+    return defaultBinaryOptions();
+  }
+  return input
+    .map((option, index) => ({
+      key: cleanText(option.key).toUpperCase().replace(/\s+/g, "_"),
+      label: cleanText(option.label),
+      shortLabel: cleanText(option.shortLabel ?? option.label),
+      sortOrder: Math.max(1, Math.floor(option.sortOrder || (index + 1) * 10)),
+      isActive: option.isActive !== false
+    }))
+    .filter((option) => option.key && option.label)
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.key.localeCompare(right.key));
+}
+
+export function defaultBinaryOptions(): MarketOptionDraft[] {
+  return [
+    { key: "YES", label: "是", shortLabel: "是", sortOrder: 10, isActive: true },
+    { key: "NO", label: "否", shortLabel: "否", sortOrder: 20, isActive: true }
+  ];
+}
+
+function buildMarketOptionSignatureFragment(options: MarketOptionDraft[]) {
+  return options
+    .map((option) => `${option.key}:${option.label}:${option.shortLabel ?? option.label}:${option.sortOrder}:${option.isActive ? "1" : "0"}`)
+    .join("|");
 }
 
 export function buildBootstrapMarketMessage(input: {

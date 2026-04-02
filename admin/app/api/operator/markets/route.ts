@@ -41,6 +41,7 @@ export async function POST(request: Request) {
     body: {
       title: draft.title,
       description: draft.description,
+      category_key: draft.categoryKey,
       collateral_asset: draft.collateralAsset,
       status: draft.status,
       open_at: draft.openAt,
@@ -50,8 +51,10 @@ export async function POST(request: Request) {
       cover_image_url: draft.coverImage,
       cover_source_url: draft.sourceUrl,
       cover_source_name: draft.sourceName,
+      options: draft.options,
       metadata: {
-        category: draft.category,
+        category: draft.categoryKey === "SPORTS" ? "体育" : "加密",
+        categoryKey: draft.categoryKey,
         coverImage: draft.coverImage,
         sourceUrl: draft.sourceUrl,
         sourceSlug: draft.sourceSlug,

@@ -1,0 +1,42 @@
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  user-select: none;
+}
+
+.shape-circle {
+  border-radius: 999px;
+}
+
+.shape-panel {
+  border-radius: 28px;
+}
+
+.size-sm {
+  width: 30px;
+  height: 30px;
+  font-size: 0.68rem;
+}
+
+.size-md {
+  width: 38px;
+  height: 38px;
+  font-size: 0.76rem;
+}
+
+.size-lg {
+  width: 84px;
+  height: 84px;
+  font-size: 1.4rem;
+  letter-spacing: 0.02em;
+}
+
+.size-xl {
+  width: 132px;
+  height: 132px;
+  font-size: 2rem;
+  letter-spacing: 0.01em;
+}

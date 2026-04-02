@@ -3,7 +3,8 @@
 import { useMemo, useState } from "react";
 
 import { useTradingSession } from "@/components/trading-session-provider";
-import { formatTimestamp, formatToken, shortenAddress } from "@/lib/format";
+import { formatAssetAmount, formatTimestamp, formatToken, shortenAddress } from "@/lib/format";
+import { zhGenericStatus, zhOutcome } from "@/lib/locale";
 import type { Deposit, Payout } from "@/lib/types";
 import styles from "@/components/claim-console.module.css";
 
@@ -22,12 +23,12 @@ export function ClaimConsole({ payouts, deposits }: ClaimConsoleProps) {
 
   async function handleClaim(eventId: string) {
     if (!primaryWallet) {
-      setStatusMap((current) => ({ ...current, [eventId]: "No connected payout wallet found yet." }));
+      setStatusMap((current) => ({ ...current, [eventId]: "当前没有可用的钱包地址。" }));
       return;
     }
 
     setPending((current) => ({ ...current, [eventId]: true }));
-    setStatusMap((current) => ({ ...current, [eventId]: "Submitting payout claim..." }));
+    setStatusMap((current) => ({ ...current, [eventId]: "正在提交领取请求..." }));
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/v1/payouts/${eventId}/claim`, {
@@ -46,11 +47,11 @@ export function ClaimConsole({ payouts, deposits }: ClaimConsoleProps) {
       }
 
       const payload = (await response.json()) as { tx_id?: number };
-      setStatusMap((current) => ({ ...current, [eventId]: `Claim submitted${payload.tx_id ? ` #${payload.tx_id}` : ""}` }));
+      setStatusMap((current) => ({ ...current, [eventId]: `领取请求已提交${payload.tx_id ? ` #${payload.tx_id}` : ""}` }));
     } catch (error) {
       setStatusMap((current) => ({
         ...current,
-        [eventId]: error instanceof Error ? error.message : "Failed to submit claim"
+        [eventId]: error instanceof Error ? error.message : "提交领取失败"
       }));
     } finally {
       setPending((current) => ({ ...current, [eventId]: false }));
@@ -61,10 +62,10 @@ export function ClaimConsole({ payouts, deposits }: ClaimConsoleProps) {
     <section className={`panel ${styles.console}`}>
       <div className={styles.header}>
         <div>
-          <span className="eyebrow">Payout claims</span>
-          <p className={styles.copy}>Claim any resolved payouts to your connected wallet when they become available.</p>
+          <span className="eyebrow">赔付领取</span>
+          <p className={styles.copy}>当赔付可领取时，可以把结算金额领回当前连接的钱包。</p>
         </div>
-        <span className="pill">{primaryWallet ? shortenAddress(primaryWallet) : "Wallet pending"}</span>
+        <span className="pill">{primaryWallet ? shortenAddress(primaryWallet) : "钱包待连接"}</span>
       </div>
 
       <div className={styles.items}>
@@ -74,23 +75,23 @@ export function ClaimConsole({ payouts, deposits }: ClaimConsoleProps) {
             <article key={item.event_id} className={styles.item}>
               <div>
                 <span className={styles.label}>Settlement Event</span>
-                <h3 className={styles.title}>Market #{item.market_id} {item.winning_outcome}</h3>
+                <h3 className={styles.title}>市场 #{item.market_id} · {zhOutcome(item.winning_outcome)}</h3>
                 <div className={styles.meta}>
                   <span>{item.position_asset}</span>
-                  <span>{formatToken(item.settled_quantity, 0)} shares</span>
+                  <span>{formatToken(item.settled_quantity, 0)} 份</span>
                   <span>{formatTimestamp(item.updated_at || item.created_at)}</span>
-                  <span>{item.status}</span>
+                  <span>{zhGenericStatus(item.status)}</span>
                 </div>
               </div>
 
               <div className={styles.amount}>
-                <strong className={styles.value}>{formatToken(item.payout_amount, 0)} {item.payout_asset}</strong>
+                <strong className={styles.value}>{formatAssetAmount(item.payout_amount, item.payout_asset)} {item.payout_asset}</strong>
                 <button
                   className={styles.button}
                   disabled={completed || pending[item.event_id]}
                   onClick={() => handleClaim(item.event_id)}
                 >
-                  {completed ? "Claimed" : pending[item.event_id] ? "Submitting..." : "Claim Payout"}
+                  {completed ? "已领取" : pending[item.event_id] ? "提交中..." : "领取赔付"}
                 </button>
                 <div className={styles.status}>{statusMap[item.event_id] ?? " "}</div>
               </div>

@@ -1,6 +1,8 @@
 package dto
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -15,6 +17,7 @@ type OperatorAction struct {
 func NormalizeCreateMarketRequest(input CreateMarketRequest) CreateMarketRequest {
 	input.Title = cleanOperatorText(input.Title)
 	input.Description = cleanOperatorText(input.Description)
+	input.CategoryKey = NormalizeMarketCategoryKey(input.CategoryKey, input.Metadata)
 	input.CoverImageURL = strings.TrimSpace(input.CoverImageURL)
 	input.CoverSourceURL = strings.TrimSpace(input.CoverSourceURL)
 	input.CoverSourceName = cleanOperatorText(input.CoverSourceName)
@@ -50,12 +53,12 @@ func NormalizeBinaryOutcome(value string) (string, bool) {
 
 func (req CreateMarketRequest) OperatorMessage() string {
 	normalized := NormalizeCreateMarketRequest(req)
+	options, err := NormalizeMarketOptions(normalized.Options)
+	if err != nil {
+		options = DefaultBinaryMarketOptions()
+	}
 	metadata := parseOperatorMetadata(normalized.Metadata)
 
-	category := cleanOperatorText(stringFromMetadata(metadata, "category"))
-	if category == "" {
-		category = "Polymarket"
-	}
 	sourceKind := strings.ToLower(cleanOperatorText(stringFromMetadata(metadata, "sourceKind", "source_kind")))
 	if sourceKind == "" {
 		sourceKind = "manual"
@@ -82,7 +85,7 @@ func (req CreateMarketRequest) OperatorMessage() string {
 		normalizeOperatorAddress(normalized.operatorWalletAddress()),
 		normalized.Title,
 		normalized.Description,
-		category,
+		normalized.CategoryKey,
 		sourceKind,
 		sourceURL,
 		sourceSlug,
@@ -94,7 +97,7 @@ func (req CreateMarketRequest) OperatorMessage() string {
 		normalized.CloseAt,
 		normalized.ResolveAt,
 		normalized.operatorRequestedAt(),
-	)
+	) + "options: " + buildMarketOptionSignatureFragment(options) + "\n"
 }
 
 func (req ResolveMarketRequest) OperatorMessage(marketID int64) string {
@@ -126,6 +129,29 @@ func (req CreateFirstLiquidityRequest) OperatorMessage(marketID int64) string {
 
 func (req CreateOrderRequest) BootstrapOperatorMessage() string {
 	return buildBootstrapOperatorMessage(req.operatorWalletAddress(), req.MarketID, req.UserID, req.Quantity, req.Outcome, req.Price, req.operatorRequestedAt())
+}
+
+func (req CreateOrderRequest) BootstrapSemanticKey() string {
+	outcome, ok := NormalizeBinaryOutcome(req.Outcome)
+	if !ok {
+		outcome = strings.ToUpper(cleanOperatorText(req.Outcome))
+	}
+
+	return fmt.Sprintf(
+		"bootstrap-order:%d:%d:%d:%s:%d",
+		req.MarketID,
+		req.UserID,
+		req.Quantity,
+		outcome,
+		req.Price,
+	)
+}
+
+func (req CreateOrderRequest) BootstrapOrderID() string {
+	// `requested_at` stays inside the signed proof for freshness, but a fresh
+	// timestamp alone must not create a second bootstrap action with identical terms.
+	sum := sha256.Sum256([]byte(req.BootstrapSemanticKey()))
+	return "ord_bootstrap_" + hex.EncodeToString(sum[:16])
 }
 
 func (req CreateMarketRequest) operatorWalletAddress() string {
@@ -207,6 +233,18 @@ func stringFromMetadata(metadata map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func buildMarketOptionSignatureFragment(options []MarketOption) string {
+	parts := make([]string, 0, len(options))
+	for _, option := range options {
+		state := "0"
+		if option.IsActive {
+			state = "1"
+		}
+		parts = append(parts, fmt.Sprintf("%s:%s:%s:%d:%s", option.Key, option.Label, option.ShortLabel, option.SortOrder, state))
+	}
+	return strings.Join(parts, "|")
 }
 
 func cleanOperatorText(value string) string {

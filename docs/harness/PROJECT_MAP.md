@@ -79,6 +79,7 @@ FunnyOption is a prediction-market MVP with:
 - Stop stack: [`/Users/zhangza/code/funnyoption/scripts/dev-down.sh`](/Users/zhangza/code/funnyoption/scripts/dev-down.sh)
 - Status: [`/Users/zhangza/code/funnyoption/scripts/dev-status.sh`](/Users/zhangza/code/funnyoption/scripts/dev-status.sh)
 - Local env: [`/Users/zhangza/code/funnyoption/.env.local`](/Users/zhangza/code/funnyoption/.env.local)
+- Persistent local chain: [`/Users/zhangza/code/funnyoption/docs/operations/local-persistent-chain.md`](/Users/zhangza/code/funnyoption/docs/operations/local-persistent-chain.md)
 
 ## Guidance
 

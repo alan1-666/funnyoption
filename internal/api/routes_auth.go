@@ -11,6 +11,11 @@ func registerSessionRoutes(api *gin.RouterGroup, orderHandler *handler.OrderHand
 	sessions.GET("", orderHandler.ListSessions)
 	sessions.POST("", markAuthLane(authLaneWalletSession), limiter.Middleware(rateLimitSessionCreate), orderHandler.CreateSession)
 	sessions.POST("/:session_id/revoke", markAuthLane(authLaneWalletSession), limiter.Middleware(rateLimitSessionWrite), orderHandler.RevokeSession)
+
+	profile := api.Group("")
+	profile.Use(markAuthLane(authLaneWalletSession))
+	profile.Use(limiter.Middleware(rateLimitSessionWrite))
+	profile.PUT("/profile", orderHandler.UpdateProfile)
 }
 
 func registerTradeRoutes(api *gin.RouterGroup, orderHandler *handler.OrderHandler, limiter *rateLimiter) {

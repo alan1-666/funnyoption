@@ -39,7 +39,9 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
 | TASK-ADMIN-003 | completed | worker | TASK-OFFCHAIN-009 | converge to one supported dedicated admin runtime and extend wallet-gated operator access to first-liquidity/bootstrap flows |
 | TASK-ADMIN-004 | completed | worker | TASK-ADMIN-003 | harden shared core API operator endpoints so create, resolve, and first-liquidity cannot bypass the admin-service wallet gate |
 | TASK-API-001 | completed | worker | TASK-ADMIN-004 | apply Gin best practices to the API service with modular route registration, middleware-based auth layering, and rate limiting on sensitive paths |
-| TASK-API-002 | next | worker | TASK-API-001 | remove the transitional bare-`user_id` trade-write path by migrating admin bootstrap order placement onto an authenticated lane and then enforcing session-or-privileged auth on `/api/v1/orders` |
+| TASK-API-002 | completed | worker | TASK-API-001 | remove the transitional bare-`user_id` trade-write path by migrating admin bootstrap order placement onto an authenticated lane and then enforcing session-or-privileged auth on `/api/v1/orders` |
+| TASK-API-003 | completed | worker | TASK-API-002 | add replay/idempotency protection to privileged bootstrap orders so operator-signed bootstrap sell orders cannot be replayed within the current proof window |
+| TASK-API-004 | next | worker | TASK-API-003 | define and enforce semantic uniqueness for privileged bootstrap orders so a fresh `requested_at` alone cannot silently authorize a second otherwise-identical bootstrap sell order |
 
 ## Risks
 
@@ -104,3 +106,13 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
   - `/api/v1/orders` still allows a transitional bare `user_id` fallback when no session fields are present
   - the dedicated admin bootstrap route still relies on that fallback for the first sell order after first-liquidity issuance
 - `TASK-API-002` is now the next worker lane and should migrate bootstrap order placement onto an authenticated path, then remove the transitional bare-`user_id` order-write lane from the shared API
+- `TASK-API-002` is now complete: the admin bootstrap route forwards an authenticated operator proof into `/api/v1/orders`, and the shared API no longer accepts bare `user_id` order writes without either session fields or an operator proof envelope
+- commander review of `TASK-API-002` found one narrower residual hardening gap:
+  - privileged bootstrap orders now use an explicit operator-proof lane, but that lane still relies on a short signature window without session-style nonce or idempotency semantics
+  - a replayed bootstrap proof inside that window could still attempt to enqueue duplicate bootstrap sell orders until the underlying position freeze blocks it
+- `TASK-API-003` is now the next worker lane and should add explicit replay/idempotency protection to the privileged bootstrap-order path without reopening the old bare-write fallback
+- `TASK-API-003` is now complete: replay of the same signed bootstrap payload is blocked by a deterministic bootstrap `order_id`, persisted replay checks, and an in-process keyed gate before the order command is published
+- commander review of `TASK-API-003` found one narrower residual product-policy gap:
+  - a second operator proof with a new `requested_at` can still intentionally authorize an otherwise-identical bootstrap sell order because the current uniqueness handle is derived from the signed proof itself
+  - the repo does not yet state whether that behavior is intended bootstrap policy or an accidental duplicate path
+- `TASK-API-004` is now the next worker lane and should define one explicit semantic-uniqueness policy for privileged bootstrap orders, then enforce that policy consistently across the admin service and shared API

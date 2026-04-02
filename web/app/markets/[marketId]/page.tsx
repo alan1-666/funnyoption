@@ -2,9 +2,11 @@ import Link from "next/link";
 
 import { LiveMarketPanel } from "@/components/live-market-panel";
 import { OrderTicket } from "@/components/order-ticket";
-import { SiteHeader } from "@/components/site-header";
-import { formatTimestamp, formatToken } from "@/lib/format";
+import { ShellTopBar } from "@/components/shell-top-bar";
+import { formatAssetAmount, formatTimestamp } from "@/lib/format";
 import { getMarketRead, getTradesRead } from "@/lib/api";
+import { presentMarketCategory, presentMarketDescription, presentMarketTitle } from "@/lib/market-display";
+import { zhMarketStatus, zhOutcome } from "@/lib/locale";
 import styles from "@/app/markets/[marketId]/page.module.css";
 
 export default async function MarketDetailPage({ params }: { params: Promise<{ marketId: string }> }) {
@@ -13,14 +15,11 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ m
   if (!Number.isInteger(numericMarketId) || numericMarketId <= 0) {
     return (
       <main className="page-shell">
-        <SiteHeader />
-        <div className={styles.backLinkWrap}>
-          <Link href="/" className={styles.backLink}>← Back to tape</Link>
-        </div>
+        <ShellTopBar />
         <section className={`panel ${styles.hero}`}>
-          <span className="eyebrow">Market not found</span>
-          <h1 className={styles.title}>Market #{marketId} is not a valid local market id.</h1>
-          <p className={styles.copy}>Return to the homepage and open a market from the live list.</p>
+          <span className="eyebrow">市场不存在</span>
+          <h1 className={styles.title}>市场 #{marketId} 不是有效的本地市场编号。</h1>
+          <p className={styles.copy}>请返回首页，从市场列表中重新选择。</p>
         </section>
       </main>
     );
@@ -32,15 +31,12 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ m
   if (marketResult.state === "unavailable") {
     return (
       <main className="page-shell">
-        <SiteHeader />
-        <div className={styles.backLinkWrap}>
-          <Link href="/" className={styles.backLink}>← Back to tape</Link>
-        </div>
+        <ShellTopBar />
         <section className={`panel ${styles.hero}`}>
-          <span className="eyebrow">API unavailable</span>
-          <h1 className={styles.title}>This market detail could not be loaded.</h1>
+          <span className="eyebrow">接口不可用</span>
+          <h1 className={styles.title}>当前无法加载这个市场详情。</h1>
           <p className={styles.copy}>
-            {marketResult.error?.message ?? "The market data could not be loaded right now."} Please reload in a moment.
+            {marketResult.error?.message ?? "市场数据暂时不可用。"} 请稍后刷新。
           </p>
         </section>
       </main>
@@ -50,14 +46,11 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ m
   if (marketResult.state === "not-found" || !marketResult.item) {
     return (
       <main className="page-shell">
-        <SiteHeader />
-        <div className={styles.backLinkWrap}>
-          <Link href="/" className={styles.backLink}>← Back to tape</Link>
-        </div>
+        <ShellTopBar />
         <section className={`panel ${styles.hero}`}>
-          <span className="eyebrow">Market not found</span>
-          <h1 className={styles.title}>Market #{marketId} does not exist.</h1>
-          <p className={styles.copy}>Return to the homepage and choose another available market.</p>
+          <span className="eyebrow">市场不存在</span>
+          <h1 className={styles.title}>市场 #{marketId} 不存在。</h1>
+          <p className={styles.copy}>请返回首页选择其他市场。</p>
         </section>
       </main>
     );
@@ -70,175 +63,149 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ m
   const yesOdds = Math.round(Number(metadata.yesOdds ?? (market.runtime.last_price_yes ? market.runtime.last_price_yes / 100 : 0.5)) * 100);
   const noOdds = Math.round(Number(metadata.noOdds ?? (market.runtime.last_price_no ? market.runtime.last_price_no / 100 : 0.5)) * 100);
   const matchedNotional = market.runtime.matched_notional;
-  const category = String(metadata.category ?? "local");
+  const category = presentMarketCategory(market);
+  const displayTitle = presentMarketTitle(market);
+  const optionSummary = (market.options ?? [])
+    .filter((option) => option.is_active !== false)
+    .sort((left, right) => left.sort_order - right.sort_order || left.key.localeCompare(right.key));
   const coverImageUrl = String(metadata.coverImage ?? metadata.coverImageUrl ?? metadata.cover_image_url ?? "");
   const coverSourceName = String(metadata.sourceName ?? metadata.coverSourceName ?? metadata.cover_source_name ?? "");
+  const sourceLabel = coverSourceName || category;
 
   return (
     <main className="page-shell">
-      <SiteHeader />
-
-      <div className={styles.backLinkWrap}>
-        <Link href="/" className={styles.backLink}>← Back to tape</Link>
-      </div>
+      <ShellTopBar />
 
       <section className={styles.layout}>
         <div className={styles.main}>
           <div className={`${styles.hero} panel float-in`}>
-            <div className={styles.heroTop}>
-              <div>
-                <span className="eyebrow">{category}</span>
-                <h1 className={styles.title}>{market.title}</h1>
-              </div>
+            <div className={styles.heroCopy}>
               <div className={styles.heroPills}>
-                <span className="pill">{market.status}</span>
+                <span className="eyebrow">{category}</span>
+                <span className="pill">{zhMarketStatus(market.status)}</span>
                 <span className="pill">{market.collateral_asset}</span>
+                {sourceLabel !== category ? <span className="pill">{sourceLabel}</span> : null}
+              </div>
+
+              <div className={styles.heroHeading}>
+                <h1 className={styles.title}>{displayTitle}</h1>
+                <p className={styles.copy}>{presentMarketDescription(market)}</p>
+              </div>
+
+              {optionSummary.length > 0 ? (
+                <div className={styles.heroTags}>
+                  {optionSummary.map((option) => (
+                    <span key={option.key} className={styles.optionChip}>
+                      <span>{option.short_label ?? option.label}</span>
+                      {market.status === "RESOLVED" && market.resolved_outcome?.toUpperCase() === option.key.toUpperCase() ? (
+                        <strong>{zhOutcome(option.key)}</strong>
+                      ) : null}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className={styles.statsGrid}>
+                <div className={styles.statCard}>
+                  <span className={styles.label}>当前买是</span>
+                  <strong>{yesOdds}¢</strong>
+                </div>
+                <div className={styles.statCard}>
+                  <span className={styles.label}>当前买否</span>
+                  <strong>{noOdds}¢</strong>
+                </div>
+                <div className={styles.statCard}>
+                  <span className={styles.label}>累计成交额</span>
+                  <strong>{formatAssetAmount(matchedNotional, "USDT")} USDT</strong>
+                </div>
+                <div className={styles.statCard}>
+                  <span className={styles.label}>成交笔数</span>
+                  <strong>{market.runtime.trade_count}</strong>
+                </div>
+                <div className={styles.statCard}>
+                  <span className={styles.label}>挂单数量</span>
+                  <strong>{market.runtime.active_order_count}</strong>
+                </div>
+                <div className={styles.statCard}>
+                  <span className={styles.label}>最近更新</span>
+                  <strong>{formatTimestamp(market.updated_at)}</strong>
+                </div>
               </div>
             </div>
 
-            {coverImageUrl ? (
-              <div className={styles.heroMedia}>
-                <img className={styles.heroImage} src={coverImageUrl} alt={market.title} loading="lazy" />
-                <div className={styles.heroImageScrim} />
-                <div className={styles.heroImageMeta}>
-                  <span>{coverSourceName || "Market cover"}</span>
-                  <strong>{market.status}</strong>
+            <div className={styles.heroMedia}>
+              {coverImageUrl ? (
+                <img className={styles.heroImage} src={coverImageUrl} alt={displayTitle} loading="lazy" />
+              ) : (
+                <div className={styles.heroFallback}>
+                  <span>{category}</span>
+                  <strong>{market.collateral_asset}</strong>
                 </div>
-              </div>
-            ) : null}
-
-            <p className={styles.copy}>{market.description}</p>
-
-            <div className={styles.statsGrid}>
-              <div className={styles.statCard}>
-                <span className={styles.label}>Yes</span>
-                <strong>{yesOdds}¢</strong>
-              </div>
-              <div className={styles.statCard}>
-                <span className={styles.label}>No</span>
-                <strong>{noOdds}¢</strong>
-              </div>
-              <div className={styles.statCard}>
-                <span className={styles.label}>Matched notional</span>
-                <strong>{formatToken(matchedNotional / 100, 0)} USDT</strong>
-              </div>
-              <div className={styles.statCard}>
-                <span className={styles.label}>Last trade</span>
-                <strong>{formatTimestamp(market.runtime.last_trade_at)}</strong>
+              )}
+              <div className={styles.heroImageScrim} />
+              <div className={styles.heroMediaMeta}>
+                <div>
+                  <span className={styles.mediaLabel}>结算时间</span>
+                  <strong>{formatTimestamp(market.resolve_at)}</strong>
+                </div>
+                <div>
+                  <span className={styles.mediaLabel}>赔付进度</span>
+                  <strong>{market.runtime.completed_payout_count}/{market.runtime.payout_count}</strong>
+                </div>
               </div>
             </div>
           </div>
 
-          <div className={`${styles.grid} float-in float-in-delay-1`}>
+          <div className={styles.liveWrap}>
             {tradesUnavailable ? (
               <section className={`panel ${styles.block}`}>
                 <div className={styles.blockHeader}>
                   <div>
-                    <span className="eyebrow">Live feeds</span>
-                    <h2 className={styles.blockTitle}>Trade snapshot unavailable</h2>
+                    <span className="eyebrow">行情暂不可用</span>
+                    <h2 className={styles.blockTitle}>当前无法加载市场走势</h2>
                   </div>
                 </div>
-                <div className={styles.routeList}>
-                  <div className={styles.routeItem}>
-                    <strong>01</strong>
-                    <p>{tradesResult.error?.message ?? "The detail page could not load recent trading activity."}</p>
-                  </div>
-                  <div className={styles.routeItem}>
-                    <strong>02</strong>
-                    <p>This is different from a quiet market. Reload after the data feed recovers before treating activity as empty.</p>
-                  </div>
-                </div>
+                <p className={styles.blockCopy}>
+                  {tradesResult.error?.message ?? "详情页暂时无法读取最近成交数据。"}
+                </p>
               </section>
             ) : (
               <LiveMarketPanel market={market} trades={trades} />
             )}
-            <section className={`panel ${styles.block}`}>
-              <div className={styles.blockHeader}>
-                <div>
-                  <span className="eyebrow">What to expect</span>
-                  <h2 className={styles.blockTitle}>Trading and settlement</h2>
-                </div>
-              </div>
-              <div className={styles.routeList}>
-                <div className={styles.routeItem}>
-                  <strong>01</strong>
-                  <p>Connect your wallet first, then enable trading once so follow-up orders stay smoother.</p>
-                </div>
-                <div className={styles.routeItem}>
-                  <strong>02</strong>
-                  <p>Orders reserve the required balance before they are submitted, so available funds stay accurate.</p>
-                </div>
-                <div className={styles.routeItem}>
-                  <strong>03</strong>
-                  <p>When the market resolves, any winning payout will appear in your portfolio and can be claimed from there.</p>
-                </div>
-                <div className={styles.routeItem}>
-                  <strong>04</strong>
-                  <p>
-                    Activity summary: {market.runtime.trade_count} trades, {market.runtime.active_order_count} open orders,
-                    {market.runtime.completed_payout_count}/{market.runtime.payout_count} payouts completed.
-                  </p>
-                </div>
-              </div>
-            </section>
-
-            <section className={`panel ${styles.block}`}>
-              <div className={styles.blockHeader}>
-                <div>
-                  <span className="eyebrow">Recent prints</span>
-                  <h2 className={styles.blockTitle}>Trade flow</h2>
-                </div>
-              </div>
-              <div className={styles.tradeTable}>
-                {tradesUnavailable ? (
-                  <div className={styles.tradeSub}>
-                    Trade flow is temporarily unavailable. {tradesResult.error?.message ?? "Please reload before treating this market as quiet."}
-                  </div>
-                ) : trades.length > 0 ? (
-                  trades.map((trade) => (
-                    <div key={trade.trade_id} className={styles.tradeRow}>
-                      <div>
-                        <div className={styles.tradeHead}>{trade.outcome} · {trade.taker_side}</div>
-                        <div className={styles.tradeSub}>seq {trade.sequence_no} · {formatTimestamp(trade.occurred_at)}</div>
-                      </div>
-                      <div className={styles.tradeNums}>
-                        <strong>{trade.price}¢</strong>
-                        <span>{formatToken(trade.quantity, 0)}</span>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className={styles.tradeSub}>No matched prints have been recorded for this market in the current local DB.</div>
-                )}
-              </div>
-            </section>
           </div>
         </div>
 
         <aside className={`${styles.sidebar} float-in float-in-delay-2`}>
           <OrderTicket market={market} />
           <section className={`panel ${styles.sidePanel}`}>
-            <span className="eyebrow">Resolve window</span>
+            <div className={styles.sidePanelHeader}>
+              <span className="eyebrow">时间与状态</span>
+              <span className="pill">{zhMarketStatus(market.status)}</span>
+            </div>
             <div className={styles.sideMetrics}>
               <div>
-                <span className={styles.label}>Open</span>
+                <span className={styles.label}>开始交易</span>
                 <strong>{formatTimestamp(market.open_at)}</strong>
               </div>
               <div>
-                <span className={styles.label}>Close</span>
+                <span className={styles.label}>停止交易</span>
                 <strong>{formatTimestamp(market.close_at)}</strong>
               </div>
               <div>
-                <span className={styles.label}>Resolve</span>
+                <span className={styles.label}>结算时间</span>
                 <strong>{formatTimestamp(market.resolve_at)}</strong>
               </div>
               <div>
-                <span className={styles.label}>Resolved outcome</span>
-                <strong>{market.resolved_outcome || "pending"}</strong>
+                <span className={styles.label}>结算结果</span>
+                <strong>{market.resolved_outcome ? zhOutcome(market.resolved_outcome) : "待结算"}</strong>
               </div>
               <div>
-                <span className={styles.label}>Payout progress</span>
-                <strong>{market.runtime.completed_payout_count}/{market.runtime.payout_count} completed</strong>
+                <span className={styles.label}>来源</span>
+                <strong>{sourceLabel}</strong>
+              </div>
+              <div>
+                <span className={styles.label}>赔付进度</span>
+                <strong>{market.runtime.completed_payout_count}/{market.runtime.payout_count}</strong>
               </div>
             </div>
           </section>

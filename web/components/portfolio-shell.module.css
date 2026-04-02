@@ -1,0 +1,702 @@
+.shell {
+  display: grid;
+  gap: 18px;
+  padding: 8px 0 36px;
+}
+
+.header {
+  display: grid;
+  grid-template-columns: auto minmax(320px, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.brandMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 28% 24%, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.08) 48%, transparent 60%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.04));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 10px 22px rgba(0, 0, 0, 0.22);
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  text-transform: lowercase;
+}
+
+.brandText {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+.searchBar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 54px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.032);
+}
+
+.searchIcon {
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 1.08rem;
+}
+
+.searchInput {
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #f7f7f8;
+  font-size: 0.98rem;
+  outline: none;
+}
+
+.searchInput::placeholder {
+  color: rgba(255, 255, 255, 0.34);
+}
+
+.searchHint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.055);
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.84rem;
+}
+
+.headerActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.backLink,
+.headerMeta {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.94rem;
+}
+
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  transition: color 0.22s ease;
+}
+
+.backLink:hover {
+  color: #ffffff;
+}
+
+.headerMeta {
+  display: grid;
+  gap: 2px;
+  min-height: 48px;
+  padding: 9px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.headerMetaLabel {
+  color: rgba(255, 255, 255, 0.44);
+  font-size: 12px;
+}
+
+.headerMeta strong {
+  color: #ffffff;
+  font-size: 0.96rem;
+  font-weight: 600;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(300px, 0.82fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.cashCard,
+.metricsCard,
+.panel {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 30px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012)),
+    rgba(14, 14, 15, 0.96);
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.cashCard {
+  position: relative;
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 16px;
+  min-height: 222px;
+  padding: 14px 72px 14px 16px;
+}
+
+.cornerAction {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(255, 255, 255, 0.88);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 12px 22px rgba(0, 0, 0, 0.18);
+  transition:
+    transform 0.22s ease,
+    border-color 0.22s ease,
+    background 0.22s ease;
+}
+
+.cornerAction:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.cornerAction:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.avatarPanel {
+  display: grid;
+  align-content: start;
+  padding: 0;
+  border-radius: 22px;
+}
+
+.cashAvatar {
+  width: 100%;
+  min-height: 142px;
+  height: auto;
+  aspect-ratio: 1 / 1.14;
+  border-radius: 30px;
+  font-size: 2rem;
+  letter-spacing: 0.01em;
+}
+
+.cashBody {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+}
+
+.cashTopline,
+.metricLabel,
+.rowSub,
+.rowHint,
+.statusCopy {
+  color: rgba(255, 255, 255, 0.54);
+}
+
+.cashTopline {
+  font-size: 0.84rem;
+}
+
+.cashValue {
+  color: #ffffff;
+  font-size: clamp(1.82rem, 3.4vw, 2.92rem);
+  line-height: 0.98;
+  letter-spacing: -0.06em;
+  font-weight: 700;
+}
+
+.cashAsset {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.cashMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.54);
+  font-size: 0.84rem;
+}
+
+.walletRail {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.addressBar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 8px 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.addressValue,
+.qrAddress {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.addressValue {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.95rem;
+}
+
+.primaryButton,
+.secondaryButton,
+.tabButton {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    transform 0.22s ease,
+    border-color 0.22s ease,
+    background 0.22s ease;
+}
+
+.iconAction,
+.copyButton,
+.qrClose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.iconAction,
+.copyButton {
+  width: 44px;
+  height: 44px;
+}
+
+.copyButton {
+  width: 34px;
+  height: 34px;
+}
+
+.iconAction:disabled,
+.copyButton:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.iconSvg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+.primaryButton {
+  min-height: 36px;
+  padding: 0 13px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #111214;
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.metricsCard {
+  display: grid;
+  gap: 10px;
+  min-height: 222px;
+  padding: 14px 16px;
+  align-content: space-between;
+  background:
+    radial-gradient(circle at 82% 16%, rgba(255, 255, 255, 0.06), transparent 24%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012)),
+    rgba(14, 14, 15, 0.96);
+}
+
+.sideTopline,
+.sideFoot {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.sideTopline {
+  font-size: 0.86rem;
+}
+
+.sideHeadline {
+  color: #ffffff;
+  font-size: 0.98rem;
+  line-height: 1.12;
+  letter-spacing: -0.05em;
+  font-weight: 600;
+}
+
+.metricRow {
+  display: grid;
+  gap: 0;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 20px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.metricBlock {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 14px;
+  background: rgba(255, 255, 255, 0.012);
+}
+
+.metricBlock + .metricBlock {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.metricLabel {
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.metricValue {
+  color: #ffffff;
+  font-size: 1.18rem;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  justify-self: end;
+}
+
+.sideFoot {
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.panel {
+  padding: 20px;
+}
+
+.tabBar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tabButton {
+  min-height: 44px;
+  padding: 0 18px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.tabButtonActive {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.content {
+  margin-top: 20px;
+  min-height: 420px;
+}
+
+.qrOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(6, 6, 7, 0.72);
+  backdrop-filter: blur(20px);
+}
+
+.qrDialog {
+  position: relative;
+  width: min(620px, calc(100vw - 40px));
+}
+
+.qrClose {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 42px;
+  height: 42px;
+  z-index: 1;
+}
+
+.qrCard {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+  border-radius: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012)),
+    rgba(14, 14, 15, 0.96);
+  box-shadow:
+    0 26px 54px rgba(0, 0, 0, 0.44),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.qrImageWrap {
+  position: relative;
+  padding: 22px;
+  border-radius: 28px;
+  background: #ffffff;
+}
+
+.qrImage {
+  display: block;
+  width: 100%;
+  max-width: 460px;
+  margin: 0 auto;
+  aspect-ratio: 1;
+  object-fit: contain;
+  border-radius: 24px;
+  background: #ffffff;
+}
+
+.qrBrand {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.16);
+  transform: translate(-50%, -50%);
+  color: #111214;
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: -0.05em;
+  text-transform: lowercase;
+}
+
+.qrFooter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.qrAddress {
+  color: #ffffff;
+  font-size: 1rem;
+  letter-spacing: -0.02em;
+}
+
+.list {
+  display: grid;
+  gap: 10px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.022);
+}
+
+.rowMain,
+.rowSide {
+  display: grid;
+  gap: 6px;
+}
+
+.rowTitle {
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.rowSub,
+.rowHint {
+  font-size: 0.9rem;
+}
+
+.rowSide {
+  justify-items: end;
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 0.9rem;
+}
+
+.rowSide strong {
+  color: #ffffff;
+  font-size: 0.96rem;
+}
+
+.secondaryButton {
+  min-height: 36px;
+  padding: 0 14px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.empty {
+  display: grid;
+  place-items: center;
+  min-height: 360px;
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 1.08rem;
+}
+
+@media (max-width: 1160px) {
+  .header {
+    grid-template-columns: 1fr;
+  }
+
+  .headerActions {
+    justify-content: flex-start;
+  }
+
+  .summaryGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .cashCard {
+    grid-template-columns: 1fr;
+    min-height: 0;
+    padding-right: 18px;
+  }
+
+  .metricsCard {
+    min-height: 0;
+  }
+
+  .cashAvatar {
+    min-height: 132px;
+  }
+
+  .walletRail {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .cornerAction {
+    top: 18px;
+    right: 18px;
+  }
+
+  .row {
+    grid-template-columns: 1fr;
+  }
+
+  .rowSide {
+    justify-items: start;
+  }
+}
+
+@media (max-width: 640px) {
+  .headerActions {
+    flex-wrap: wrap;
+  }
+
+  .backLink,
+  .headerMeta {
+    width: 100%;
+  }
+
+  .panel,
+  .cashCard,
+  .metricsCard {
+    padding: 18px;
+    border-radius: 24px;
+  }
+
+  .tabBar {
+    gap: 10px;
+  }
+
+  .tabButton {
+    min-width: calc(50% - 6px);
+  }
+
+  .content {
+    min-height: 300px;
+  }
+
+  .walletRail {
+    grid-template-columns: 1fr;
+  }
+
+  .addressBar {
+    min-height: 42px;
+  }
+
+  .primaryButton,
+  .iconAction {
+    width: 100%;
+  }
+}

@@ -6,8 +6,11 @@ const TARGET_VAULT_ADDRESS = process.env.NEXT_PUBLIC_VAULT_ADDRESS ?? "";
 const TARGET_COLLATERAL_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_COLLATERAL_TOKEN_ADDRESS ?? "";
 const TARGET_COLLATERAL_SYMBOL = process.env.NEXT_PUBLIC_COLLATERAL_SYMBOL ?? "USDT";
 const TARGET_COLLATERAL_DECIMALS = Number(process.env.NEXT_PUBLIC_COLLATERAL_DECIMALS ?? "6");
-const TARGET_EXPLORER_URL = process.env.NEXT_PUBLIC_CHAIN_EXPLORER_URL ?? "https://testnet.bscscan.com";
+const TARGET_EXPLORER_URL = process.env.NEXT_PUBLIC_CHAIN_EXPLORER_URL ?? "";
 const TARGET_RPC_URL = process.env.NEXT_PUBLIC_CHAIN_RPC_URL ?? "https://data-seed-prebsc-1-s1.bnbchain.org:8545";
+const TARGET_NATIVE_CURRENCY_NAME = process.env.NEXT_PUBLIC_NATIVE_CURRENCY_NAME ?? (TARGET_CHAIN_ID === 31337 ? "Ethereum" : "BNB");
+const TARGET_NATIVE_CURRENCY_SYMBOL = process.env.NEXT_PUBLIC_NATIVE_CURRENCY_SYMBOL ?? (TARGET_CHAIN_ID === 31337 ? "ETH" : "tBNB");
+const TARGET_NATIVE_CURRENCY_DECIMALS = Number(process.env.NEXT_PUBLIC_NATIVE_CURRENCY_DECIMALS ?? "18");
 
 const vaultAbi = [
   {
@@ -87,9 +90,13 @@ export async function ensureTargetChain() {
         {
           chainId: targetHex,
           chainName: TARGET_CHAIN_NAME,
-          nativeCurrency: { name: "BNB", symbol: "tBNB", decimals: 18 },
+          nativeCurrency: {
+            name: TARGET_NATIVE_CURRENCY_NAME,
+            symbol: TARGET_NATIVE_CURRENCY_SYMBOL,
+            decimals: TARGET_NATIVE_CURRENCY_DECIMALS
+          },
           rpcUrls: [TARGET_RPC_URL],
-          blockExplorerUrls: [TARGET_EXPLORER_URL]
+          ...(TARGET_EXPLORER_URL ? { blockExplorerUrls: [TARGET_EXPLORER_URL] } : {})
         }
       ]
     });

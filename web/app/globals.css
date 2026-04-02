@@ -1,24 +1,24 @@
 :root {
-  --bg: #09090b;
-  --panel: rgba(22, 23, 29, 0.88);
-  --panel-strong: rgba(28, 30, 38, 0.94);
-  --panel-soft: rgba(18, 19, 24, 0.7);
+  --bg: #151515;
+  --panel: rgba(22, 22, 23, 0.92);
+  --panel-strong: rgba(26, 26, 27, 0.97);
+  --panel-soft: rgba(26, 26, 27, 0.78);
   --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.16);
-  --text: #f7f3e8;
-  --muted: rgba(247, 243, 232, 0.62);
-  --lime: #b9ff42;
-  --cyan: #80f7ff;
-  --salmon: #ff7a59;
-  --amber: #ffc857;
-  --danger: #ff5e5b;
-  --ok: #79ffb3;
-  --shadow: 0 30px 100px rgba(0, 0, 0, 0.4);
-  --radius-xl: 28px;
-  --radius-lg: 22px;
-  --radius-md: 16px;
-  --radius-sm: 12px;
-  --container: 1280px;
+  --line-strong: rgba(255, 255, 255, 0.15);
+  --text: #edf2f7;
+  --muted: rgba(255, 255, 255, 0.58);
+  --lime: #67e8d3;
+  --cyan: #5cbef2;
+  --salmon: #fb8c73;
+  --amber: #f4c978;
+  --danger: #fb7185;
+  --ok: #6ee7b7;
+  --shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+  --radius-xl: 18px;
+  --radius-lg: 16px;
+  --radius-md: 12px;
+  --radius-sm: 10px;
+  --container: 1680px;
 }
 
 * {
@@ -33,10 +33,9 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(circle at top left, rgba(128, 247, 255, 0.14), transparent 32%),
-    radial-gradient(circle at top right, rgba(185, 255, 66, 0.16), transparent 28%),
-    radial-gradient(circle at bottom center, rgba(255, 122, 89, 0.14), transparent 35%),
-    linear-gradient(180deg, #050507 0%, #09090b 30%, #0d0f14 100%);
+    radial-gradient(circle at 12% 8%, rgba(255, 255, 255, 0.045), transparent 20%),
+    radial-gradient(circle at 84% 10%, rgba(166, 136, 255, 0.055), transparent 16%),
+    linear-gradient(180deg, #131313 0%, #151515 42%, #171717 100%);
   color: var(--text);
   font-family: var(--font-body), sans-serif;
 }
@@ -46,12 +45,12 @@ body::before {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  opacity: 0.22;
+  opacity: 0.018;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
-  background-size: 72px 72px;
-  mask-image: radial-gradient(circle at center, black 55%, transparent 100%);
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 120px 120px;
+  mask-image: radial-gradient(circle at center, black 45%, transparent 100%);
 }
 
 a {
@@ -65,33 +64,32 @@ input {
 }
 
 .page-shell {
-  width: min(var(--container), calc(100% - 32px));
+  width: min(var(--container), calc(100% - 48px));
   margin: 0 auto;
-  padding: 24px 0 64px;
+  padding: 24px 0 72px;
 }
 
 .eyebrow {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 14px;
+  gap: 8px;
+  padding: 7px 11px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.03);
   color: var(--muted);
-  font-size: 12px;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.06em;
   font-family: var(--font-mono), monospace;
 }
 
 .section-title {
   margin: 0;
-  font-family: var(--font-display), sans-serif;
-  font-size: clamp(1.8rem, 3.8vw, 4rem);
-  line-height: 0.95;
-  letter-spacing: -0.04em;
-  text-transform: uppercase;
+  font-family: var(--font-body), sans-serif;
+  font-size: clamp(1.25rem, 2vw, 1.8rem);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-weight: 700;
 }
 
 .section-copy {
@@ -102,35 +100,36 @@ input {
 }
 
 .panel {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.018));
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
-  backdrop-filter: blur(20px);
+  backdrop-filter: blur(12px);
   border-radius: var(--radius-xl);
 }
 
 .pill {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 6px;
+  padding: 6px 10px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--line);
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
   font-family: var(--font-mono), monospace;
 }
 
 .metric-value {
-  font-family: var(--font-display), sans-serif;
-  font-size: clamp(1.9rem, 3.8vw, 4.2rem);
-  line-height: 0.9;
-  letter-spacing: -0.05em;
+  font-family: var(--font-body), sans-serif;
+  font-size: clamp(1.45rem, 2.2vw, 2.1rem);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  font-weight: 700;
 }
 
 .gradient-text {
-  background: linear-gradient(120deg, var(--lime), var(--cyan), #fff0ba);
+  background: linear-gradient(120deg, var(--lime), var(--cyan), #fdf3c2);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;

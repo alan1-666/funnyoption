@@ -1,9 +1,0 @@
-{
-  "pages": {
-    "/api/operator/markets/[marketId]/first-liquidity/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/operator/markets/[marketId]/first-liquidity/route.js"
-    ]
-  }
-}

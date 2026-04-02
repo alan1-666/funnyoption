@@ -20,7 +20,7 @@ func TestSettlementProcessorHandleSettlementCompleted(t *testing.T) {
 		PositionAsset:   "POSITION:1001:YES",
 		SettledQuantity: 10,
 		PayoutAsset:     "USDT",
-		PayoutAmount:    10,
+		PayoutAmount:    1000,
 	})
 	if err != nil {
 		t.Fatalf("json.Marshal returned error: %v", err)
@@ -36,10 +36,10 @@ func TestSettlementProcessorHandleSettlementCompleted(t *testing.T) {
 	if got := journal.BalanceOf("market:1001:resolved:yes", "POSITION:1001:YES"); got != 10 {
 		t.Fatalf("unexpected resolved pool delta: %d", got)
 	}
-	if got := journal.BalanceOf("market:1001:treasury", "USDT"); got != -10 {
+	if got := journal.BalanceOf("market:1001:treasury", "USDT"); got != -1000 {
 		t.Fatalf("unexpected treasury payout delta: %d", got)
 	}
-	if got := journal.BalanceOf("user:2001:available", "USDT"); got != 10 {
+	if got := journal.BalanceOf("user:2001:available", "USDT"); got != 1000 {
 		t.Fatalf("unexpected user payout delta: %d", got)
 	}
 }

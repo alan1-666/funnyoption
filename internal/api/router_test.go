@@ -226,6 +226,120 @@ func TestEngineTradeWriteRejectsBareUserIDWithoutAuthEnvelope(t *testing.T) {
 	}
 }
 
+func TestEngineTradeWriteRejectsReplayedOperatorBootstrapOrder(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	reqBody := dto.CreateOrderRequest{
+		UserID:      1001,
+		MarketID:    88,
+		Outcome:     "yes",
+		Side:        "sell",
+		Type:        "limit",
+		TimeInForce: "gtc",
+		Price:       10,
+		Quantity:    20,
+	}
+	wallet := attachSignedRouterBootstrapOrderOperator(t, &reqBody)
+	orderID := reqBody.BootstrapOrderID()
+
+	engine := newEngine(Meta{Service: "api", Env: "test"}, handler.Dependencies{
+		Logger:         slog.Default(),
+		KafkaPublisher: &testPublisher{},
+		KafkaTopics:    kafka.NewTopics("funnyoption."),
+		AccountClient:  &testAccountClient{},
+		QueryStore: &testQueryStore{
+			getFreezeResp: dto.FreezeResponse{
+				FreezeID: "frz_operator",
+				UserID:   1001,
+				Asset:    "POSITION:88:YES",
+				RefType:  "ORDER",
+				RefID:    orderID,
+				Status:   "ACTIVE",
+			},
+		},
+		OperatorWallets: []string{wallet},
+	}, routerOptions{
+		rateLimiter: newRateLimiter(defaultRateLimitPolicies()),
+	})
+
+	raw, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "operator bootstrap order already accepted") {
+		t.Fatalf("unexpected response body: %s", w.Body.String())
+	}
+}
+
+func TestEngineTradeWriteRejectsSemanticDuplicateOperatorBootstrapOrderWithFreshProof(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	reqBody := dto.CreateOrderRequest{
+		UserID:      1001,
+		MarketID:    88,
+		Outcome:     "yes",
+		Side:        "sell",
+		Type:        "limit",
+		TimeInForce: "gtc",
+		Price:       10,
+		Quantity:    20,
+	}
+
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey returned error: %v", err)
+	}
+
+	firstRequestedAt := time.Now().Add(-time.Second).UnixMilli()
+	wallet := signRouterBootstrapOrderOperator(t, key, firstRequestedAt, &reqBody)
+	orderID := reqBody.BootstrapOrderID()
+
+	secondRequestedAt := time.Now().UnixMilli()
+	signRouterBootstrapOrderOperator(t, key, secondRequestedAt, &reqBody)
+	if reqBody.BootstrapOrderID() != orderID {
+		t.Fatalf("expected semantic bootstrap order id to stay stable across requested_at changes")
+	}
+
+	engine := newEngine(Meta{Service: "api", Env: "test"}, handler.Dependencies{
+		Logger:         slog.Default(),
+		KafkaPublisher: &testPublisher{},
+		KafkaTopics:    kafka.NewTopics("funnyoption."),
+		AccountClient:  &testAccountClient{},
+		QueryStore: &testQueryStore{
+			getOrderResp: dto.OrderResponse{
+				OrderID:  orderID,
+				UserID:   1001,
+				MarketID: 88,
+				Outcome:  "YES",
+				Side:     "SELL",
+			},
+		},
+		OperatorWallets: []string{wallet},
+	}, routerOptions{
+		rateLimiter: newRateLimiter(defaultRateLimitPolicies()),
+	})
+
+	raw, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "operator bootstrap order already accepted") {
+		t.Fatalf("unexpected response body: %s", w.Body.String())
+	}
+}
+
 func TestEnginePrivilegedRouteRequiresOperatorEnvelope(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -346,10 +460,16 @@ func attachSignedRouterBootstrapOrderOperator(t *testing.T, req *dto.CreateOrder
 	if err != nil {
 		t.Fatalf("GenerateKey returned error: %v", err)
 	}
+	return signRouterBootstrapOrderOperator(t, key, time.Now().UnixMilli(), req)
+}
+
+func signRouterBootstrapOrderOperator(t *testing.T, key *ecdsa.PrivateKey, requestedAt int64, req *dto.CreateOrderRequest) string {
+	t.Helper()
+
 	wallet := sharedauth.NormalizeHex(crypto.PubkeyToAddress(key.PublicKey).Hex())
 	req.Operator = &dto.OperatorAction{
 		WalletAddress: wallet,
-		RequestedAt:   time.Now().UnixMilli(),
+		RequestedAt:   requestedAt,
 	}
 	req.RequestedAtMillis = req.Operator.RequestedAt
 	req.Operator.Signature = signRouterOperatorMessage(t, key, req.BootstrapOperatorMessage())
@@ -423,6 +543,8 @@ type testQueryStore struct {
 	getSessionResp    dto.SessionResponse
 	getMarketResp     dto.MarketResponse
 	createSessionResp dto.SessionResponse
+	getOrderResp      dto.OrderResponse
+	getFreezeResp     dto.FreezeResponse
 }
 
 func (s *testQueryStore) CreateMarket(ctx context.Context, req dto.CreateMarketRequest) (dto.MarketResponse, error) {
@@ -456,16 +578,52 @@ func (s *testQueryStore) CreateClaimRequest(ctx context.Context, req dto.ClaimPa
 	return dto.ChainTransactionResponse{}, nil
 }
 
+func (s *testQueryStore) GetUserProfile(ctx context.Context, req dto.GetUserProfileRequest) (dto.UserProfileResponse, error) {
+	_ = ctx
+	_ = req
+	return dto.UserProfileResponse{}, handler.ErrNotFound
+}
+
+func (s *testQueryStore) UpsertUserProfile(ctx context.Context, req dto.UpdateUserProfileRequest, walletAddress string) (dto.UserProfileResponse, error) {
+	_ = ctx
+	_ = req
+	return dto.UserProfileResponse{
+		UserID:        req.UserID,
+		WalletAddress: walletAddress,
+		DisplayName:   req.DisplayName,
+		AvatarPreset:  req.AvatarPreset,
+	}, nil
+}
+
 func (s *testQueryStore) GetSession(ctx context.Context, sessionID string) (dto.SessionResponse, error) {
 	_ = ctx
 	_ = sessionID
 	return s.getSessionResp, nil
 }
 
+func (s *testQueryStore) GetOrder(ctx context.Context, orderID string) (dto.OrderResponse, error) {
+	_ = ctx
+	_ = orderID
+	if s.getOrderResp.OrderID == "" {
+		return dto.OrderResponse{}, handler.ErrNotFound
+	}
+	return s.getOrderResp, nil
+}
+
 func (s *testQueryStore) RevokeSession(ctx context.Context, sessionID string) (dto.SessionResponse, error) {
 	_ = ctx
 	_ = sessionID
 	return dto.SessionResponse{}, nil
+}
+
+func (s *testQueryStore) GetLatestFreezeByRef(ctx context.Context, refType, refID string) (dto.FreezeResponse, error) {
+	_ = ctx
+	_ = refType
+	_ = refID
+	if s.getFreezeResp.FreezeID == "" {
+		return dto.FreezeResponse{}, handler.ErrNotFound
+	}
+	return s.getFreezeResp, nil
 }
 
 func (s *testQueryStore) AdvanceSessionNonce(ctx context.Context, sessionID string, nonce uint64) (dto.SessionResponse, error) {

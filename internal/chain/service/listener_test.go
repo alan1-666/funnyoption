@@ -67,7 +67,7 @@ func TestDepositListenerPollOnceCreditsMatchedWallet(t *testing.T) {
 			{
 				Address:     common.HexToAddress("0x00000000000000000000000000000000000000bb"),
 				Topics:      []common.Hash{depositEventTopic, common.BytesToHash(common.HexToAddress("0x00000000000000000000000000000000000000aa").Bytes())},
-				Data:        common.LeftPadBytes(big.NewInt(500).Bytes(), 32),
+				Data:        common.LeftPadBytes(big.NewInt(5_000_000).Bytes(), 32),
 				BlockNumber: 108,
 				TxHash:      common.HexToHash("0x1"),
 				Index:       3,
@@ -75,12 +75,15 @@ func TestDepositListenerPollOnceCreditsMatchedWallet(t *testing.T) {
 		},
 	}
 	cfg := config.ServiceConfig{
-		ChainName:     "bsc",
-		NetworkName:   "testnet",
-		VaultAddress:  "0x00000000000000000000000000000000000000bb",
-		Confirmations: 6,
-		StartBlock:    100,
-		PollInterval:  time.Second,
+		ChainName:               "bsc",
+		NetworkName:             "testnet",
+		VaultAddress:            "0x00000000000000000000000000000000000000bb",
+		Confirmations:           6,
+		StartBlock:              100,
+		PollInterval:            time.Second,
+		CollateralSymbol:        "USDT",
+		CollateralDecimals:      6,
+		CollateralDisplayDigits: 2,
 	}
 
 	listener, err := NewDepositListenerWithReader(slog.Default(), cfg, store, processor, reader)
@@ -116,7 +119,7 @@ func TestDepositListenerSkipsWalletWithoutSession(t *testing.T) {
 			{
 				Address:     common.HexToAddress("0x00000000000000000000000000000000000000bb"),
 				Topics:      []common.Hash{depositEventTopic, common.BytesToHash(common.HexToAddress("0x00000000000000000000000000000000000000ff").Bytes())},
-				Data:        common.LeftPadBytes(big.NewInt(200).Bytes(), 32),
+				Data:        common.LeftPadBytes(big.NewInt(2_000_000).Bytes(), 32),
 				BlockNumber: 4,
 				TxHash:      common.HexToHash("0x2"),
 				Index:       1,
@@ -124,12 +127,15 @@ func TestDepositListenerSkipsWalletWithoutSession(t *testing.T) {
 		},
 	}
 	cfg := config.ServiceConfig{
-		ChainName:     "bsc",
-		NetworkName:   "testnet",
-		VaultAddress:  "0x00000000000000000000000000000000000000bb",
-		Confirmations: 0,
-		StartBlock:    1,
-		PollInterval:  time.Second,
+		ChainName:               "bsc",
+		NetworkName:             "testnet",
+		VaultAddress:            "0x00000000000000000000000000000000000000bb",
+		Confirmations:           0,
+		StartBlock:              1,
+		PollInterval:            time.Second,
+		CollateralSymbol:        "USDT",
+		CollateralDecimals:      6,
+		CollateralDisplayDigits: 2,
 	}
 
 	listener, err := NewDepositListenerWithReader(slog.Default(), cfg, store, processor, reader)
@@ -183,7 +189,7 @@ func TestDepositListenerPollOnceDebitsWithdrawalWallet(t *testing.T) {
 					common.BytesToHash(common.HexToAddress("0x00000000000000000000000000000000000000aa").Bytes()),
 				},
 				Data: append(
-					common.LeftPadBytes(big.NewInt(250).Bytes(), 32),
+					common.LeftPadBytes(big.NewInt(2_500_000).Bytes(), 32),
 					common.LeftPadBytes(common.HexToAddress("0x00000000000000000000000000000000000000cc").Bytes(), 32)...,
 				),
 				BlockNumber: 109,
@@ -193,12 +199,15 @@ func TestDepositListenerPollOnceDebitsWithdrawalWallet(t *testing.T) {
 		},
 	}
 	cfg := config.ServiceConfig{
-		ChainName:     "bsc",
-		NetworkName:   "testnet",
-		VaultAddress:  "0x00000000000000000000000000000000000000bb",
-		Confirmations: 6,
-		StartBlock:    100,
-		PollInterval:  time.Second,
+		ChainName:               "bsc",
+		NetworkName:             "testnet",
+		VaultAddress:            "0x00000000000000000000000000000000000000bb",
+		Confirmations:           6,
+		StartBlock:              100,
+		PollInterval:            time.Second,
+		CollateralSymbol:        "USDT",
+		CollateralDecimals:      6,
+		CollateralDisplayDigits: 2,
 	}
 
 	listener, err := NewDepositListenerWithReader(slog.Default(), cfg, store, processor, reader)

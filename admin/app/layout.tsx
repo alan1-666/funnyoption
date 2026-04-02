@@ -4,13 +4,13 @@ import "@/app/globals.css";
 import { Providers } from "@/app/providers";
 
 export const metadata: Metadata = {
-  title: "FunnyOption Admin",
-  description: "Dedicated operator runtime for FunnyOption market creation, bootstrap, and resolution."
+  title: "FunnyOption 运营后台",
+  description: "FunnyOption 独立运营后台，用于创建市场、首发流动性和结算管理。"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="zh-CN">
       <body>
         <Providers>{children}</Providers>
       </body>

@@ -16,6 +16,9 @@ type ServiceConfig struct {
 	HTTPAddr                string
 	GRPCAddr                string
 	AccountGRPCAddr         string
+	CollateralSymbol        string
+	CollateralDecimals      int
+	CollateralDisplayDigits int
 	DefaultOperatorUserID   int64
 	OperatorWallets         []string
 	ChainRPCURL             string
@@ -47,6 +50,9 @@ func Load(serviceName string) ServiceConfig {
 		HTTPAddr:                getenv(serviceKey+"_HTTP_ADDR", defaultHTTPAddr(serviceName)),
 		GRPCAddr:                getenv(serviceKey+"_GRPC_ADDR", defaultGRPCAddr(serviceName)),
 		AccountGRPCAddr:         getenv("FUNNYOPTION_ACCOUNT_GRPC_ADDR", defaultGRPCAddr("account")),
+		CollateralSymbol:        getenv("FUNNYOPTION_COLLATERAL_SYMBOL", "USDT"),
+		CollateralDecimals:      getenvInt("FUNNYOPTION_COLLATERAL_DECIMALS", 6),
+		CollateralDisplayDigits: getenvInt("FUNNYOPTION_COLLATERAL_ACCOUNTING_DECIMALS", 2),
 		DefaultOperatorUserID:   int64(getenvInt("FUNNYOPTION_DEFAULT_OPERATOR_USER_ID", 1001)),
 		OperatorWallets:         splitCSV(getenv("FUNNYOPTION_OPERATOR_WALLETS", "")),
 		ChainRPCURL:             getenv("FUNNYOPTION_CHAIN_RPC_URL", ""),

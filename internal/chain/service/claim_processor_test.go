@@ -12,6 +12,7 @@ import (
 	"funnyoption/internal/shared/config"
 
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -108,6 +109,9 @@ func TestClaimProcessorPollOnceSubmitsClaim(t *testing.T) {
 		VaultAddress:            "0x00000000000000000000000000000000000000cc",
 		ChainOperatorPrivateKey: privateKeyHex(key),
 		ChainGasLimit:           250000,
+		CollateralSymbol:        "USDT",
+		CollateralDecimals:      6,
+		CollateralDisplayDigits: 2,
 	}
 	processor, err := NewClaimProcessor(slog.Default(), cfg, store, sender)
 	if err != nil {
@@ -128,6 +132,25 @@ func TestClaimProcessorPollOnceSubmitsClaim(t *testing.T) {
 	}
 	if sender.sentTx == nil {
 		t.Fatalf("expected transaction to be sent")
+	}
+
+	contractABI, err := abi.JSON(strings.NewReader(vaultClaimABI))
+	if err != nil {
+		t.Fatalf("abi.JSON returned error: %v", err)
+	}
+	args, err := contractABI.Methods["processClaim"].Inputs.Unpack(sender.sentTx.Data()[4:])
+	if err != nil {
+		t.Fatalf("Inputs.Unpack returned error: %v", err)
+	}
+	if len(args) != 4 {
+		t.Fatalf("expected 4 contract args, got %d", len(args))
+	}
+	amountArg, ok := args[2].(*big.Int)
+	if !ok {
+		t.Fatalf("expected amount arg to be *big.Int, got %T", args[2])
+	}
+	if amountArg.Int64() != 10_000_000 {
+		t.Fatalf("expected chain payout amount 10000000, got %d", amountArg.Int64())
 	}
 }
 
@@ -157,6 +180,9 @@ func TestClaimProcessorPollOnceFailsInvalidQueuedClaim(t *testing.T) {
 		VaultAddress:            "0x00000000000000000000000000000000000000cc",
 		ChainOperatorPrivateKey: privateKeyHex(key),
 		ChainGasLimit:           250000,
+		CollateralSymbol:        "USDT",
+		CollateralDecimals:      6,
+		CollateralDisplayDigits: 2,
 	}
 	processor, err := NewClaimProcessor(slog.Default(), cfg, store, sender)
 	if err != nil {

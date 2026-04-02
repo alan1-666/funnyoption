@@ -11,3 +11,12 @@ coverage.out
 vendor/
 .logs/
 .run/
+.playwright-cli/
+cache/
+contracts/out/
+web/.next/
+web/.next-dev/
+admin/.next/
+admin/.next-dev/
+web/tsconfig.tsbuildinfo
+admin/tsconfig.tsbuildinfo

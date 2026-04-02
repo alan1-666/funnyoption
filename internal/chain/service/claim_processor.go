@@ -10,6 +10,7 @@ import (
 	"time"
 
 	chainmodel "funnyoption/internal/chain/model"
+	"funnyoption/internal/shared/assets"
 	"funnyoption/internal/shared/config"
 
 	"github.com/ethereum/go-ethereum"
@@ -135,9 +136,16 @@ func (p *ClaimProcessor) submitClaim(ctx context.Context, task chainmodel.ClaimT
 	if task.PayoutAmount <= 0 {
 		return "", fmt.Errorf("payout_amount must be positive")
 	}
+	chainAmount, err := assets.AccountingToChainAmount(task.PayoutAmount, p.cfg.CollateralDecimals, p.cfg.CollateralDisplayDigits)
+	if err != nil {
+		return "", err
+	}
+	if chainAmount <= 0 {
+		return "", fmt.Errorf("payout_amount resolves to non-positive chain amount")
+	}
 
 	claimID := crypto.Keccak256Hash([]byte(task.RefID))
-	data, err := p.contractABI.Pack("processClaim", claimID, wallet, big.NewInt(task.PayoutAmount), recipient)
+	data, err := p.contractABI.Pack("processClaim", claimID, wallet, big.NewInt(chainAmount), recipient)
 	if err != nil {
 		return "", err
 	}

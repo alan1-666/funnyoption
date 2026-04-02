@@ -1,0 +1,154 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.panel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.title {
+  margin: 10px 0 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: clamp(1rem, 1.5vw, 1.2rem);
+  line-height: 1.2;
+  font-weight: 700;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.searchWrap {
+  flex: 0 1 248px;
+  min-height: 38px;
+  max-width: 320px;
+  display: flex;
+  align-items: center;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  overflow: hidden;
+}
+
+.searchTag {
+  flex: 0 0 auto;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  background: #f8fafc;
+  color: var(--muted);
+  font-size: 11px;
+  border-right: 1px solid var(--line);
+}
+
+.search,
+.select {
+  min-height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  padding: 0 12px;
+}
+
+.search {
+  flex: 1 1 auto;
+  border: none;
+  border-radius: 0;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.select {
+  min-width: 108px;
+  font-size: 13px;
+}
+
+.search::placeholder {
+  color: rgba(15, 23, 42, 0.4);
+}
+
+.searchWrap:focus-within,
+.search:focus-visible,
+.select:focus-visible {
+  outline: none;
+  border-color: rgba(37, 99, 235, 0.7);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.search:focus-visible {
+  box-shadow: none;
+}
+
+.list {
+  display: grid;
+  gap: 10px;
+}
+
+.row,
+.empty {
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+  padding: 12px 14px;
+}
+
+.row {
+  display: grid;
+  gap: 8px;
+}
+
+.primary,
+.secondary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: center;
+}
+
+.primary strong {
+  color: var(--text);
+}
+
+.primary span,
+.secondary span,
+.empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (max-width: 1120px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .panel {
+    padding: 18px;
+  }
+
+  .header {
+    display: grid;
+  }
+
+  .searchWrap {
+    flex-basis: 100%;
+    max-width: none;
+  }
+}

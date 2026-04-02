@@ -9,5 +9,11 @@ if [[ -f "${ROOT_DIR}/.env.local" ]]; then
   set +a
 fi
 
+if [[ -f "${ROOT_DIR}/.run/dev/local-chain.env" ]]; then
+  set -a
+  source "${ROOT_DIR}/.run/dev/local-chain.env"
+  set +a
+fi
+
 cd "${ROOT_DIR}"
 exec go run ./cmd/local-lifecycle "$@"

@@ -1,11 +1,8 @@
 .panel {
   display: grid;
-  gap: 18px;
-  padding: 24px;
-  background:
-    radial-gradient(circle at top right, rgba(255, 200, 87, 0.16), transparent 24%),
-    radial-gradient(circle at bottom left, rgba(255, 122, 89, 0.12), transparent 30%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
+  gap: 14px;
+  padding: 18px;
+  background: var(--panel);
 }
 
 .header {
@@ -16,19 +13,18 @@
 }
 
 .title {
-  margin: 14px 0 0;
+  margin: 10px 0 0;
   font-family: var(--font-display), sans-serif;
-  font-size: clamp(1.9rem, 4vw, 3.1rem);
-  line-height: 0.94;
-  text-transform: uppercase;
+  font-size: clamp(1.1rem, 1.8vw, 1.4rem);
+  line-height: 1.2;
   text-wrap: balance;
 }
 
 .copy,
 .sideCopy {
-  margin: 12px 0 0;
+  margin: 10px 0 0;
   color: var(--muted);
-  line-height: 1.7;
+  line-height: 1.6;
 }
 
 .badges,
@@ -40,25 +36,25 @@
 }
 
 .gateNote {
-  padding: 14px 16px;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 200, 87, 0.24);
-  background: rgba(255, 200, 87, 0.08);
+  padding: 11px 13px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
   color: var(--muted);
-  line-height: 1.6;
+  line-height: 1.5;
 }
 
 .grid {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
-  gap: 18px;
+  gap: 12px;
 }
 
 .list,
 .side,
 .resolvedList {
   display: grid;
-  gap: 14px;
+  gap: 10px;
 }
 
 .marketRow,
@@ -66,21 +62,21 @@
 .resolvedRow,
 .empty,
 .emptyCompact {
-  border-radius: 20px;
+  border-radius: 14px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--panel-soft);
 }
 
 .marketRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 16px;
-  padding: 18px;
+  gap: 14px;
+  padding: 14px;
 }
 
 .marketMain {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .marketTitleRow {
@@ -91,7 +87,7 @@
 }
 
 .marketTitle {
-  font-size: 1.05rem;
+  font-size: 1rem;
   line-height: 1.5;
 }
 
@@ -108,16 +104,16 @@
 
 .actions {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   align-content: start;
-  min-width: 176px;
+  min-width: 156px;
 }
 
 .toggle,
 .toggleActive,
 .resolve {
-  min-height: 46px;
-  border-radius: 14px;
+  min-height: 40px;
+  border-radius: 10px;
   border: 1px solid var(--line);
   color: var(--text);
   transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
@@ -130,15 +126,15 @@
 }
 
 .toggleActive {
-  border-color: rgba(255, 200, 87, 0.7);
-  background: linear-gradient(135deg, rgba(255, 200, 87, 0.26), rgba(255, 122, 89, 0.2));
+  border-color: rgba(37, 99, 235, 0.22);
+  background: rgba(37, 99, 235, 0.08);
 }
 
 .resolve {
-  padding: 0 16px;
-  background: linear-gradient(135deg, var(--amber), #ffe8ac);
-  color: #16110b;
-  border-color: transparent;
+  padding: 0 14px;
+  background: #0f172a;
+  color: #fff;
+  border-color: #dbe4f0;
   font-weight: 800;
 }
 
@@ -149,16 +145,16 @@
 }
 
 .sideCard {
-  padding: 18px;
+  padding: 14px;
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .resolvedRow {
   display: grid;
   grid-template-columns: auto auto 1fr;
   gap: 10px;
-  padding: 14px;
+  padding: 11px 12px;
   align-items: center;
   font-size: 13px;
   color: var(--muted);
@@ -176,7 +172,7 @@
 
 .empty,
 .emptyCompact {
-  padding: 18px;
+  padding: 14px;
   color: var(--muted);
 }
 

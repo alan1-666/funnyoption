@@ -11,6 +11,20 @@ Run one deterministic local proof for:
 5. the market resolves
 6. settlement updates the terminal reads
 
+## Persistent local-chain mode
+
+If you set `FUNNYOPTION_LOCAL_CHAIN_MODE=anvil`, the repo now supports a persistent local-chain path in addition to the older in-process proof environment.
+
+See:
+
+- [/Users/zhangza/code/funnyoption/docs/operations/local-persistent-chain.md](/Users/zhangza/code/funnyoption/docs/operations/local-persistent-chain.md)
+
+In that mode:
+
+- `scripts/dev-up.sh` starts a managed `anvil` node and deploys local contracts
+- `scripts/local-lifecycle.sh` sources `/Users/zhangza/code/funnyoption/.run/dev/local-chain.env`
+- `cmd/local-lifecycle` uses the persistent local vault and running `chain-service` instead of spinning up its own simulated proof chain
+
 ## Important local truth
 
 The default local `.env.local` does **not** include a configured `FUNNYOPTION_VAULT_ADDRESS` or collateral token address.

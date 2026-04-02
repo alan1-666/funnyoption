@@ -2,183 +2,258 @@
   display: grid;
   gap: 18px;
   padding: 22px;
+  border-radius: 32px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.01)),
+    rgba(12, 12, 13, 0.96);
 }
 
 .header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
   gap: 16px;
+  align-items: flex-start;
+}
+
+.headerIntro {
+  display: grid;
+  gap: 10px;
 }
 
 .copy {
-  margin: 10px 0 0;
-  color: var(--muted);
-  line-height: 1.6;
+  margin: 0;
+  max-width: 58ch;
+  color: rgba(255, 255, 255, 0.62);
+  line-height: 1.7;
 }
 
-.grid {
+.chartCard,
+.detailPanel {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.024);
 }
 
-.card {
-  display: grid;
-  gap: 12px;
-  padding: 16px;
-  border-radius: 18px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.candleWrap {
-  display: grid;
-  gap: 10px;
-  padding: 14px;
-  border-radius: 14px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)),
-    rgba(0, 0, 0, 0.18);
-}
-
-.candleHead {
+.marketStrip {
   display: flex;
   justify-content: space-between;
+  gap: 14px;
   align-items: center;
-  gap: 12px;
   flex-wrap: wrap;
 }
 
-.candleMeta {
-  color: var(--muted);
-  font-size: 12px;
-  font-family: var(--font-mono), monospace;
+.legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-.candleChart {
+.legendChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.legendChip strong {
+  color: #ffffff;
+}
+
+.legendChipYes {
+  background: linear-gradient(135deg, rgba(0, 175, 96, 0.96), rgba(20, 193, 111, 0.94));
+  color: #ffffff;
+}
+
+.marketMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: rgba(255, 255, 255, 0.54);
+  font-size: 0.9rem;
+}
+
+.chartFrame {
+  position: relative;
+  min-height: 420px;
+  padding: 22px 0 40px;
+}
+
+.chart {
   width: 100%;
-  height: 136px;
+  height: 360px;
   display: block;
 }
 
-.candleEmpty {
-  min-height: 92px;
+.gridLine {
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 1;
+  stroke-dasharray: 3 8;
+}
+
+.axisLabel {
+  fill: rgba(255, 255, 255, 0.46);
+  font-size: 12px;
+}
+
+.pathYes,
+.pathNo {
+  fill: none;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.pathYes {
+  stroke: #1588ff;
+  filter: drop-shadow(0 0 12px rgba(21, 136, 255, 0.18));
+}
+
+.pathNo {
+  stroke: #ff4f43;
+  filter: drop-shadow(0 0 12px rgba(255, 79, 67, 0.14));
+}
+
+.timeAxis {
+  position: absolute;
+  left: 0;
+  right: 56px;
+  bottom: 8px;
+  height: 20px;
+}
+
+.timeAxis span {
+  position: absolute;
+  transform: translateX(-50%);
+  color: rgba(255, 255, 255, 0.44);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.rangeBar,
+.tabBar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rangeButton,
+.rangeActive,
+.tabButton,
+.tabActive {
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+}
+
+.rangeActive,
+.tabActive {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.resultsList,
+.activityList,
+.rulesList {
+  display: grid;
+  gap: 12px;
+}
+
+.resultRow,
+.activityRow,
+.ruleCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.024);
+}
+
+.resultRow strong,
+.activityRow strong,
+.ruleCard strong {
+  color: #ffffff;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+
+.resultRow span,
+.activityRow span,
+.ruleCard span {
+  display: block;
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.54);
+  line-height: 1.5;
+}
+
+.resultMeta,
+.activityMeta {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.resultMeta span,
+.activityMeta span {
+  margin: 0;
+}
+
+.emptyState {
   display: grid;
   place-items: center;
-  color: var(--muted);
-  font-size: 13px;
-  border: 1px dashed var(--line);
-  border-radius: 12px;
+  min-height: 180px;
+  border-radius: 24px;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.52);
+  text-align: center;
+  padding: 20px;
 }
 
-.candleUp .wick,
-.candleUp .body {
-  stroke: rgba(92, 255, 148, 0.9);
-  fill: rgba(92, 255, 148, 0.32);
-}
+@media (max-width: 920px) {
+  .panel,
+  .chartCard,
+  .detailPanel,
+  .resultRow,
+  .activityRow,
+  .ruleCard {
+    border-radius: 24px;
+  }
 
-.candleDown .wick,
-.candleDown .body {
-  stroke: rgba(255, 111, 111, 0.92);
-  fill: rgba(255, 111, 111, 0.34);
-}
-
-.wick {
-  stroke-width: 2;
-  stroke-linecap: round;
-}
-
-.body {
-  stroke-width: 1.5;
-}
-
-.title {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
-}
-
-.title h3 {
-  margin: 0;
-  font-family: var(--font-display), sans-serif;
-  font-size: clamp(1.5rem, 2vw, 2rem);
-  line-height: 0.95;
-  text-transform: uppercase;
-}
-
-.stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.stat {
-  display: grid;
-  gap: 6px;
-  padding: 12px;
-  border-radius: 14px;
-  background: rgba(0, 0, 0, 0.18);
-}
-
-.label {
-  color: var(--muted);
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-family: var(--font-mono), monospace;
-}
-
-.ladder {
-  display: grid;
-  gap: 8px;
-}
-
-.row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.row:last-child {
-  border-bottom: none;
-}
-
-.meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.events {
-  display: grid;
-  gap: 10px;
-}
-
-.event {
-  padding: 14px;
-  border-radius: 16px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.eventHead {
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-@media (max-width: 940px) {
-  .grid,
-  .stats {
+  .header,
+  .marketStrip,
+  .resultRow,
+  .activityRow,
+  .ruleCard {
     grid-template-columns: 1fr;
   }
 
-  .candleChart {
-    height: 120px;
+  .chartFrame {
+    min-height: 320px;
+    padding-bottom: 46px;
+  }
+
+  .chart {
+    height: 280px;
+  }
+
+  .timeAxis {
+    right: 0;
   }
 }

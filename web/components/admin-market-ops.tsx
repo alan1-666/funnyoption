@@ -4,7 +4,7 @@ import { startTransition, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { Market } from "@/lib/types";
-import { formatTimestamp, formatToken } from "@/lib/format";
+import { formatAssetAmount, formatTimestamp } from "@/lib/format";
 import styles from "@/components/admin-market-ops.module.css";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8080";
@@ -87,7 +87,7 @@ export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
                     <span>Close {formatTimestamp(market.close_at)}</span>
                     <span>Resolve {formatTimestamp(market.resolve_at)}</span>
                     <span>{market.runtime.trade_count} trades</span>
-                    <span>{formatToken(market.runtime.matched_notional / 100, 0)} USDT matched</span>
+                    <span>{formatAssetAmount(market.runtime.matched_notional, "USDT")} USDT matched</span>
                   </div>
                 </div>
 

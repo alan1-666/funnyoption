@@ -10,6 +10,7 @@ import (
 	"time"
 
 	chainmodel "funnyoption/internal/chain/model"
+	"funnyoption/internal/shared/assets"
 	"funnyoption/internal/shared/config"
 
 	"github.com/ethereum/go-ethereum"
@@ -172,6 +173,13 @@ func (l *DepositListener) handleDepositLog(ctx context.Context, logEntry types.L
 	if !amount.IsInt64() {
 		return fmt.Errorf("deposit amount exceeds int64")
 	}
+	accountingAmount, err := assets.ChainToAccountingAmount(amount.Int64(), l.cfg.CollateralDecimals, l.cfg.CollateralDisplayDigits)
+	if err != nil {
+		return err
+	}
+	if accountingAmount <= 0 {
+		return fmt.Errorf("deposit amount resolves to non-positive accounting amount")
+	}
 
 	walletAddress := strings.ToLower(common.BytesToAddress(logEntry.Topics[1].Bytes()).Hex())
 	userID, err := l.store.LookupActiveUserByWallet(ctx, walletAddress)
@@ -188,8 +196,8 @@ func (l *DepositListener) handleDepositLog(ctx context.Context, logEntry types.L
 		UserID:        userID,
 		WalletAddress: walletAddress,
 		VaultAddress:  strings.ToLower(l.vaultAddress.Hex()),
-		Asset:         "USDT",
-		Amount:        amount.Int64(),
+		Asset:         assets.NormalizeAsset(l.cfg.CollateralSymbol),
+		Amount:        accountingAmount,
 		ChainName:     l.cfg.ChainName,
 		NetworkName:   l.cfg.NetworkName,
 		TxHash:        normalizeChainTxHash(logEntry.TxHash.Hex()),
@@ -217,6 +225,13 @@ func (l *DepositListener) handleWithdrawalLog(ctx context.Context, logEntry type
 	if !amount.IsInt64() {
 		return fmt.Errorf("withdrawal amount exceeds int64")
 	}
+	accountingAmount, err := assets.ChainToAccountingAmount(amount.Int64(), l.cfg.CollateralDecimals, l.cfg.CollateralDisplayDigits)
+	if err != nil {
+		return err
+	}
+	if accountingAmount <= 0 {
+		return fmt.Errorf("withdrawal amount resolves to non-positive accounting amount")
+	}
 	recipientAddress := strings.ToLower(common.BytesToAddress(logEntry.Data[32:64]).Hex())
 
 	userID, err := l.store.LookupActiveUserByWallet(ctx, walletAddress)
@@ -234,8 +249,8 @@ func (l *DepositListener) handleWithdrawalLog(ctx context.Context, logEntry type
 		WalletAddress:    walletAddress,
 		RecipientAddress: recipientAddress,
 		VaultAddress:     strings.ToLower(l.vaultAddress.Hex()),
-		Asset:            "USDT",
-		Amount:           amount.Int64(),
+		Asset:            assets.NormalizeAsset(l.cfg.CollateralSymbol),
+		Amount:           accountingAmount,
 		ChainName:        l.cfg.ChainName,
 		NetworkName:      l.cfg.NetworkName,
 		TxHash:           normalizeChainTxHash(logEntry.TxHash.Hex()),

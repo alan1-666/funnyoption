@@ -11,7 +11,7 @@ func TestMergeMarketMetadataResolvedMarket(t *testing.T) {
 	t.Parallel()
 
 	raw := json.RawMessage(`{"category":"macro","yesOdds":0.57,"noOdds":0.43}`)
-	merged := mergeMarketMetadata(raw, "RESOLVED", "YES", dto.MarketRuntime{
+	merged := mergeMarketMetadata(raw, nil, "RESOLVED", "YES", dto.MarketRuntime{
 		MatchedQuantity: 12,
 		MatchedNotional: 732,
 		TradeCount:      2,
@@ -37,7 +37,7 @@ func TestMergeMarketMetadataResolvedMarket(t *testing.T) {
 func TestMergeMarketMetadataUsesLastTradePrice(t *testing.T) {
 	t.Parallel()
 
-	merged := mergeMarketMetadata(nil, "OPEN", "", dto.MarketRuntime{
+	merged := mergeMarketMetadata(nil, nil, "OPEN", "", dto.MarketRuntime{
 		LastPriceYes:    61,
 		MatchedQuantity: 10,
 		MatchedNotional: 610,
@@ -60,7 +60,7 @@ func TestMergeMarketMetadataPreservesExistingCategory(t *testing.T) {
 	t.Parallel()
 
 	raw := json.RawMessage(`{"category":"flow"}`)
-	merged := mergeMarketMetadata(raw, "OPEN", "", dto.MarketRuntime{})
+	merged := mergeMarketMetadata(raw, nil, "OPEN", "", dto.MarketRuntime{})
 
 	var payload map[string]any
 	if err := json.Unmarshal(merged, &payload); err != nil {
@@ -69,5 +69,27 @@ func TestMergeMarketMetadataPreservesExistingCategory(t *testing.T) {
 
 	if got := payload["category"]; got != "flow" {
 		t.Fatalf("category = %v, want flow", got)
+	}
+}
+
+func TestMergeMarketMetadataAppliesCanonicalCategory(t *testing.T) {
+	t.Parallel()
+
+	merged := mergeMarketMetadata(nil, &dto.MarketCategory{
+		CategoryID:  1,
+		CategoryKey: "SPORTS",
+		DisplayName: "体育",
+	}, "OPEN", "", dto.MarketRuntime{})
+
+	var payload map[string]any
+	if err := json.Unmarshal(merged, &payload); err != nil {
+		t.Fatalf("unmarshal merged metadata: %v", err)
+	}
+
+	if got := payload["category"]; got != "体育" {
+		t.Fatalf("category = %v, want 体育", got)
+	}
+	if got := payload["categoryKey"]; got != "SPORTS" {
+		t.Fatalf("categoryKey = %v, want SPORTS", got)
 	}
 }

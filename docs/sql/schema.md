@@ -12,9 +12,13 @@
 
 `/Users/zhangza/code/funnyoption/migrations/006_chain_withdrawals.sql` adds on-chain withdrawal queue mirrors.
 
+`/Users/zhangza/code/funnyoption/migrations/007_market_taxonomy_and_options.sql` adds formal market categories plus per-market option-set JSON storage.
+
 ## Trading domain
 
 - `markets`: market master data and lifecycle state
+- `market_categories`: canonical market taxonomy such as `加密 / 体育`
+- `market_option_sets`: one JSON option schema per market
 - `market_resolutions`: one row per market resolution workflow
 - `orders`: accepted orders and final order state
 - `trades`: immutable fills emitted by matching

@@ -1,0 +1,363 @@
+{
+  "info": {
+    "_postman_id": "4e4e91f7-bf08-4b86-98cb-funnyoption-api",
+    "name": "FunnyOption API",
+    "description": "Core API + dedicated admin service Postman collection for the current FunnyOption repo state. Replace signature/session variables before sending authenticated requests.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "api_base_url", "value": "http://127.0.0.1:8080" },
+    { "key": "admin_base_url", "value": "http://127.0.0.1:3001" },
+    { "key": "market_id", "value": "1775106639302" },
+    { "key": "user_id", "value": "1001" },
+    { "key": "bootstrap_user_id", "value": "1002" },
+    { "key": "event_id", "value": "evt_replace_me" },
+    { "key": "entry_id", "value": "entry_replace_me" },
+    { "key": "wallet_address", "value": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" },
+    { "key": "recipient_address", "value": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" },
+    { "key": "chain_id", "value": "97" },
+    { "key": "session_id", "value": "sess_replace_me" },
+    { "key": "session_public_key", "value": "0xsession_public_key_replace_me" },
+    { "key": "session_nonce", "value": "sess_nonce_001" },
+    { "key": "wallet_signature", "value": "0xwallet_signature_replace_me" },
+    { "key": "session_signature", "value": "0xsession_signature_replace_me" },
+    { "key": "order_nonce", "value": "1" },
+    { "key": "session_issued_at", "value": "1775113700000" },
+    { "key": "session_expires_at", "value": "1775117300000" },
+    { "key": "order_requested_at", "value": "1775113769163" },
+    { "key": "client_order_id", "value": "cli_001" },
+    { "key": "trace_id", "value": "trace_001" },
+    { "key": "operator_wallet_address", "value": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" },
+    { "key": "operator_requested_at", "value": "1775113769163" },
+    { "key": "operator_signature", "value": "0xoperator_signature_replace_me" },
+    { "key": "polymarket_input", "value": "https://polymarket.com/event/example-market-slug" }
+  ],
+  "item": [
+    {
+      "name": "Core API / Meta",
+      "item": [
+        {
+          "name": "Healthz",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/healthz"
+          }
+        },
+        {
+          "name": "Ping",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/v1/ping"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Core API / Public Reads",
+      "item": [
+        {
+          "name": "List Markets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/v1/markets?limit=20"
+          }
+        },
+        {
+          "name": "Get Market",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/v1/markets/{{market_id}}"
+          }
+        },
+        {
+          "name": "List Orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/v1/orders?market_id={{market_id}}&limit=20"
+          }
+        },
+        {
+          "name": "List Trades",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/v1/trades?market_id={{market_id}}&limit=20"
+          }
+        },
+        {
+          "name": "List Balances",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/v1/balances?user_id={{user_id}}&limit=20"
+          }
+        },
+        {
+          "name": "List Positions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/v1/positions?user_id={{user_id}}&market_id={{market_id}}&limit=20"
+          }
+        },
+        {
+          "name": "List Payouts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/v1/payouts?user_id={{user_id}}&market_id={{market_id}}&limit=20"
+          }
+        },
+        {
+          "name": "List Freezes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/v1/freezes?user_id={{user_id}}&limit=20"
+          }
+        },
+        {
+          "name": "List Ledger Entries",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/v1/ledger/entries?limit=20"
+          }
+        },
+        {
+          "name": "List Ledger Postings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/v1/ledger/entries/{{entry_id}}/postings"
+          }
+        },
+        {
+          "name": "Liability Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/v1/reports/liabilities"
+          }
+        },
+        {
+          "name": "List Deposits",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/v1/deposits?user_id={{user_id}}&limit=20"
+          }
+        },
+        {
+          "name": "List Withdrawals",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/v1/withdrawals?user_id={{user_id}}&limit=20"
+          }
+        },
+        {
+          "name": "List Chain Transactions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/v1/chain-transactions?limit=20"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Core API / Sessions",
+      "item": [
+        {
+          "name": "List Sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/v1/sessions?user_id={{user_id}}&limit=20"
+          }
+        },
+        {
+          "name": "Create Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{user_id}},\n  \"wallet_address\": \"{{wallet_address}}\",\n  \"session_public_key\": \"{{session_public_key}}\",\n  \"scope\": \"TRADE\",\n  \"chain_id\": {{chain_id}},\n  \"nonce\": \"{{session_nonce}}\",\n  \"issued_at\": {{session_issued_at}},\n  \"expires_at\": {{session_expires_at}},\n  \"wallet_signature\": \"{{wallet_signature}}\"\n}"
+            },
+            "url": "{{api_base_url}}/api/v1/sessions",
+            "description": "You must generate `wallet_signature` from the FunnyOption session grant message before sending."
+          }
+        },
+        {
+          "name": "Revoke Session",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{api_base_url}}/api/v1/sessions/{{session_id}}/revoke"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Core API / Trade + Claim Writes",
+      "item": [
+        {
+          "name": "Create Order (Session)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client_order_id\": \"{{client_order_id}}\",\n  \"trace_id\": \"{{trace_id}}\",\n  \"session_id\": \"{{session_id}}\",\n  \"session_signature\": \"{{session_signature}}\",\n  \"order_nonce\": {{order_nonce}},\n  \"requested_at\": {{order_requested_at}},\n  \"market_id\": {{market_id}},\n  \"outcome\": \"yes\",\n  \"side\": \"buy\",\n  \"type\": \"limit\",\n  \"time_in_force\": \"gtc\",\n  \"price\": 58,\n  \"quantity\": 40\n}"
+            },
+            "url": "{{api_base_url}}/api/v1/orders",
+            "description": "Standard end-user trade write. Requires a valid session-backed order signature."
+          }
+        },
+        {
+          "name": "Create Order (Operator Bootstrap)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{bootstrap_user_id}},\n  \"requested_at\": {{operator_requested_at}},\n  \"market_id\": {{market_id}},\n  \"outcome\": \"yes\",\n  \"side\": \"sell\",\n  \"type\": \"limit\",\n  \"time_in_force\": \"gtc\",\n  \"price\": 58,\n  \"quantity\": 40,\n  \"operator\": {\n    \"wallet_address\": \"{{operator_wallet_address}}\",\n    \"requested_at\": {{operator_requested_at}},\n    \"signature\": \"{{operator_signature}}\"\n  }\n}"
+            },
+            "url": "{{api_base_url}}/api/v1/orders",
+            "description": "Privileged bootstrap-only order lane. Signature must match the `ISSUE_FIRST_LIQUIDITY` operator message."
+          }
+        },
+        {
+          "name": "Create Claim Payout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{user_id}},\n  \"wallet_address\": \"{{wallet_address}}\",\n  \"recipient_address\": \"{{recipient_address}}\"\n}"
+            },
+            "url": "{{api_base_url}}/api/v1/payouts/{{event_id}}/claim"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Core API / Privileged Writes",
+      "item": [
+        {
+          "name": "Create Market",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Will BTC close above 100k this week?\",\n  \"description\": \"Resolve YES if BTC weekly close is above 100,000.\",\n  \"collateral_asset\": \"USDT\",\n  \"status\": \"OPEN\",\n  \"open_at\": 1775200000,\n  \"close_at\": 1775800000,\n  \"resolve_at\": 1775886400,\n  \"created_by\": {{user_id}},\n  \"cover_image_url\": \"https://example.com/cover.png\",\n  \"cover_source_url\": \"https://polymarket.com/event/example\",\n  \"cover_source_name\": \"Polymarket\",\n  \"metadata\": {\n    \"category\": \"Crypto\",\n    \"sourceKind\": \"manual\",\n    \"yesOdds\": 0.5,\n    \"noOdds\": 0.5\n  },\n  \"operator\": {\n    \"wallet_address\": \"{{operator_wallet_address}}\",\n    \"requested_at\": {{operator_requested_at}},\n    \"signature\": \"{{operator_signature}}\"\n  }\n}"
+            },
+            "url": "{{api_base_url}}/api/v1/markets",
+            "description": "Privileged shared API endpoint. Requires operator proof."
+          }
+        },
+        {
+          "name": "Resolve Market",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"outcome\": \"YES\",\n  \"operator\": {\n    \"wallet_address\": \"{{operator_wallet_address}}\",\n    \"requested_at\": {{operator_requested_at}},\n    \"signature\": \"{{operator_signature}}\"\n  }\n}"
+            },
+            "url": "{{api_base_url}}/api/v1/markets/{{market_id}}/resolve"
+          }
+        },
+        {
+          "name": "Issue First Liquidity",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{bootstrap_user_id}},\n  \"quantity\": 40,\n  \"outcome\": \"YES\",\n  \"price\": 58,\n  \"operator\": {\n    \"wallet_address\": \"{{operator_wallet_address}}\",\n    \"requested_at\": {{operator_requested_at}},\n    \"signature\": \"{{operator_signature}}\"\n  }\n}"
+            },
+            "url": "{{api_base_url}}/api/v1/admin/markets/{{market_id}}/first-liquidity"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin Service / Operator API",
+      "item": [
+        {
+          "name": "Create Market via Admin Service",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"market\": {\n    \"title\": \"Will ETH close above 6000 this week?\",\n    \"description\": \"Resolve YES if ETH weekly close is above 6000.\",\n    \"category\": \"Crypto\",\n    \"coverImage\": \"https://example.com/eth.png\",\n    \"sourceUrl\": \"https://polymarket.com/event/example\",\n    \"sourceSlug\": \"example-market-slug\",\n    \"sourceName\": \"Polymarket\",\n    \"sourceKind\": \"manual\",\n    \"status\": \"OPEN\",\n    \"collateralAsset\": \"USDT\",\n    \"openAt\": 1775200000,\n    \"closeAt\": 1775800000,\n    \"resolveAt\": 1775886400\n  },\n  \"operator\": {\n    \"walletAddress\": \"{{operator_wallet_address}}\",\n    \"requestedAt\": {{operator_requested_at}},\n    \"signature\": \"{{operator_signature}}\"\n  }\n}"
+            },
+            "url": "{{admin_base_url}}/api/operator/markets"
+          }
+        },
+        {
+          "name": "Resolve Market via Admin Service",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"market\": {\n    \"marketId\": {{market_id}},\n    \"outcome\": \"YES\"\n  },\n  \"operator\": {\n    \"walletAddress\": \"{{operator_wallet_address}}\",\n    \"requestedAt\": {{operator_requested_at}},\n    \"signature\": \"{{operator_signature}}\"\n  }\n}"
+            },
+            "url": "{{admin_base_url}}/api/operator/markets/{{market_id}}/resolve"
+          }
+        },
+        {
+          "name": "Bootstrap First Liquidity via Admin Service",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bootstrap\": {\n    \"marketId\": {{market_id}},\n    \"userId\": {{bootstrap_user_id}},\n    \"quantity\": 40,\n    \"outcome\": \"YES\",\n    \"price\": 58\n  },\n  \"operator\": {\n    \"walletAddress\": \"{{operator_wallet_address}}\",\n    \"requestedAt\": {{operator_requested_at}},\n    \"signature\": \"{{operator_signature}}\"\n  }\n}"
+            },
+            "url": "{{admin_base_url}}/api/operator/markets/{{market_id}}/first-liquidity"
+          }
+        },
+        {
+          "name": "Import Polymarket Metadata",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{admin_base_url}}/api/polymarket?input={{polymarket_input}}"
+          }
+        }
+      ]
+    }
+  ]
+}

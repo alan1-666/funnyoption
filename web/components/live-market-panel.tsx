@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { createWsUrl } from "@/lib/ws";
-import { formatTimestamp, formatToken } from "@/lib/format";
+import { formatAssetAmount, formatTimestamp, formatToken } from "@/lib/format";
+import { presentMarketDescription } from "@/lib/market-display";
+import { zhMarketStatus, zhOutcome, zhSide } from "@/lib/locale";
 import type { Market, Trade } from "@/lib/types";
 import styles from "@/components/live-market-panel.module.css";
 
@@ -60,6 +62,7 @@ interface MarketEnvelope {
     winning_outcome?: string;
     occurred_at_millis?: number;
     payout_amount?: number;
+    payout_asset?: string;
     user_id?: number;
   };
 }
@@ -69,6 +72,22 @@ interface SideState {
   depth: QuoteDepthEvent | null;
   candles: QuoteCandle[];
 }
+
+type DetailTab = "results" | "activity" | "rules";
+type RangeKey = "1H" | "6H" | "1D" | "ALL";
+
+const RANGE_OPTIONS: Array<{ key: RangeKey; label: string }> = [
+  { key: "1H", label: "1H" },
+  { key: "6H", label: "6H" },
+  { key: "1D", label: "1D" },
+  { key: "ALL", label: "ALL" }
+];
+
+const RANGE_WINDOW: Record<Exclude<RangeKey, "ALL">, number> = {
+  "1H": 60 * 60 * 1000,
+  "6H": 6 * 60 * 60 * 1000,
+  "1D": 24 * 60 * 60 * 1000
+};
 
 function initialTicker(market: Market, outcome: "YES" | "NO"): QuoteTickerEvent | null {
   let price = 0;
@@ -124,39 +143,123 @@ function buildCandlesFromTrades(marketId: number, outcome: "YES" | "NO", trades:
       trade_count: 1
     });
   }
-  return candles.slice(-18);
+  return candles.slice(-48);
 }
 
-function renderCandlePath(candles: QuoteCandle[]) {
-  if (candles.length === 0) {
+function readLivePrice(market: Market, side: SideState, outcome: "YES" | "NO") {
+  if (side.ticker?.last_price && side.ticker.last_price > 0) {
+    return side.ticker.last_price;
+  }
+  const metadata = market.metadata ?? {};
+  if (market.status === "RESOLVED") {
+    return market.resolved_outcome === outcome ? 100 : 0;
+  }
+  if (outcome === "YES") {
+    if (market.runtime.last_price_yes > 0) {
+      return market.runtime.last_price_yes;
+    }
+    if (typeof metadata.yesOdds === "number" && metadata.yesOdds > 0) {
+      return Math.round(metadata.yesOdds * 100);
+    }
+    return 50;
+  }
+  if (market.runtime.last_price_no > 0) {
+    return market.runtime.last_price_no;
+  }
+  if (typeof metadata.noOdds === "number" && metadata.noOdds > 0) {
+    return Math.round(metadata.noOdds * 100);
+  }
+  return 50;
+}
+
+function filterCandles(candles: QuoteCandle[], range: RangeKey) {
+  if (candles.length === 0 || range === "ALL") {
+    return candles;
+  }
+  const anchor = candles[candles.length - 1].bucket_end_millis;
+  const threshold = anchor - RANGE_WINDOW[range];
+  const filtered = candles.filter((candle) => candle.bucket_end_millis >= threshold);
+  return filtered.length > 1 ? filtered : candles;
+}
+
+function buildFallbackCandles(price: number, anchorSeconds: number): QuoteCandle[] {
+  const safePrice = Math.max(0, Math.min(100, price));
+  const anchorMillis = anchorSeconds > 0 ? anchorSeconds * 1000 : Date.now();
+  return Array.from({ length: 4 }, (_, index) => {
+    const bucketStart = anchorMillis - (3 - index) * 60 * 60 * 1000;
+    return {
+      bucket_start_millis: bucketStart,
+      bucket_end_millis: bucketStart + 60 * 60 * 1000,
+      open: safePrice,
+      high: safePrice,
+      low: safePrice,
+      close: safePrice,
+      volume: 0,
+      trade_count: 0
+    };
+  });
+}
+
+function createLinePoints(candles: QuoteCandle[], timestamps: number[], width: number, height: number, padding: { top: number; right: number; bottom: number; left: number }) {
+  if (timestamps.length === 0) {
+    return "";
+  }
+  const usableWidth = width - padding.left - padding.right;
+  const usableHeight = height - padding.top - padding.bottom;
+  const indexByTimestamp = new Map(candles.map((candle) => [candle.bucket_start_millis, candle.close]));
+  const firstValue = candles[0]?.close ?? 50;
+  let lastValue = firstValue;
+
+  return timestamps
+    .map((timestamp, index) => {
+      const value = indexByTimestamp.get(timestamp) ?? lastValue;
+      lastValue = value;
+      const x = padding.left + (timestamps.length === 1 ? 0 : (index / (timestamps.length - 1)) * usableWidth);
+      const y = padding.top + ((100 - value) / 100) * usableHeight;
+      return `${index === 0 ? "M" : "L"} ${x} ${y}`;
+    })
+    .join(" ");
+}
+
+function buildChartModel(yesCandles: QuoteCandle[], noCandles: QuoteCandle[]) {
+  const timestamps = Array.from(
+    new Set([...yesCandles.map((candle) => candle.bucket_start_millis), ...noCandles.map((candle) => candle.bucket_start_millis)])
+  ).sort((left, right) => left - right);
+
+  if (timestamps.length === 0) {
     return null;
   }
-  const allPrices = candles.flatMap((item) => [item.high, item.low]);
-  const minPrice = Math.min(...allPrices) - 2;
-  const maxPrice = Math.max(...allPrices) + 2;
-  const safeRange = Math.max(maxPrice - minPrice, 1);
-  const chartHeight = 124;
-  const chartWidth = 360;
-  const slotWidth = chartWidth / Math.max(candles.length, 1);
-  const bodyWidth = Math.max(slotWidth * 0.42, 5);
 
-  const priceToY = (price: number) => {
-    const ratio = (price - minPrice) / safeRange;
-    return chartHeight - ratio * (chartHeight - 8) - 4;
-  };
+  const width = 940;
+  const height = 360;
+  const padding = { top: 22, right: 56, bottom: 36, left: 0 };
+  const yesPath = createLinePoints(yesCandles, timestamps, width, height, padding);
+  const noPath = createLinePoints(noCandles, timestamps, width, height, padding);
+  const levels = [0, 25, 50, 75, 100];
+  const labelIndexes = Array.from(new Set([0, Math.floor((timestamps.length - 1) / 3), Math.floor(((timestamps.length - 1) * 2) / 3), timestamps.length - 1]));
+  const usableWidth = width - padding.left - padding.right;
+  const usableHeight = height - padding.top - padding.bottom;
 
   return {
-    minPrice,
-    maxPrice,
-    chartHeight,
-    chartWidth,
-    slotWidth,
-    bodyWidth,
-    priceToY
+    width,
+    height,
+    padding,
+    yesPath,
+    noPath,
+    levels: levels.map((level) => ({
+      label: `${level}%`,
+      y: padding.top + ((100 - level) / 100) * usableHeight
+    })),
+    timeLabels: labelIndexes.map((index) => ({
+      x: padding.left + (timestamps.length === 1 ? 0 : (index / (timestamps.length - 1)) * usableWidth),
+      label: new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date(timestamps[index]))
+    }))
   };
 }
 
 export function LiveMarketPanel({ market, trades }: { market: Market; trades: Trade[] }) {
+  const [activeTab, setActiveTab] = useState<DetailTab>("results");
+  const [activeRange, setActiveRange] = useState<RangeKey>("1D");
   const [sides, setSides] = useState<Record<"YES" | "NO", SideState>>(() => ({
     YES: {
       ticker: initialTicker(market, "YES"),
@@ -171,7 +274,7 @@ export function LiveMarketPanel({ market, trades }: { market: Market; trades: Tr
   }));
   const [events, setEvents] = useState<MarketEnvelope[]>([]);
   const [status, setStatus] = useState(
-    market.status === "RESOLVED" ? "Market resolved; waiting for terminal stream updates" : "Waiting for live quote stream"
+    market.status === "RESOLVED" ? "市场已结算，等待终态事件" : "等待实时行情"
   );
 
   const streams = useMemo(
@@ -190,40 +293,41 @@ export function LiveMarketPanel({ market, trades }: { market: Market; trades: Tr
     const sockets = streams.map((stream) => {
       const url = createWsUrl(`/ws?stream=${stream.type}&book_key=${stream.key}`);
       const socket = new WebSocket(url);
-      socket.onopen = () => setStatus("Streaming over WebSocket");
+      socket.onopen = () => setStatus("实时连接中");
       socket.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data) as QuoteDepthEvent | QuoteTickerEvent | QuoteCandleEvent;
           const outcome = String(payload.outcome).toUpperCase() as "YES" | "NO";
           setSides((current) => ({
             ...current,
-            [outcome]: stream.type === "ticker"
-              ? { ...current[outcome], ticker: payload as QuoteTickerEvent }
-              : stream.type === "depth"
-                ? { ...current[outcome], depth: payload as QuoteDepthEvent }
-                : { ...current[outcome], candles: (payload as QuoteCandleEvent).candles ?? current[outcome].candles }
+            [outcome]:
+              stream.type === "ticker"
+                ? { ...current[outcome], ticker: payload as QuoteTickerEvent }
+                : stream.type === "depth"
+                  ? { ...current[outcome], depth: payload as QuoteDepthEvent }
+                  : { ...current[outcome], candles: (payload as QuoteCandleEvent).candles ?? current[outcome].candles }
           }));
         } catch {
-          setStatus("Failed to decode quote stream");
+          setStatus("行情流解析失败");
         }
       };
-      socket.onerror = () => setStatus("Quote stream degraded");
-      socket.onclose = () => setStatus("Quote stream idle");
+      socket.onerror = () => setStatus("行情流异常");
+      socket.onclose = () => setStatus("行情流空闲");
       return socket;
     });
 
     const marketSocket = new WebSocket(createWsUrl(`/ws?stream=market&market_id=${market.market_id}`));
-    marketSocket.onopen = () => setStatus("Streaming over WebSocket");
+    marketSocket.onopen = () => setStatus("实时连接中");
     marketSocket.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data) as MarketEnvelope;
         setEvents((current) => [payload, ...current].slice(0, 8));
       } catch {
-        setStatus("Failed to decode market stream");
+        setStatus("市场事件解析失败");
       }
     };
-    marketSocket.onerror = () => setStatus("Market event stream degraded");
-    marketSocket.onclose = () => setStatus("Market event stream idle");
+    marketSocket.onerror = () => setStatus("市场事件流异常");
+    marketSocket.onclose = () => setStatus("市场事件流空闲");
 
     return () => {
       sockets.forEach((socket) => socket.close());
@@ -231,126 +335,189 @@ export function LiveMarketPanel({ market, trades }: { market: Market; trades: Tr
     };
   }, [market.market_id, streams]);
 
+  const yesPrice = readLivePrice(market, sides.YES, "YES");
+  const noPrice = readLivePrice(market, sides.NO, "NO");
+  const yesCandles = filterCandles(sides.YES.candles, activeRange);
+  const noCandles = filterCandles(sides.NO.candles, activeRange);
+  const renderedYesCandles = yesCandles.length > 0 ? yesCandles : buildFallbackCandles(yesPrice, market.updated_at);
+  const renderedNoCandles = noCandles.length > 0 ? noCandles : buildFallbackCandles(noPrice, market.updated_at);
+  const chartModel = buildChartModel(renderedYesCandles, renderedNoCandles);
+  const options = (market.options ?? [])
+    .filter((option) => option.is_active !== false)
+    .sort((left, right) => left.sort_order - right.sort_order || left.key.localeCompare(right.key));
+  const recentTrades = [...trades].sort((left, right) => right.occurred_at - left.occurred_at).slice(0, 6);
+
   return (
     <section className={`panel ${styles.panel}`}>
       <div className={styles.header}>
-        <div>
-          <span className="eyebrow">Live feeds</span>
-          <p className={styles.copy}>This panel only shows what the local `ws` service has actually produced. If there is no quote or depth yet, the surface stays empty on purpose.</p>
+        <div className={styles.headerIntro}>
+          <span className="eyebrow">市场走势</span>
+          <p className={styles.copy}>用一张大图表直接看 yes / no 的走势，下方再切结果、活动和规则，不再拆成很多说明块。</p>
         </div>
         <span className="pill">{status}</span>
       </div>
 
-      <div className={styles.grid}>
-        {(["YES", "NO"] as const).map((outcome) => {
-          const side = sides[outcome];
-          return (
-            <article key={outcome} className={styles.card}>
-              <div className={styles.title}>
-                <h3>{outcome} book</h3>
-                <span className="pill">{side.ticker?.book_key ?? `${market.market_id}:${outcome}`}</span>
-              </div>
-              <div className={styles.stats}>
-                <div className={styles.stat}>
-                  <span className={styles.label}>Last</span>
-                  <strong>{side.ticker ? `${side.ticker.last_price}¢` : "—"}</strong>
-                </div>
-                <div className={styles.stat}>
-                  <span className={styles.label}>Bid</span>
-                  <strong>{side.ticker?.best_bid ? `${side.ticker.best_bid}¢` : "—"}</strong>
-                </div>
-                <div className={styles.stat}>
-                  <span className={styles.label}>Ask</span>
-                  <strong>{side.ticker?.best_ask ? `${side.ticker.best_ask}¢` : "—"}</strong>
-                </div>
-              </div>
+      <section className={styles.chartCard}>
+        <div className={styles.marketStrip}>
+          <div className={styles.legend}>
+            <button className={`${styles.legendChip} ${styles.legendChipYes}`}>
+              <span>{zhOutcome("YES")}</span>
+              <strong>{yesPrice}%</strong>
+            </button>
+            <button className={styles.legendChip}>
+              <span>{zhOutcome("NO")}</span>
+              <strong>{noPrice}%</strong>
+            </button>
+          </div>
+          <div className={styles.marketMeta}>
+            <span>{formatAssetAmount(market.runtime.matched_notional, "USDT")} USDT</span>
+            <span>{market.runtime.trade_count} 笔成交</span>
+            <span>{zhMarketStatus(market.status)}</span>
+          </div>
+        </div>
 
-              <div className={styles.candleWrap}>
-                <div className={styles.candleHead}>
-                  <span className={styles.label}>1m candle tape</span>
-                  {side.candles.length > 0 ? (
-                    <span className={styles.candleMeta}>
-                      O {side.candles[side.candles.length - 1].open} · H {side.candles[side.candles.length - 1].high} · L {side.candles[side.candles.length - 1].low} · C {side.candles[side.candles.length - 1].close}
-                    </span>
-                  ) : (
-                    <span className={styles.candleMeta}>waiting for prints</span>
-                  )}
-                </div>
-                {(() => {
-                  const geometry = renderCandlePath(side.candles);
-                  if (!geometry) {
-                    return <div className={styles.candleEmpty}>No trades yet on this side.</div>;
-                  }
-                  return (
-                    <svg viewBox={`0 0 ${geometry.chartWidth} ${geometry.chartHeight}`} className={styles.candleChart} role="img" aria-label={`${outcome} candle chart`}>
-                      {side.candles.map((candle, index) => {
-                        const centerX = geometry.slotWidth * index + geometry.slotWidth / 2;
-                        const wickTop = geometry.priceToY(candle.high);
-                        const wickBottom = geometry.priceToY(candle.low);
-                        const openY = geometry.priceToY(candle.open);
-                        const closeY = geometry.priceToY(candle.close);
-                        const bodyY = Math.min(openY, closeY);
-                        const bodyHeight = Math.max(Math.abs(closeY - openY), 2);
-                        const rising = candle.close >= candle.open;
-                        const className = rising ? styles.candleUp : styles.candleDown;
+        <div className={styles.chartFrame}>
+          {chartModel ? (
+            <>
+              <svg viewBox={`0 0 ${chartModel.width} ${chartModel.height}`} className={styles.chart} role="img" aria-label="market chart">
+                {chartModel.levels.map((level) => (
+                  <g key={level.label}>
+                    <line
+                      x1={chartModel.padding.left}
+                      x2={chartModel.width - chartModel.padding.right}
+                      y1={level.y}
+                      y2={level.y}
+                      className={styles.gridLine}
+                    />
+                    <text x={chartModel.width - chartModel.padding.right + 12} y={level.y + 4} className={styles.axisLabel}>
+                      {level.label}
+                    </text>
+                  </g>
+                ))}
+                <path d={chartModel.yesPath} className={styles.pathYes} />
+                <path d={chartModel.noPath} className={styles.pathNo} />
+              </svg>
 
-                        return (
-                          <g key={`${outcome}-${candle.bucket_start_millis}`} className={className}>
-                            <line x1={centerX} x2={centerX} y1={wickTop} y2={wickBottom} className={styles.wick} />
-                            <rect
-                              x={centerX - geometry.bodyWidth / 2}
-                              y={bodyY}
-                              width={geometry.bodyWidth}
-                              height={bodyHeight}
-                              rx={2}
-                              className={styles.body}
-                            />
-                          </g>
-                        );
-                      })}
-                    </svg>
-                  );
-                })()}
+              <div className={styles.timeAxis}>
+                {chartModel.timeLabels.map((item) => (
+                  <span key={`${item.label}-${item.x}`} style={{ left: `${(item.x / chartModel.width) * 100}%` }}>
+                    {item.label}
+                  </span>
+                ))}
               </div>
+            </>
+          ) : (
+            <div className={styles.emptyState}>当前市场还没有足够的数据来绘制价格走势。</div>
+          )}
+        </div>
 
-              <div className={styles.ladder}>
-                {side.depth && [...side.depth.bids, ...side.depth.asks].length > 0 ? (
-                  [...side.depth.bids, ...side.depth.asks].slice(0, 6).map((level, index) => (
-                    <div key={`${outcome}-${level.price}-${index}`} className={styles.row}>
-                      <span>{level.price}¢</span>
-                      <strong>{formatToken(level.quantity, 0)}</strong>
+        <div className={styles.rangeBar}>
+          {RANGE_OPTIONS.map((range) => (
+            <button
+              key={range.key}
+              className={activeRange === range.key ? styles.rangeActive : styles.rangeButton}
+              onClick={() => setActiveRange(range.key)}
+            >
+              {range.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className={styles.detailPanel}>
+        <div className={styles.tabBar}>
+          <button className={activeTab === "results" ? styles.tabActive : styles.tabButton} onClick={() => setActiveTab("results")}>
+            结果
+          </button>
+          <button className={activeTab === "activity" ? styles.tabActive : styles.tabButton} onClick={() => setActiveTab("activity")}>
+            活动
+          </button>
+          <button className={activeTab === "rules" ? styles.tabActive : styles.tabButton} onClick={() => setActiveTab("rules")}>
+            规则
+          </button>
+        </div>
+
+        {activeTab === "results" ? (
+          <div className={styles.resultsList}>
+            {options.length > 0 ? (
+              options.map((option) => {
+                const optionKey = option.key.toUpperCase();
+                const livePrice = optionKey === "YES" ? yesPrice : optionKey === "NO" ? noPrice : null;
+                const isResolved = market.status === "RESOLVED" && market.resolved_outcome?.toUpperCase() === optionKey;
+                return (
+                  <div key={option.key} className={styles.resultRow}>
+                    <div>
+                      <strong>{option.label}</strong>
+                      <span>{isResolved ? "已命中结算结果" : "当前有效选项"}</span>
                     </div>
-                  ))
-                ) : (
-                  <div className={styles.candleEmpty}>No live depth snapshot yet for this side.</div>
-                )}
-              </div>
+                    <div className={styles.resultMeta}>
+                      <span>{livePrice !== null ? `${livePrice}%` : "待开放"}</span>
+                      <strong>{isResolved ? "Resolved" : "Live"}</strong>
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className={styles.emptyState}>这个市场还没有配置选项。</div>
+            )}
+          </div>
+        ) : null}
 
-              <div className={styles.meta}>
-                <span>updated {formatTimestamp(Math.floor((side.ticker?.occurred_at_millis ?? 0) / 1000))}</span>
-                <span>qty {formatToken(side.ticker?.last_quantity ?? 0, 0)}</span>
+        {activeTab === "activity" ? (
+          <div className={styles.activityList}>
+            {recentTrades.map((trade) => (
+              <div key={trade.trade_id} className={styles.activityRow}>
+                <div>
+                  <strong>{zhOutcome(trade.outcome)} · {zhSide(trade.taker_side)}</strong>
+                  <span>{formatTimestamp(trade.occurred_at)}</span>
+                </div>
+                <div className={styles.activityMeta}>
+                  <span>{trade.price}¢</span>
+                  <strong>{formatToken(trade.quantity, 0)} 份</strong>
+                </div>
               </div>
-            </article>
-          );
-        })}
-      </div>
+            ))}
+            {events.map((event, index) => (
+              <div key={`${event.type}-${index}`} className={styles.activityRow}>
+                <div>
+                  <strong>{event.type}</strong>
+                  <span>{event.payload.status ?? event.payload.winning_outcome ?? event.payload.resolved_outcome ?? "状态更新"}</span>
+                </div>
+                <div className={styles.activityMeta}>
+                  {event.payload.payout_amount ? (
+                    <span>{formatAssetAmount(event.payload.payout_amount, String(event.payload.payout_asset ?? "USDT"))}</span>
+                  ) : null}
+                  <strong>{formatTimestamp(Math.floor((event.payload.occurred_at_millis ?? 0) / 1000))}</strong>
+                </div>
+              </div>
+            ))}
+            {recentTrades.length === 0 && events.length === 0 ? (
+              <div className={styles.emptyState}>当前浏览器会话里还没有收到活动数据。</div>
+            ) : null}
+          </div>
+        ) : null}
 
-      <div className={styles.events}>
-        {events.length > 0 ? (
-          events.map((event, index) => (
-            <div key={`${event.type}-${index}`} className={styles.event}>
-              <div className={styles.eventHead}>{event.type}</div>
-              <div className={styles.meta}>
-                <span>{event.payload.status ?? event.payload.winning_outcome ?? event.payload.resolved_outcome ?? "state update"}</span>
-                {event.payload.payout_amount ? <span>payout {formatToken(event.payload.payout_amount, 0)}</span> : null}
-                <span>{formatTimestamp(Math.floor((event.payload.occurred_at_millis ?? 0) / 1000))}</span>
-              </div>
+        {activeTab === "rules" ? (
+          <div className={styles.rulesList}>
+            <div className={styles.ruleCard}>
+              <strong>开始交易</strong>
+              <span>{formatTimestamp(market.open_at)}</span>
             </div>
-          ))
-        ) : (
-          <div className={styles.candleEmpty}>No market-event messages have been observed for this market in the current browser session.</div>
-        )}
-      </div>
+            <div className={styles.ruleCard}>
+              <strong>停止交易</strong>
+              <span>{formatTimestamp(market.close_at)}</span>
+            </div>
+            <div className={styles.ruleCard}>
+              <strong>结算时间</strong>
+              <span>{formatTimestamp(market.resolve_at)}</span>
+            </div>
+            <div className={styles.ruleCard}>
+              <strong>说明</strong>
+              <span>{presentMarketDescription(market)}</span>
+            </div>
+          </div>
+        ) : null}
+      </section>
     </section>
   );
 }

@@ -1,0 +1,201 @@
+.wrap {
+  position: sticky;
+  top: 12px;
+  z-index: 48;
+  margin-bottom: 18px;
+}
+
+.bar {
+  display: grid;
+  grid-template-columns: auto minmax(360px, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  min-height: 78px;
+  padding: 14px 18px;
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(17, 17, 18, 0.92);
+  backdrop-filter: blur(18px);
+  box-shadow:
+    0 16px 36px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 28% 24%, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.1) 48%, transparent 60%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.04));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 12px 24px rgba(0, 0, 0, 0.24);
+}
+
+.brandMark {
+  color: #ffffff;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.05em;
+  text-transform: lowercase;
+}
+
+.searchBar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  min-height: 52px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.searchIcon {
+  color: rgba(255, 255, 255, 0.54);
+  font-size: 1.15rem;
+}
+
+.searchInput {
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #f7f7f8;
+  font-size: 1rem;
+  outline: none;
+}
+
+.searchInput::placeholder {
+  color: rgba(255, 255, 255, 0.36);
+}
+
+.searchHint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.84rem;
+}
+
+.actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.iconButton,
+.profileDock {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.82);
+  cursor: default;
+}
+
+.iconButton:disabled {
+  opacity: 1;
+}
+
+.iconSvg {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+.profileDock {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 0 12px 0 16px;
+  border-radius: 999px;
+  color: inherit;
+}
+
+.profileMeta {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
+.profileMeta strong {
+  color: #ffffff;
+  font-size: 1rem;
+  line-height: 1.1;
+  font-weight: 600;
+}
+
+.profileMeta span {
+  color: rgba(255, 255, 255, 0.46);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background:
+    linear-gradient(135deg, #ffd45c, #ff8d5a 38%, #ff6fb6 72%, #8f7cff);
+  color: rgba(17, 17, 18, 0.92);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+@media (max-width: 980px) {
+  .bar {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .actions {
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 640px) {
+  .bar {
+    padding: 12px;
+    border-radius: 22px;
+  }
+
+  .brand {
+    width: 48px;
+    height: 48px;
+  }
+
+  .searchBar {
+    min-height: 48px;
+  }
+
+  .actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

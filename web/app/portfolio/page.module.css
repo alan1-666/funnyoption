@@ -1,174 +1,19 @@
-.hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1.06fr) minmax(300px, 0.94fr);
-  gap: 18px;
+.shell {
+  width: min(1380px, calc(100% - 88px));
+  margin: 0 auto;
+  padding: 24px 0 64px;
 }
 
-.heroMain {
-  padding: 24px;
-}
-
-.title {
-  margin: 16px 0 0;
-  max-width: 11ch;
-  font-family: var(--font-display), sans-serif;
-  font-size: clamp(2.6rem, 6.8vw, 5.4rem);
-  line-height: 0.93;
-  text-transform: uppercase;
-}
-
-.copy {
-  margin: 16px 0 0;
-  max-width: 60ch;
-  color: var(--muted);
-  line-height: 1.7;
-}
-
-.heroRail {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.metric {
-  display: grid;
-  gap: 10px;
-  padding: 20px;
-}
-
-.label {
-  color: var(--muted);
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-family: var(--font-mono), monospace;
-}
-
-.metric strong {
-  font-family: var(--font-display), sans-serif;
-  font-size: clamp(2rem, 4vw, 3.6rem);
-  line-height: 0.9;
-}
-
-.grid,
-.lowerRow {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
-  margin-top: 20px;
-}
-
-.block {
-  padding: 20px;
-}
-
-.blockHeader {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-end;
-}
-
-.blockTitle {
-  margin: 14px 0 0;
-  font-family: var(--font-display), sans-serif;
-  font-size: clamp(1.8rem, 4vw, 3rem);
-  line-height: 0.95;
-  text-transform: uppercase;
-}
-
-.balanceList,
-.positionList,
-.depositList {
-  display: grid;
-  gap: 12px;
-  margin-top: 18px;
-}
-
-.balanceCard,
-.positionRow,
-.depositRow {
-  display: grid;
-  gap: 10px;
-  padding: 16px;
-  border-radius: 18px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.balanceValue {
-  font-family: var(--font-display), sans-serif;
-  font-size: clamp(2rem, 4vw, 3rem);
-  line-height: 0.92;
-}
-
-.balanceMeta,
-.positionMeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.positionRow,
-.depositRow {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: flex-start;
-}
-
-.positionTitle {
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.positionQty,
-.depositMeta {
-  display: grid;
-  justify-items: end;
-  gap: 4px;
-}
-
-.positionQty span,
-.depositMeta span {
-  color: var(--muted);
-  font-size: 13px;
-}
-
-@media (max-width: 1240px) {
-  .hero {
-    grid-template-columns: 1fr;
+@media (max-width: 1180px) {
+  .shell {
+    width: min(100% - 34px, 1380px);
+    padding-top: 20px;
   }
 }
 
-@media (max-width: 1024px) {
-  .hero,
-  .grid,
-  .lowerRow {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 860px) {
-  .heroRail {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 720px) {
-
-  .block,
-  .heroMain {
-    padding: 20px;
-  }
-
-  .positionRow,
-  .depositRow {
-    grid-template-columns: 1fr;
-  }
-
-  .positionQty,
-  .depositMeta {
-    justify-items: start;
+@media (max-width: 760px) {
+  .shell {
+    width: min(100% - 20px, 1380px);
+    padding: 16px 0 52px;
   }
 }

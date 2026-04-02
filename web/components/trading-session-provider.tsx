@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, startTransition, useContext, useEffect, useState } from "react";
+import { getChainMeta } from "@/lib/chain";
 
 import {
   authorizeSession,
@@ -39,24 +40,39 @@ interface TradingSessionContextValue {
 }
 
 const TradingSessionContext = createContext<TradingSessionContextValue | null>(null);
+const TARGET_CHAIN = getChainMeta();
 
 function formatError(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown wallet error";
+  if (!(error instanceof Error)) {
+    return "钱包操作失败";
+  }
+
+  if (/metamask or an eip-1193 wallet is required/i.test(error.message) || /metamask or a compatible wallet is required/i.test(error.message)) {
+    return "需要 MetaMask 或兼容的钱包扩展";
+  }
+
+  return error.message;
 }
 
 export function TradingSessionProvider({ children }: { children: React.ReactNode }) {
   const [wallet, setWallet] = useState<WalletConnection | null>(null);
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [busy, setBusy] = useState<"connect" | "session" | null>(null);
-  const [statusMessage, setStatusMessage] = useState("Wallet idle");
+  const [statusMessage, setStatusMessage] = useState("钱包待命");
 
   useEffect(() => {
     const stored = loadStoredSession();
-    if (stored) {
-      setSession(stored);
-      setWallet({ walletAddress: stored.walletAddress, chainId: stored.chainId });
-      setStatusMessage("Session restored");
+    if (!stored) {
+      return;
     }
+    if (stored.chainId !== TARGET_CHAIN.chainId) {
+      clearStoredSession();
+      setStatusMessage(`本地会话来自链 ${stored.chainId}，请切换到 ${TARGET_CHAIN.chainName}（${TARGET_CHAIN.chainId}）。`);
+      return;
+    }
+    setSession(stored);
+    setWallet({ walletAddress: stored.walletAddress, chainId: stored.chainId });
+    setStatusMessage("已恢复本地会话");
   }, []);
 
   useEffect(() => {
@@ -71,7 +87,7 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
           setWallet(null);
           setSession(null);
           clearStoredSession();
-          setStatusMessage("Wallet disconnected");
+          setStatusMessage("钱包已断开");
           return;
         }
 
@@ -79,7 +95,7 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
         if (session && session.walletAddress !== walletAddress) {
           setSession(null);
           clearStoredSession();
-          setStatusMessage("Wallet switched, local session cleared");
+          setStatusMessage("钱包已切换，已清空旧会话");
         }
       });
     };
@@ -89,7 +105,7 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
       const chainId = Number.parseInt(chainIdHex, 16);
       startTransition(() => {
         setWallet((current) => (current ? { ...current, chainId } : current));
-        setStatusMessage(`Chain changed to ${chainId}`);
+        setStatusMessage(`已切换到链 ${chainId}`);
       });
     };
 
@@ -103,18 +119,18 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
   }, [session]);
 
   async function handleConnect() {
-    if (wallet) {
-      setStatusMessage(`Wallet ready on chain ${wallet.chainId}`);
+    if (wallet && wallet.chainId === TARGET_CHAIN.chainId) {
+      setStatusMessage(`钱包已连接到 ${TARGET_CHAIN.chainName}（${wallet.chainId}）`);
       return wallet;
     }
 
     setBusy("connect");
-    setStatusMessage("Connecting wallet...");
+    setStatusMessage("连接钱包中...");
     try {
       const connection = await connectWallet();
       startTransition(() => {
         setWallet(connection);
-        setStatusMessage(`Wallet linked on chain ${connection.chainId}`);
+        setStatusMessage(`钱包已连接到 ${TARGET_CHAIN.chainName}（${connection.chainId}）`);
       });
       return connection;
     } catch (error) {
@@ -128,13 +144,19 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
 
   async function handleCreateSession(activeWallet?: WalletConnection | null) {
     setBusy("session");
-    setStatusMessage("Authorizing session key...");
+    setStatusMessage("正在授权交易会话...");
     try {
-      const created = await authorizeSession(activeWallet ?? wallet ?? undefined);
+      const readyWallet =
+        activeWallet && activeWallet.chainId === TARGET_CHAIN.chainId
+          ? activeWallet
+          : wallet && wallet.chainId === TARGET_CHAIN.chainId
+            ? wallet
+            : await handleConnect();
+      const created = await authorizeSession(readyWallet ?? undefined);
       startTransition(() => {
         setSession(created);
         setWallet({ walletAddress: created.walletAddress, chainId: created.chainId });
-        setStatusMessage("Trading is enabled");
+        setStatusMessage("交易已开启");
       });
       return created;
     } catch (error) {
@@ -148,7 +170,7 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
 
   async function handlePrepareTrading() {
     if (session) {
-      setStatusMessage("Trading is already enabled");
+      setStatusMessage("交易已开启");
       return session;
     }
 
@@ -173,21 +195,21 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
     const sessionRecord = activeSession ?? session;
     if (!sessionRecord) return null;
     const payload = await signOrderWithSession(sessionRecord, order);
-    startTransition(() => setStatusMessage(`Signed order #${payload.orderNonce}`));
+    startTransition(() => setStatusMessage(`订单签名已完成，序号 ${payload.orderNonce}`));
     return payload;
   }
 
   function handleCommitOrderNonce(nonce: number) {
     startTransition(() => {
       setSession((current) => (current ? bumpSessionOrderNonce(current, nonce) : current));
-      setStatusMessage(`Queued order #${nonce}`);
+      setStatusMessage(`订单已入队，序号 ${nonce}`);
     });
   }
 
   function handleClear() {
     clearStoredSession();
     setSession(null);
-    setStatusMessage("Session cleared");
+    setStatusMessage("本地会话已清空");
   }
 
   async function handleRevokeCurrentSession() {
@@ -197,7 +219,7 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
     }
     await revokeRemoteSession(session.sessionId);
     handleClear();
-    setStatusMessage("Session revoked");
+    setStatusMessage("会话已撤销");
   }
 
   return (

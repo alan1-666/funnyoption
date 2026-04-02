@@ -40,6 +40,22 @@ export interface MarketMetadata {
   [key: string]: unknown;
 }
 
+export interface MarketCategory {
+  category_id: number;
+  category_key: string;
+  display_name: string;
+  description?: string;
+  sort_order?: number;
+}
+
+export interface MarketOption {
+  key: string;
+  label: string;
+  short_label?: string;
+  sort_order: number;
+  is_active: boolean;
+}
+
 export interface MarketRuntime {
   trade_count: number;
   matched_quantity: number;
@@ -60,12 +76,14 @@ export interface Market {
   title: string;
   description: string;
   collateral_asset: string;
+  category?: MarketCategory | null;
   status: MarketStatus;
   open_at: number;
   close_at: number;
   resolve_at: number;
   resolved_outcome: string;
   created_by: number;
+  options?: MarketOption[];
   metadata?: MarketMetadata | null;
   runtime: MarketRuntime;
   created_at: number;
@@ -118,6 +136,15 @@ export interface Balance {
   asset: string;
   available: number;
   frozen: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface UserProfile {
+  user_id: number;
+  wallet_address: string;
+  display_name: string;
+  avatar_preset: string;
   created_at: number;
   updated_at: number;
 }

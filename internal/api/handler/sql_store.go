@@ -16,12 +16,17 @@ import (
 
 var ErrNotFound = errors.New("resource not found")
 var ErrSessionNonceConflict = errors.New("session nonce conflict")
+var ErrInvalidMarketCategory = errors.New("market category is invalid")
 
 type QueryStore interface {
 	CreateMarket(ctx context.Context, req dto.CreateMarketRequest) (dto.MarketResponse, error)
 	CreateSession(ctx context.Context, req dto.CreateSessionRequest) (dto.SessionResponse, error)
 	CreateClaimRequest(ctx context.Context, req dto.ClaimPayoutRequest) (dto.ChainTransactionResponse, error)
+	GetUserProfile(ctx context.Context, req dto.GetUserProfileRequest) (dto.UserProfileResponse, error)
+	UpsertUserProfile(ctx context.Context, req dto.UpdateUserProfileRequest, walletAddress string) (dto.UserProfileResponse, error)
+	GetOrder(ctx context.Context, orderID string) (dto.OrderResponse, error)
 	GetSession(ctx context.Context, sessionID string) (dto.SessionResponse, error)
+	GetLatestFreezeByRef(ctx context.Context, refType, refID string) (dto.FreezeResponse, error)
 	RevokeSession(ctx context.Context, sessionID string) (dto.SessionResponse, error)
 	AdvanceSessionNonce(ctx context.Context, sessionID string, nonce uint64) (dto.SessionResponse, error)
 	GetMarket(ctx context.Context, marketID int64) (dto.MarketResponse, error)
@@ -50,18 +55,36 @@ func NewSQLStore(db *sql.DB) *SQLStore {
 }
 
 func (s *SQLStore) CreateMarket(ctx context.Context, req dto.CreateMarketRequest) (dto.MarketResponse, error) {
-	row := s.db.QueryRowContext(ctx, `
+	categoryKey := dto.NormalizeMarketCategoryKey(req.CategoryKey, req.Metadata)
+	options, err := dto.NormalizeMarketOptions(req.Options)
+	if err != nil {
+		return dto.MarketResponse{}, dto.ErrInvalidMarketOptions
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return dto.MarketResponse{}, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	category, err := lookupMarketCategoryTx(ctx, tx, categoryKey)
+	if err != nil {
+		return dto.MarketResponse{}, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO markets (
-			market_id, title, description, collateral_asset, status,
+			market_id, title, description, category_id, collateral_asset, status,
 			open_at, close_at, resolve_at, resolved_outcome, created_by, metadata, created_at, updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '', $9, $10, EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT)
-		RETURNING market_id, title, description, collateral_asset, status, open_at, close_at, resolve_at,
-		          resolved_outcome, created_by, metadata, created_at, updated_at
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '', $10, $11, EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT)
 	`,
 		req.MarketID,
 		strings.TrimSpace(req.Title),
 		strings.TrimSpace(req.Description),
+		category.CategoryID,
 		normalizeAsset(req.CollateralAsset),
 		normalizeMarketStatus(req.Status),
 		req.OpenAt,
@@ -69,13 +92,39 @@ func (s *SQLStore) CreateMarket(ctx context.Context, req dto.CreateMarketRequest
 		req.ResolveAt,
 		req.CreatedBy,
 		metadataOrDefault(req.Metadata),
-	)
+	); err != nil {
+		return dto.MarketResponse{}, err
+	}
 
-	return scanMarket(row)
+	encodedOptions, err := json.Marshal(options)
+	if err != nil {
+		return dto.MarketResponse{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO market_option_sets (
+			market_id, option_schema, version, created_at, updated_at
+		)
+		VALUES ($1, $2, 1, EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT)
+	`, req.MarketID, encodedOptions); err != nil {
+		return dto.MarketResponse{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return dto.MarketResponse{}, err
+	}
+	return s.GetMarket(ctx, req.MarketID)
 }
 
 func (s *SQLStore) CreateSession(ctx context.Context, req dto.CreateSessionRequest) (dto.SessionResponse, error) {
-	row := s.db.QueryRowContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return dto.SessionResponse{}, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	row := tx.QueryRowContext(ctx, `
 		INSERT INTO wallet_sessions (
 			session_id, user_id, wallet_address, session_public_key, scope, chain_id,
 			session_nonce, last_order_nonce, status, issued_at, expires_at, revoked_at, created_at, updated_at
@@ -107,7 +156,66 @@ func (s *SQLStore) CreateSession(ctx context.Context, req dto.CreateSessionReque
 		req.IssuedAtMillis,
 		req.ExpiresAtMillis,
 	)
-	return scanSession(row)
+	session, err := scanSession(row)
+	if err != nil {
+		return dto.SessionResponse{}, err
+	}
+	if err := ensureUserProfileTx(ctx, tx, session.UserID, session.WalletAddress); err != nil {
+		return dto.SessionResponse{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return dto.SessionResponse{}, err
+	}
+	return session, nil
+}
+
+func (s *SQLStore) GetUserProfile(ctx context.Context, req dto.GetUserProfileRequest) (dto.UserProfileResponse, error) {
+	query := `
+		SELECT user_id, wallet_address, display_name, avatar_preset, created_at, updated_at
+		FROM user_profiles
+	`
+	var (
+		args    []any
+		filters []string
+	)
+
+	if req.UserID > 0 {
+		args = append(args, req.UserID)
+		filters = append(filters, fmt.Sprintf("user_id = $%d", len(args)))
+	}
+	if walletAddress := normalizeWalletAddress(req.WalletAddress); walletAddress != "" {
+		args = append(args, walletAddress)
+		filters = append(filters, fmt.Sprintf("wallet_address = $%d", len(args)))
+	}
+	if len(filters) == 0 {
+		return dto.UserProfileResponse{}, ErrNotFound
+	}
+
+	query += " WHERE " + strings.Join(filters, " AND ")
+	query += " ORDER BY updated_at DESC LIMIT 1"
+	row := s.db.QueryRowContext(ctx, query, args...)
+	return scanUserProfile(row)
+}
+
+func (s *SQLStore) UpsertUserProfile(ctx context.Context, req dto.UpdateUserProfileRequest, walletAddress string) (dto.UserProfileResponse, error) {
+	row := s.db.QueryRowContext(ctx, `
+		INSERT INTO user_profiles (
+			user_id, wallet_address, display_name, avatar_preset, created_at, updated_at
+		)
+		VALUES ($1, $2, $3, $4, EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT)
+		ON CONFLICT (user_id) DO UPDATE
+		SET wallet_address = EXCLUDED.wallet_address,
+			display_name = EXCLUDED.display_name,
+			avatar_preset = EXCLUDED.avatar_preset,
+			updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		RETURNING user_id, wallet_address, display_name, avatar_preset, created_at, updated_at
+	`,
+		req.UserID,
+		normalizeWalletAddress(walletAddress),
+		dto.NormalizeUserDisplayName(req.DisplayName),
+		req.AvatarPreset,
+	)
+	return scanUserProfile(row)
 }
 
 func (s *SQLStore) CreateClaimRequest(ctx context.Context, req dto.ClaimPayoutRequest) (dto.ChainTransactionResponse, error) {
@@ -157,6 +265,17 @@ func (s *SQLStore) CreateClaimRequest(ctx context.Context, req dto.ClaimPayoutRe
 		          status, payload, error_message, attempt_count, created_at, updated_at
 	`, strings.TrimSpace(req.EventID), normalizeWalletAddress(req.WalletAddress), payload)
 	return scanChainTransaction(row)
+}
+
+func (s *SQLStore) GetOrder(ctx context.Context, orderID string) (dto.OrderResponse, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT order_id, client_order_id, command_id, user_id, market_id, outcome, side, order_type,
+		       time_in_force, collateral_asset, freeze_id, freeze_asset, freeze_amount, price, quantity,
+		       filled_quantity, remaining_quantity, status, cancel_reason, created_at, updated_at
+		FROM orders
+		WHERE order_id = $1
+	`, strings.TrimSpace(orderID))
+	return scanOrder(row)
 }
 
 func (s *SQLStore) GetSession(ctx context.Context, sessionID string) (dto.SessionResponse, error) {
@@ -225,6 +344,17 @@ func (s *SQLStore) GetMarket(ctx context.Context, marketID int64) (dto.MarketRes
 	return items[0], nil
 }
 
+func (s *SQLStore) GetLatestFreezeByRef(ctx context.Context, refType, refID string) (dto.FreezeResponse, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT freeze_id, user_id, asset, ref_type, ref_id, original_amount, remaining_amount, status, created_at, updated_at
+		FROM freeze_records
+		WHERE ref_type = $1 AND ref_id = $2
+		ORDER BY created_at DESC, freeze_id DESC
+		LIMIT 1
+	`, strings.ToUpper(strings.TrimSpace(refType)), strings.TrimSpace(refID))
+	return scanFreeze(row)
+}
+
 func (s *SQLStore) ListMarkets(ctx context.Context, req dto.ListMarketsRequest) ([]dto.MarketResponse, error) {
 	var (
 		args    []any
@@ -243,6 +373,10 @@ func (s *SQLStore) ListMarkets(ctx context.Context, req dto.ListMarketsRequest) 
 	if req.CreatedBy > 0 {
 		args = append(args, req.CreatedBy)
 		filters = append(filters, fmt.Sprintf("created_by = $%d", len(args)))
+	}
+	if categoryKey := dto.NormalizeMarketCategoryFilter(req.CategoryKey); categoryKey != "" {
+		args = append(args, categoryKey)
+		filters = append(filters, fmt.Sprintf("category_id = (SELECT category_id FROM market_categories WHERE category_key = $%d)", len(args)))
 	}
 	if len(filters) > 0 {
 		query += " WHERE " + strings.Join(filters, " AND ")
@@ -970,7 +1104,32 @@ func scanOrder(row scanner) (dto.OrderResponse, error) {
 		&item.CreatedAt,
 		&item.UpdatedAt,
 	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return dto.OrderResponse{}, ErrNotFound
+		}
 		return dto.OrderResponse{}, err
+	}
+	return item, nil
+}
+
+func scanFreeze(row scanner) (dto.FreezeResponse, error) {
+	var item dto.FreezeResponse
+	if err := row.Scan(
+		&item.FreezeID,
+		&item.UserID,
+		&item.Asset,
+		&item.RefType,
+		&item.RefID,
+		&item.OriginalAmount,
+		&item.RemainingAmount,
+		&item.Status,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return dto.FreezeResponse{}, ErrNotFound
+		}
+		return dto.FreezeResponse{}, err
 	}
 	return item, nil
 }
@@ -1020,6 +1179,24 @@ func scanSession(row scanner) (dto.SessionResponse, error) {
 			return dto.SessionResponse{}, ErrNotFound
 		}
 		return dto.SessionResponse{}, err
+	}
+	return item, nil
+}
+
+func scanUserProfile(row scanner) (dto.UserProfileResponse, error) {
+	var item dto.UserProfileResponse
+	if err := row.Scan(
+		&item.UserID,
+		&item.WalletAddress,
+		&item.DisplayName,
+		&item.AvatarPreset,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return dto.UserProfileResponse{}, ErrNotFound
+		}
+		return dto.UserProfileResponse{}, err
 	}
 	return item, nil
 }
@@ -1107,6 +1284,14 @@ func (s *SQLStore) attachMarketRuntime(ctx context.Context, markets []dto.Market
 		return nil
 	}
 
+	categoriesByMarket, err := s.loadMarketCategories(ctx, marketIDs(markets))
+	if err != nil {
+		return err
+	}
+	optionsByMarket, err := s.loadMarketOptions(ctx, marketIDs(markets))
+	if err != nil {
+		return err
+	}
 	runtimeByMarket, err := s.loadMarketRuntime(ctx, marketIDs(markets))
 	if err != nil {
 		return err
@@ -1114,10 +1299,108 @@ func (s *SQLStore) attachMarketRuntime(ctx context.Context, markets []dto.Market
 
 	for index := range markets {
 		runtime := runtimeByMarket[markets[index].MarketID]
+		markets[index].Category = categoriesByMarket[markets[index].MarketID]
+		if options, ok := optionsByMarket[markets[index].MarketID]; ok {
+			markets[index].Options = options
+		} else {
+			markets[index].Options = dto.DefaultBinaryMarketOptions()
+		}
 		markets[index].Runtime = runtime
-		markets[index].Metadata = mergeMarketMetadata(markets[index].Metadata, markets[index].Status, markets[index].ResolvedOutcome, runtime)
+		markets[index].Metadata = mergeMarketMetadata(markets[index].Metadata, markets[index].Category, markets[index].Status, markets[index].ResolvedOutcome, runtime)
 	}
 	return nil
+}
+
+func (s *SQLStore) loadMarketCategories(ctx context.Context, marketIDs []int64) (map[int64]*dto.MarketCategory, error) {
+	items := make(map[int64]*dto.MarketCategory, len(marketIDs))
+	if len(marketIDs) == 0 {
+		return items, nil
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT m.market_id, c.category_id, c.category_key, c.display_name, c.description, c.sort_order, c.metadata
+		FROM markets m
+		LEFT JOIN market_categories c ON c.category_id = m.category_id
+		WHERE m.market_id = ANY($1)
+	`, pq.Array(marketIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			marketID    int64
+			item        dto.MarketCategory
+			metadata    []byte
+			categoryID  sql.NullInt64
+			categoryKey sql.NullString
+			displayName sql.NullString
+			description sql.NullString
+			sortOrder   sql.NullInt64
+		)
+		if err := rows.Scan(&marketID, &categoryID, &categoryKey, &displayName, &description, &sortOrder, &metadata); err != nil {
+			return nil, err
+		}
+		if !categoryID.Valid {
+			continue
+		}
+		item.CategoryID = categoryID.Int64
+		item.CategoryKey = categoryKey.String
+		item.DisplayName = displayName.String
+		item.Description = description.String
+		if sortOrder.Valid {
+			item.SortOrder = int(sortOrder.Int64)
+		}
+		item.Metadata = normalizeJSONRaw(metadata)
+		items[marketID] = &item
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *SQLStore) loadMarketOptions(ctx context.Context, marketIDs []int64) (map[int64][]dto.MarketOption, error) {
+	items := make(map[int64][]dto.MarketOption, len(marketIDs))
+	if len(marketIDs) == 0 {
+		return items, nil
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT market_id, option_schema
+		FROM market_option_sets
+		WHERE market_id = ANY($1)
+	`, pq.Array(marketIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			marketID int64
+			raw      []byte
+		)
+		if err := rows.Scan(&marketID, &raw); err != nil {
+			return nil, err
+		}
+		var options []dto.MarketOption
+		if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			options = dto.DefaultBinaryMarketOptions()
+		} else if err := json.Unmarshal(raw, &options); err != nil {
+			return nil, err
+		}
+		normalized, err := dto.NormalizeMarketOptions(options)
+		if err != nil {
+			return nil, err
+		}
+		items[marketID] = normalized
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 func (s *SQLStore) loadMarketRuntime(ctx context.Context, marketIDs []int64) (map[int64]dto.MarketRuntime, error) {
@@ -1306,13 +1589,19 @@ func marketIDs(markets []dto.MarketResponse) []int64 {
 	return ids
 }
 
-func mergeMarketMetadata(raw json.RawMessage, status, resolvedOutcome string, runtime dto.MarketRuntime) json.RawMessage {
+func mergeMarketMetadata(raw json.RawMessage, category *dto.MarketCategory, status, resolvedOutcome string, runtime dto.MarketRuntime) json.RawMessage {
 	metadata := make(map[string]any)
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null")) {
 		if err := json.Unmarshal(trimmed, &metadata); err != nil {
 			metadata = make(map[string]any)
 		}
+	}
+
+	if category != nil {
+		metadata["category"] = category.DisplayName
+		metadata["categoryKey"] = category.CategoryKey
+		metadata["category_key"] = category.CategoryKey
 	}
 
 	switch normalizeOptional(status) {
@@ -1359,6 +1648,22 @@ func normalizeLimit(limit int) int {
 		return 200
 	}
 	return limit
+}
+
+func ensureUserProfileTx(ctx context.Context, tx *sql.Tx, userID int64, walletAddress string) error {
+	if userID <= 0 || strings.TrimSpace(walletAddress) == "" {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO user_profiles (
+			user_id, wallet_address, display_name, avatar_preset, created_at, updated_at
+		)
+		VALUES ($1, $2, '', $3, EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT)
+		ON CONFLICT (user_id) DO UPDATE
+		SET wallet_address = EXCLUDED.wallet_address,
+			updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+	`, userID, normalizeWalletAddress(walletAddress), dto.DefaultAvatarPreset(userID, walletAddress))
+	return err
 }
 
 func normalizeOptional(value string) string {
@@ -1416,4 +1721,34 @@ func metadataOrDefault(raw json.RawMessage) []byte {
 		return []byte(`{}`)
 	}
 	return raw
+}
+
+func normalizeJSONRaw(raw []byte) json.RawMessage {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	return json.RawMessage(trimmed)
+}
+
+func lookupMarketCategoryTx(ctx context.Context, tx *sql.Tx, categoryKey string) (dto.MarketCategory, error) {
+	var (
+		item     dto.MarketCategory
+		metadata []byte
+	)
+	row := tx.QueryRowContext(ctx, `
+		SELECT category_id, category_key, display_name, description, sort_order, metadata
+		FROM market_categories
+		WHERE category_key = $1
+		  AND status = 'ACTIVE'
+		LIMIT 1
+	`, categoryKey)
+	if err := row.Scan(&item.CategoryID, &item.CategoryKey, &item.DisplayName, &item.Description, &item.SortOrder, &metadata); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return dto.MarketCategory{}, ErrInvalidMarketCategory
+		}
+		return dto.MarketCategory{}, err
+	}
+	item.Metadata = normalizeJSONRaw(metadata)
+	return item, nil
 }

@@ -25,11 +25,7 @@ Run one reproducible local lifecycle that covers:
 ## Run
 
 ```bash
-cd /Users/zhangza/code/funnyoption
-set -a
-source .env.local
-set +a
-go run ./cmd/local-lifecycle
+/Users/zhangza/code/funnyoption/scripts/local-lifecycle.sh
 ```
 
 ## What the runner does
@@ -51,6 +47,7 @@ go run ./cmd/local-lifecycle
 - The runner works around that by creating its own in-process listener-proof chain for the deposit step, with `chain_id=1337`, `chain_name=simulated`, and `network_name=local-proof`.
 - The proof vault is local-only and exists to emit the canonical `Deposited(address,uint256)` event shape, so the listener path is truthful even though the default stack is not pointed at a shared BSC testnet vault.
 - The current matching model is `BUY` versus `SELL` on the same outcome. To guarantee a first trade in local smoke, the runner now issues explicit first-liquidity inventory before placing the resting `SELL`.
+- If `FUNNYOPTION_LOCAL_CHAIN_MODE=anvil` is enabled, the wrapper also sources `/Users/zhangza/code/funnyoption/.run/dev/local-chain.env` and the runner uses the persistent local chain instead of the in-process proof chain.
 
 ## Output
 

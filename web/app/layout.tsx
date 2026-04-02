@@ -30,12 +30,12 @@ const serif = Instrument_Serif({
 
 export const metadata: Metadata = {
   title: "FunnyOption",
-  description: "Experimental prediction market front-end for session-key trading on BSC."
+  description: "FunnyOption 中文交易前端，提供本地市场浏览、充值、下单和结算查看。"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="zh-CN">
       <body className={`${display.variable} ${body.variable} ${mono.variable} ${serif.variable}`}>
         <Providers>{children}</Providers>
       </body>

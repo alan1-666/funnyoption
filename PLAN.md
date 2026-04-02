@@ -8,7 +8,7 @@ Detailed execution lives in `docs/harness/plans/active/`.
 - Active orchestration plan: [`docs/harness/plans/active/PLAN-2026-04-01-master.md`](/Users/zhangza/code/funnyoption/docs/harness/plans/active/PLAN-2026-04-01-master.md)
 - Harness rollout task: [`docs/harness/tasks/TASK-HARNESS-001.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-HARNESS-001.md)
 - Off-chain umbrella task: [`docs/harness/tasks/TASK-OFFCHAIN-001.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-OFFCHAIN-001.md)
-- Next execution task: [`docs/harness/tasks/TASK-API-002.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-API-002.md)
+- Next execution task: [`docs/harness/tasks/TASK-API-004.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-API-004.md)
 
 ## Strategic lanes
 
@@ -52,6 +52,6 @@ Detailed execution lives in `docs/harness/plans/active/`.
 - Harness framework: active
 - Off-chain MVP: code-complete, with truthful local deposit proof and explicit first-liquidity now in place
 - Admin/operator backend: dedicated admin service is converged and core privileged market mutations are now protected at the shared API boundary
-- API service hardening: modular routing, middleware layering, and rate limiting are in place
-- Next worker focus: remove the transitional bare-`user_id` order-write lane so `/api/v1/orders` no longer accepts direct unauthenticated bootstrap-style writes
+- API service hardening: modular routing, middleware layering, rate limiting, bare-`user_id` fallback removal, and same-proof bootstrap replay protection are now in place
+- Next worker focus: define and enforce semantic uniqueness for privileged bootstrap orders so re-signing the same bootstrap sell order with a fresh `requested_at` cannot silently create a second accepted bootstrap order
 - Chain hardening: active

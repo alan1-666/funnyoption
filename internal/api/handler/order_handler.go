@@ -32,13 +32,14 @@ type Dependencies struct {
 }
 
 type OrderHandler struct {
-	logger          *slog.Logger
-	publisher       sharedkafka.Publisher
-	topics          sharedkafka.Topics
-	account         accountclient.AccountClient
-	store           QueryStore
-	operatorWallets map[string]struct{}
-	operatorUserID  int64
+	logger              *slog.Logger
+	publisher           sharedkafka.Publisher
+	topics              sharedkafka.Topics
+	account             accountclient.AccountClient
+	store               QueryStore
+	operatorWallets     map[string]struct{}
+	operatorUserID      int64
+	bootstrapReplayGate *bootstrapReplayGate
 }
 
 type collectionResponse[T any] struct {
@@ -47,13 +48,14 @@ type collectionResponse[T any] struct {
 
 func NewOrderHandler(deps Dependencies) *OrderHandler {
 	return &OrderHandler{
-		logger:          deps.Logger,
-		publisher:       deps.KafkaPublisher,
-		topics:          deps.KafkaTopics,
-		account:         deps.AccountClient,
-		store:           deps.QueryStore,
-		operatorWallets: normalizeOperatorWalletSet(deps.OperatorWallets),
-		operatorUserID:  deps.DefaultOperatorUserID,
+		logger:              deps.Logger,
+		publisher:           deps.KafkaPublisher,
+		topics:              deps.KafkaTopics,
+		account:             deps.AccountClient,
+		store:               deps.QueryStore,
+		operatorWallets:     normalizeOperatorWalletSet(deps.OperatorWallets),
+		operatorUserID:      deps.DefaultOperatorUserID,
+		bootstrapReplayGate: newBootstrapReplayGate(),
 	}
 }
 
@@ -96,6 +98,16 @@ func (h *OrderHandler) CreateMarket(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "resolve_at must be greater than or equal to close_at"})
 		return
 	}
+	normalizedOptions, err := dto.NormalizeMarketOptions(req.Options)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "options must contain at least two unique entries with key and label"})
+		return
+	}
+	req.Options = normalizedOptions
+	if normalizeMarketStatus(req.Status) == "OPEN" && !dto.IsBinaryTradingOptions(req.Options) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "only YES/NO binary options can enter OPEN status in the current engine"})
+		return
+	}
 	if req.MarketID <= 0 {
 		req.MarketID = time.Now().UnixMilli()
 	}
@@ -103,6 +115,10 @@ func (h *OrderHandler) CreateMarket(ctx *gin.Context) {
 
 	market, err := h.store.CreateMarket(ctx, req)
 	if err != nil {
+		if errors.Is(err, ErrInvalidMarketCategory) || errors.Is(err, dto.ErrInvalidMarketOptions) {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		h.logger.Error("create market failed", "market_id", req.MarketID, "err", err)
 		ctx.JSON(http.StatusBadGateway, gin.H{"error": "create market failed"})
 		return
@@ -564,6 +580,80 @@ func (h *OrderHandler) CreateSession(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, session)
 }
 
+func (h *OrderHandler) GetProfile(ctx *gin.Context) {
+	var req dto.GetUserProfileRequest
+	if err := ctx.ShouldBindQuery(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.store == nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
+		return
+	}
+	if req.UserID <= 0 && strings.TrimSpace(req.WalletAddress) == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "user_id or wallet_address is required"})
+		return
+	}
+
+	item, err := h.store.GetUserProfile(ctx, req)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "profile not found"})
+			return
+		}
+		h.logger.Error("get profile failed", "user_id", req.UserID, "wallet_address", req.WalletAddress, "err", err)
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "get profile failed"})
+		return
+	}
+	ctx.JSON(http.StatusOK, item)
+}
+
+func (h *OrderHandler) UpdateProfile(ctx *gin.Context) {
+	var req dto.UpdateUserProfileRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.store == nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
+		return
+	}
+	preset, ok := dto.NormalizeAvatarPreset(req.AvatarPreset)
+	if !ok {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "avatar_preset is invalid"})
+		return
+	}
+
+	session, err := h.store.GetSession(ctx, req.SessionID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "active session is required"})
+			return
+		}
+		h.logger.Error("get session for profile update failed", "session_id", req.SessionID, "err", err)
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "profile update failed"})
+		return
+	}
+	if session.UserID != req.UserID || strings.ToUpper(session.Status) != "ACTIVE" {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "active session is required"})
+		return
+	}
+	if session.ExpiresAtMillis > 0 && session.ExpiresAtMillis < time.Now().UnixMilli() {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "session is expired"})
+		return
+	}
+
+	req.AvatarPreset = preset
+	req.DisplayName = dto.NormalizeUserDisplayName(req.DisplayName)
+	item, err := h.store.UpsertUserProfile(ctx, req, session.WalletAddress)
+	if err != nil {
+		h.logger.Error("update profile failed", "user_id", req.UserID, "err", err)
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "profile update failed"})
+		return
+	}
+	ctx.JSON(http.StatusOK, item)
+}
+
 func (h *OrderHandler) ListSessions(ctx *gin.Context) {
 	var req dto.ListSessionsRequest
 	if err := ctx.ShouldBindQuery(&req); err != nil {
@@ -823,6 +913,27 @@ func (h *OrderHandler) CreateOrder(ctx *gin.Context) {
 		}
 		operator, ok := h.requirePrivilegedOperator(ctx, req.Operator, req.BootstrapOperatorMessage())
 		if !ok {
+			return
+		}
+		if h.store == nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
+			return
+		}
+		unlockBootstrap := h.bootstrapReplayGate.Lock(req.BootstrapSemanticKey())
+		defer unlockBootstrap()
+
+		orderID = req.BootstrapOrderID()
+		replayed, err := h.bootstrapOrderAlreadyAccepted(ctx, orderID)
+		if err != nil {
+			h.logger.Error("check bootstrap order uniqueness failed", "order_id", orderID, "err", err)
+			ctx.JSON(http.StatusBadGateway, gin.H{"error": "check bootstrap order uniqueness failed"})
+			return
+		}
+		if replayed {
+			ctx.JSON(http.StatusConflict, gin.H{
+				"error":    "operator bootstrap order already accepted",
+				"order_id": orderID,
+			})
 			return
 		}
 		requestedAt = operator.RequestedAt

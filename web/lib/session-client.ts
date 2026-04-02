@@ -1,9 +1,11 @@
 import * as ed from "@noble/ed25519";
+import { ensureTargetChain, getChainMeta } from "@/lib/chain";
 
 const STORAGE_KEY = "funnyoption:session:v1";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8080";
 const DEFAULT_USER_ID = Number(process.env.NEXT_PUBLIC_DEFAULT_USER_ID ?? "1001");
 const DEFAULT_SCOPE = "TRADE";
+const TARGET_CHAIN_ID = getChainMeta().chainId;
 
 export interface WalletConnection {
   walletAddress: string;
@@ -189,6 +191,7 @@ export async function fetchChainTasks() {
 }
 
 export async function connectWallet(): Promise<WalletConnection> {
+  await ensureTargetChain();
   const ethereum = ensureEthereum();
   const accounts = (await ethereum.request({ method: "eth_requestAccounts" })) as string[];
   const chainIdHex = (await ethereum.request({ method: "eth_chainId" })) as string;
@@ -287,7 +290,7 @@ async function signPersonalMessage(message: string, walletAddress: string) {
 }
 
 export async function authorizeSession(existingWallet?: WalletConnection) {
-  const wallet = existingWallet ?? (await connectWallet());
+  const wallet = existingWallet && existingWallet.chainId === TARGET_CHAIN_ID ? existingWallet : await connectWallet();
   const privateKey = ed.utils.randomPrivateKey();
   const publicKey = await ed.getPublicKeyAsync(privateKey);
   const issuedAt = Date.now();

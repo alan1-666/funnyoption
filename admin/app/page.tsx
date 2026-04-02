@@ -1,3 +1,4 @@
+import { AdminReadBoard } from "@/components/admin-read-board";
 import { AdminMarketOps } from "@/components/admin-market-ops";
 import { MarketBootstrap } from "@/components/market-bootstrap";
 import { MarketStudio } from "@/components/market-studio";
@@ -13,7 +14,8 @@ import {
   getTradesRead,
   getWithdrawals
 } from "@/lib/api";
-import { formatTimestamp, formatToken, shortenAddress } from "@/lib/format";
+import { formatAssetAmount, formatTimestamp, shortenAddress } from "@/lib/format";
+import { zhGenericStatus } from "@/lib/locale";
 import styles from "@/app/page.module.css";
 
 const DEMO_USER_IDS = [1001, 1002, 1003] as const;
@@ -60,45 +62,45 @@ export default async function AdminPage() {
     <main className={`page-shell ${styles.pageShell}`}>
       <section className={styles.topbar}>
         <div className={styles.brandBlock}>
-          <span className="eyebrow">Dedicated admin service</span>
-          <h1 className={styles.title}>Operate markets from a wallet-gated runtime that is no longer embedded in the public web shell.</h1>
+          <span className="eyebrow">独立运营后台</span>
+          <h1 className={styles.title}>市场发布、首发流动性和结算，在同一套运营工具里完成。</h1>
         </div>
         <div className={styles.topbarActions}>
           <a href={PUBLIC_WEB_BASE_URL} className={styles.linkCard}>
-            Public Tape
+            前台首页
           </a>
           <a href={`${PUBLIC_WEB_BASE_URL}/portfolio`} className={styles.linkCard}>
-            User Portfolio
+            用户资产
           </a>
         </div>
       </section>
 
       <section className={styles.hero}>
         <div className={`panel ${styles.heroPrimary} float-in`}>
-          <span className="eyebrow">Operator lane</span>
-          <p className={styles.heroCopy}>The operator surface now lives in its own service boundary. Market creation, first-liquidity bootstrap, and resolution now run through admin-owned API routes so the public app no longer carries privileged controls.</p>
+          <span className="eyebrow">运营概览</span>
+          <p className={styles.heroCopy}>这里保留运营真正高频的动作：发市场、发首发流动性、做结算，以及快速核对账户和读面。</p>
           <div className={styles.metricGrid}>
             <div className={styles.metricCard}>
-              <span className={styles.metricLabel}>Open markets</span>
+              <span className={styles.metricLabel}>交易中市场</span>
               <strong className="metric-value">{marketsResult.state === "unavailable" ? "—" : openCount}</strong>
             </div>
             <div className={styles.metricCard}>
-              <span className={styles.metricLabel}>Resolved markets</span>
+              <span className={styles.metricLabel}>已结算市场</span>
               <strong className="metric-value">{marketsResult.state === "unavailable" ? "—" : resolvedCount}</strong>
             </div>
             <div className={styles.metricCard}>
-              <span className={styles.metricLabel}>Matched notional</span>
-              <strong className="metric-value">{marketsResult.state === "unavailable" ? "API" : `${formatToken(matchedNotional / 100, 0)}`}</strong>
+              <span className={styles.metricLabel}>累计成交额</span>
+              <strong className="metric-value">{marketsResult.state === "unavailable" ? "API" : formatAssetAmount(matchedNotional, "USDT")}</strong>
             </div>
           </div>
         </div>
 
         <div className={`panel ${styles.heroSide} float-in float-in-delay-1`}>
-          <span className="eyebrow">Lifecycle proof</span>
-          <h2 className={styles.sideTitle}>The local lifecycle runner still anchors the read-side proof.</h2>
-          <p className={styles.sideCopy}>This admin service now owns the full operator lane for create, bootstrap, and resolve. Deposit truthfulness and lifecycle settlement verification still line up with the shared local runner below.</p>
+          <span className="eyebrow">验收命令</span>
+          <h2 className={styles.sideTitle}>页面做操作，命令行做最终验收。</h2>
+          <p className={styles.sideCopy}>需要跑完整链路时，直接执行这条 lifecycle 命令，然后回到后台核对市场、账户和终态数据。</p>
           <code className={styles.command}>{lifecycleCommand}</code>
-          <p className={styles.sideMeta}>Use the cards below to confirm market state, sessions, balances, and terminal reads after any local run.</p>
+          <p className={styles.sideMeta}>这能作为本地联调、UI 操作和共享服务结果之间的统一基线。</p>
         </div>
       </section>
 
@@ -111,10 +113,10 @@ export default async function AdminPage() {
 
       <section className={styles.sectionHeader}>
         <div>
-          <span className="eyebrow">User snapshots</span>
-          <h2 className="section-title">Balances, sessions, orders, and payouts in one glance.</h2>
+          <span className="eyebrow">账户快照</span>
+          <h2 className="section-title">快速核对余额、会话、订单和赔付。</h2>
         </div>
-        <p className="section-copy">These demo-user cards are still the fastest way to check whether lifecycle actions moved balances, positions, deposits, and settlement outputs in the shared backend.</p>
+        <p className="section-copy">适合在充值、下单、结算之后，快速确认账户和读面有没有一起更新。</p>
       </section>
 
       <section className={styles.snapshotGrid}>
@@ -126,47 +128,44 @@ export default async function AdminPage() {
             <article key={snapshot.userId} className={`panel ${styles.snapshotCard}`}>
               <div className={styles.snapshotHeader}>
                 <div>
-                  <span className="eyebrow">User {snapshot.userId}</span>
-                  <h3 className={styles.snapshotTitle}>Lifecycle footprint</h3>
+                  <span className="eyebrow">用户 {snapshot.userId}</span>
+                  <h3 className={styles.snapshotTitle}>账户联动</h3>
                 </div>
-                <span className="pill">{liveSession ? shortenAddress(liveSession.wallet_address) : "No active session"}</span>
+                <span className="pill">{liveSession ? shortenAddress(liveSession.wallet_address) : "暂无会话"}</span>
               </div>
 
-              <div className={styles.statGrid}>
-                <div className={styles.statBlock}>
-                  <span>Available USDT</span>
-                  <strong>{formatToken(availableUsdt, 0)}</strong>
+              <div className={styles.snapshotList}>
+                <div className={styles.snapshotRow}>
+                  <span className={styles.detailLabel}>可用 USDT</span>
+                  <strong className={styles.rowValue}>{formatAssetAmount(availableUsdt, "USDT")}</strong>
                 </div>
-                <div className={styles.statBlock}>
-                  <span>Frozen USDT</span>
-                  <strong>{formatToken(frozenUsdt, 0)}</strong>
+                <div className={styles.snapshotRow}>
+                  <span className={styles.detailLabel}>冻结 USDT</span>
+                  <strong className={styles.rowValue}>{formatAssetAmount(frozenUsdt, "USDT")}</strong>
                 </div>
-                <div className={styles.statBlock}>
-                  <span>Open positions</span>
-                  <strong>{snapshot.positions.length}</strong>
+                <div className={styles.snapshotRow}>
+                  <span className={styles.detailLabel}>持仓数</span>
+                  <strong className={styles.rowValue}>{snapshot.positions.length}</strong>
                 </div>
-                <div className={styles.statBlock}>
-                  <span>Payout rows</span>
-                  <strong>{snapshot.payouts.length}</strong>
+                <div className={styles.snapshotRow}>
+                  <span className={styles.detailLabel}>赔付记录</span>
+                  <strong className={styles.rowValue}>{snapshot.payouts.length}</strong>
                 </div>
-              </div>
-
-              <div className={styles.detailGrid}>
-                <div className={styles.detailBlock}>
-                  <span className={styles.detailLabel}>Sessions</span>
-                  <p>{liveSession ? `${liveSession.status} · nonce ${liveSession.last_order_nonce}` : "No active session in local reads."}</p>
+                <div className={styles.snapshotRow}>
+                  <span className={styles.detailLabel}>会话</span>
+                  <span className={styles.rowMeta}>{liveSession ? `${zhGenericStatus(liveSession.status)} · nonce ${liveSession.last_order_nonce}` : "本地读面里还没有活跃会话。"}</span>
                 </div>
-                <div className={styles.detailBlock}>
-                  <span className={styles.detailLabel}>Deposits</span>
-                  <p>{snapshot.deposits.length > 0 ? `${snapshot.deposits.length} row(s), latest ${formatTimestamp(snapshot.deposits[0]?.credited_at || snapshot.deposits[0]?.created_at || 0)}` : "No credited deposits yet."}</p>
+                <div className={styles.snapshotRow}>
+                  <span className={styles.detailLabel}>充值</span>
+                  <span className={styles.rowMeta}>{snapshot.deposits.length > 0 ? `共 ${snapshot.deposits.length} 条，最近 ${formatTimestamp(snapshot.deposits[0]?.credited_at || snapshot.deposits[0]?.created_at || 0)}` : "还没有入账记录。"}</span>
                 </div>
-                <div className={styles.detailBlock}>
-                  <span className={styles.detailLabel}>Orders</span>
-                  <p>{snapshot.orders.length > 0 ? `${snapshot.orders[0]?.status} · ${snapshot.orders.length} row(s)` : "No orders yet."}</p>
+                <div className={styles.snapshotRow}>
+                  <span className={styles.detailLabel}>订单</span>
+                  <span className={styles.rowMeta}>{snapshot.orders.length > 0 ? `${zhGenericStatus(snapshot.orders[0]?.status ?? "")} · 共 ${snapshot.orders.length} 条` : "还没有订单记录。"}</span>
                 </div>
-                <div className={styles.detailBlock}>
-                  <span className={styles.detailLabel}>Withdrawals</span>
-                  <p>{snapshot.withdrawals.length > 0 ? `${snapshot.withdrawals.length} queued` : "No withdrawals queued."}</p>
+                <div className={styles.snapshotRow}>
+                  <span className={styles.detailLabel}>提现</span>
+                  <span className={styles.rowMeta}>{snapshot.withdrawals.length > 0 ? `${snapshot.withdrawals.length} 笔排队中` : "还没有提现请求。"}</span>
                 </div>
               </div>
             </article>
@@ -176,53 +175,13 @@ export default async function AdminPage() {
 
       <section className={styles.sectionHeader}>
         <div>
-          <span className="eyebrow">Recent tape</span>
-          <h2 className="section-title">Latest trades and market terminals.</h2>
+          <span className="eyebrow">读面</span>
+          <h2 className="section-title">成交和市场状态支持搜索与筛选。</h2>
         </div>
-        <p className="section-copy">This feed stays wired to the shared backend reads so operators can check matching and terminal market state without dropping into SQL.</p>
+        <p className="section-copy">在后台直接按市场、方向、状态和关键词过滤，不用手动翻长列表。</p>
       </section>
 
-      <section className={styles.feedGrid}>
-        <div className={`panel ${styles.feedCard}`}>
-          <div className={styles.feedHeader}>
-            <span className="eyebrow">Trades</span>
-            <span className="pill">{trades.length} recent</span>
-          </div>
-          <div className={styles.feedList}>
-            {trades.length > 0 ? (
-              trades.slice(0, 8).map((trade) => (
-                <div key={trade.trade_id} className={styles.feedRow}>
-                  <strong>#{trade.market_id} {trade.outcome}</strong>
-                  <span>{trade.taker_side} {formatToken(trade.quantity, 0)} @ {trade.price}c</span>
-                  <span>{formatTimestamp(trade.occurred_at)}</span>
-                </div>
-              ))
-            ) : (
-              <div className={styles.emptyState}>No trades are visible yet.</div>
-            )}
-          </div>
-        </div>
-
-        <div className={`panel ${styles.feedCard}`}>
-          <div className={styles.feedHeader}>
-            <span className="eyebrow">Markets</span>
-            <span className="pill">{markets.length} tracked</span>
-          </div>
-          <div className={styles.feedList}>
-            {markets.length > 0 ? (
-              markets.slice(0, 8).map((market) => (
-                <div key={market.market_id} className={styles.feedRow}>
-                  <strong>#{market.market_id}</strong>
-                  <span>{market.status}{market.resolved_outcome ? ` · ${market.resolved_outcome}` : ""}</span>
-                  <span>{formatTimestamp(market.updated_at)}</span>
-                </div>
-              ))
-            ) : (
-              <div className={styles.emptyState}>No markets available in the local API.</div>
-            )}
-          </div>
-        </div>
-      </section>
+      <AdminReadBoard markets={markets} trades={trades} />
     </main>
   );
 }

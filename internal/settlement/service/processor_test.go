@@ -59,7 +59,7 @@ func TestProcessorResolveMarket(t *testing.T) {
 	if len(publisher.settlements) != 1 {
 		t.Fatalf("expected 1 settlement event, got %d", len(publisher.settlements))
 	}
-	if publisher.settlements[0].UserID != 1001 || publisher.settlements[0].PayoutAmount != 25 {
+	if publisher.settlements[0].UserID != 1001 || publisher.settlements[0].PayoutAmount != 2500 {
 		t.Fatalf("unexpected settlement event: %+v", publisher.settlements[0])
 	}
 }

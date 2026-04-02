@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 
 import styles from "@/components/admin-market-ops.module.css";
 import { useOperatorAccess } from "@/components/operator-access-provider";
-import { formatTimestamp, formatToken, shortenAddress } from "@/lib/format";
+import { formatAssetAmount, formatTimestamp, shortenAddress } from "@/lib/format";
+import { zhMarketStatus, zhOutcome } from "@/lib/locale";
 import type { Market } from "@/lib/types";
 
 interface AdminMarketOpsProps {
@@ -15,7 +16,7 @@ interface AdminMarketOpsProps {
 export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
   const router = useRouter();
   const { wallet, busy: operatorBusy, signResolveMarket } = useOperatorAccess();
-  const [status, setStatus] = useState("Resolution lane idle");
+  const [status, setStatus] = useState("结算通道待命");
   const [busyMarketId, setBusyMarketId] = useState<number | null>(null);
   const [outcomes, setOutcomes] = useState<Record<number, "YES" | "NO">>({});
 
@@ -34,7 +35,7 @@ export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
 
   async function handleResolve(marketId: number) {
     setBusyMarketId(marketId);
-    setStatus(`Requesting operator signature for market #${marketId}...`);
+    setStatus(`等待市场 #${marketId} 的结算签名...`);
     try {
       const market = {
         marketId,
@@ -42,7 +43,7 @@ export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
       } as const;
       const operator = await signResolveMarket(market);
       if (!operator) {
-        setStatus("Connect an allowlisted wallet before resolving a market.");
+        setStatus("请先连接白名单运营钱包。");
         return;
       }
 
@@ -61,10 +62,10 @@ export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
       if (!response.ok) {
         throw new Error(payload?.error ?? `HTTP ${response.status}`);
       }
-      setStatus(`Market #${marketId} queued for resolution as ${payload?.resolved_outcome ?? selectedOutcome(marketId)} by ${shortenAddress(payload?.operator_wallet_address ?? operator.walletAddress)}`);
+      setStatus(`市场 #${marketId} 已提交结算，结果 ${zhOutcome(payload?.resolved_outcome ?? selectedOutcome(marketId))}，签名钱包 ${shortenAddress(payload?.operator_wallet_address ?? operator.walletAddress)}。`);
       startTransition(() => router.refresh());
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Failed to resolve market");
+      setStatus(error instanceof Error ? error.message : "结算失败");
     } finally {
       setBusyMarketId(null);
     }
@@ -74,20 +75,17 @@ export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
     <section className={`panel ${styles.panel}`}>
       <div className={styles.header}>
         <div>
-          <span className="eyebrow">Resolution desk</span>
-          <h2 className={styles.title}>Resolve live markets from the dedicated admin runtime.</h2>
-          <p className={styles.copy}>Resolution now runs through an admin-owned API lane that requires an allowlisted wallet signature before it proxies the resolve event to the shared backend.</p>
+          <span className="eyebrow">市场结算</span>
+          <h2 className={styles.title}>在后台结算交易中的市场。</h2>
+          <p className={styles.copy}>提交结算后，清簿、赔付生成和账务入账仍由共享服务继续完成，后台只负责发起动作和核对结果。</p>
         </div>
         <div className={styles.badges}>
-          <span className="pill">{openMarkets.length} open</span>
-          <span className="pill">{recentResolved.length} recent terminals</span>
-          <span className="pill">{wallet ? shortenAddress(wallet.walletAddress) : "Wallet required"}</span>
+          <span className="pill">交易中 {openMarkets.length}</span>
+          <span className="pill">{wallet ? shortenAddress(wallet.walletAddress) : "需要连接钱包"}</span>
         </div>
       </div>
 
-      <div className={styles.gateNote}>
-        Wallet-gated operator access is enforced at the admin service boundary. A connected but non-allowlisted wallet can inspect reads here, but resolution requests are denied before they hit the shared market event API.
-      </div>
+      <div className={styles.gateNote}>只有白名单运营钱包可以提交结算；非白名单钱包即使已连接，也只能查看读面。</div>
 
       <div className={styles.grid}>
         <div className={styles.list}>
@@ -97,14 +95,14 @@ export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
                 <div className={styles.marketMain}>
                   <div className={styles.marketTitleRow}>
                     <strong className={styles.marketTitle}>#{market.market_id} {market.title}</strong>
-                    <span className="pill">{market.status}</span>
+                    <span className="pill">{zhMarketStatus(market.status)}</span>
                   </div>
-                  <p className={styles.marketCopy}>{market.description || "No market description provided."}</p>
                   <div className={styles.marketMeta}>
-                    <span>Close {formatTimestamp(market.close_at)}</span>
-                    <span>Resolve {formatTimestamp(market.resolve_at)}</span>
-                    <span>{market.runtime.trade_count} trades</span>
-                    <span>{formatToken(market.runtime.matched_notional / 100, 0)} USDT matched</span>
+                    <span>{market.category?.display_name ?? market.metadata?.category ?? "未分类"}</span>
+                    <span>停止交易 {formatTimestamp(market.close_at)}</span>
+                    <span>结算时间 {formatTimestamp(market.resolve_at)}</span>
+                    <span>{market.runtime.trade_count} 笔成交</span>
+                    <span>成交额 {formatAssetAmount(market.runtime.matched_notional, "USDT")} USDT</span>
                   </div>
                 </div>
 
@@ -117,7 +115,7 @@ export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
                         className={selectedOutcome(market.market_id) === outcome ? styles.toggleActive : styles.toggle}
                         onClick={() => setOutcomes((current) => ({ ...current, [market.market_id]: outcome }))}
                       >
-                        {outcome}
+                        {zhOutcome(outcome)}
                       </button>
                     ))}
                   </div>
@@ -127,37 +125,36 @@ export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
                     disabled={busyMarketId === market.market_id || operatorBusy === "connect" || operatorBusy === "sign"}
                     onClick={() => handleResolve(market.market_id)}
                   >
-                    {busyMarketId === market.market_id ? "Resolving..." : "Resolve Market"}
+                    {busyMarketId === market.market_id ? "提交中..." : "执行结算"}
                   </button>
                 </div>
               </article>
             ))
           ) : (
-            <div className={styles.empty}>No open markets are available to resolve.</div>
+            <div className={styles.empty}>当前没有可结算的交易中市场。</div>
           )}
         </div>
 
         <aside className={styles.side}>
           <div className={styles.sideCard}>
-            <span className="eyebrow">Settlement note</span>
-            <p className={styles.sideCopy}>The admin service only gates and forwards the resolve action. Matching cleanup, payout creation, settlement credits, and terminal reads still happen in the existing backend services.</p>
+            <span className="eyebrow">说明</span>
+            <p className={styles.sideCopy}>这里负责发起结算动作。后续的清簿、赔付和余额入账仍由共享服务自动完成。</p>
           </div>
-          <div className={styles.sideCard}>
-            <span className="eyebrow">Recent terminals</span>
-            <div className={styles.resolvedList}>
-              {recentResolved.length > 0 ? (
-                recentResolved.map((market) => (
+          {recentResolved.length > 0 ? (
+            <div className={styles.sideCard}>
+              <span className="eyebrow">最近已结算</span>
+              <div className={styles.resolvedList}>
+                {recentResolved.map((market) => (
                   <div key={market.market_id} className={styles.resolvedRow}>
                     <strong>#{market.market_id}</strong>
-                    <span>{market.resolved_outcome || "—"}</span>
+                    <span>{market.category?.display_name ?? market.metadata?.category ?? "未分类"}</span>
+                    <span>{market.resolved_outcome ? zhOutcome(market.resolved_outcome) : "—"}</span>
                     <span>{formatTimestamp(market.updated_at)}</span>
                   </div>
-                ))
-              ) : (
-                <div className={styles.emptyCompact}>No resolved markets yet.</div>
-              )}
+                ))}
+              </div>
             </div>
-          </div>
+          ) : null}
         </aside>
       </div>
 

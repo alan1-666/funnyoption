@@ -160,51 +160,61 @@ type publishCall struct {
 }
 
 type fakeQueryStore struct {
-	createMarketResp   dto.MarketResponse
-	createMarketErr    error
-	createMarketReq    dto.CreateMarketRequest
-	createSessionResp  dto.SessionResponse
-	createSessionErr   error
-	createClaimResp    dto.ChainTransactionResponse
-	createClaimErr     error
-	createClaimReq     dto.ClaimPayoutRequest
-	createClaimCalled  bool
-	getSessionResp     dto.SessionResponse
-	getSessionErr      error
-	revokeSessionResp  dto.SessionResponse
-	revokeSessionErr   error
-	advanceSessionResp dto.SessionResponse
-	advanceSessionErr  error
-	getMarketResp      dto.MarketResponse
-	getMarketErr       error
-	listMarketsResp    []dto.MarketResponse
-	listMarketsErr     error
-	listSessionsResp   []dto.SessionResponse
-	listSessionsErr    error
-	listDepositsResp   []dto.DepositResponse
-	listDepositsErr    error
-	listWithdrawResp   []dto.WithdrawalResponse
-	listWithdrawErr    error
-	listChainTxResp    []dto.ChainTransactionResponse
-	listChainTxErr     error
-	listOrdersResp     []dto.OrderResponse
-	listOrdersErr      error
-	listTradesResp     []dto.TradeResponse
-	listTradesErr      error
-	listBalancesResp   []dto.BalanceResponse
-	listBalancesErr    error
-	listPositionsResp  []dto.PositionResponse
-	listPositionsErr   error
-	listPayoutsResp    []dto.PayoutResponse
-	listPayoutsErr     error
-	listFreezesResp    []dto.FreezeResponse
-	listFreezesErr     error
-	listEntriesResp    []dto.LedgerEntryResponse
-	listEntriesErr     error
-	listPostingsResp   []dto.LedgerPostingResponse
-	listPostingsErr    error
-	liabilityResp      []dto.LiabilityReportLine
-	liabilityErr       error
+	createMarketResp    dto.MarketResponse
+	createMarketErr     error
+	createMarketReq     dto.CreateMarketRequest
+	createSessionResp   dto.SessionResponse
+	createSessionErr    error
+	createClaimResp     dto.ChainTransactionResponse
+	createClaimErr      error
+	createClaimReq      dto.ClaimPayoutRequest
+	createClaimCalled   bool
+	getProfileResp      dto.UserProfileResponse
+	getProfileErr       error
+	updateProfileResp   dto.UserProfileResponse
+	updateProfileErr    error
+	updateProfileReq    dto.UpdateUserProfileRequest
+	updateProfileWallet string
+	getSessionResp      dto.SessionResponse
+	getSessionErr       error
+	revokeSessionResp   dto.SessionResponse
+	revokeSessionErr    error
+	advanceSessionResp  dto.SessionResponse
+	advanceSessionErr   error
+	getMarketResp       dto.MarketResponse
+	getMarketErr        error
+	listMarketsResp     []dto.MarketResponse
+	listMarketsErr      error
+	listSessionsResp    []dto.SessionResponse
+	listSessionsErr     error
+	listDepositsResp    []dto.DepositResponse
+	listDepositsErr     error
+	listWithdrawResp    []dto.WithdrawalResponse
+	listWithdrawErr     error
+	listChainTxResp     []dto.ChainTransactionResponse
+	listChainTxErr      error
+	listOrdersResp      []dto.OrderResponse
+	listOrdersErr       error
+	listTradesResp      []dto.TradeResponse
+	listTradesErr       error
+	listBalancesResp    []dto.BalanceResponse
+	listBalancesErr     error
+	listPositionsResp   []dto.PositionResponse
+	listPositionsErr    error
+	listPayoutsResp     []dto.PayoutResponse
+	listPayoutsErr      error
+	listFreezesResp     []dto.FreezeResponse
+	listFreezesErr      error
+	listEntriesResp     []dto.LedgerEntryResponse
+	listEntriesErr      error
+	listPostingsResp    []dto.LedgerPostingResponse
+	listPostingsErr     error
+	liabilityResp       []dto.LiabilityReportLine
+	liabilityErr        error
+	getOrderResp        dto.OrderResponse
+	getOrderErr         error
+	getFreezeResp       dto.FreezeResponse
+	getFreezeErr        error
 }
 
 func (f *fakeQueryStore) CreateMarket(ctx context.Context, req dto.CreateMarketRequest) (dto.MarketResponse, error) {
@@ -248,6 +258,27 @@ func (f *fakeQueryStore) CreateClaimRequest(ctx context.Context, req dto.ClaimPa
 		}
 	}
 	return f.createClaimResp, f.createClaimErr
+}
+
+func (f *fakeQueryStore) GetUserProfile(ctx context.Context, req dto.GetUserProfileRequest) (dto.UserProfileResponse, error) {
+	_ = ctx
+	_ = req
+	return f.getProfileResp, f.getProfileErr
+}
+
+func (f *fakeQueryStore) UpsertUserProfile(ctx context.Context, req dto.UpdateUserProfileRequest, walletAddress string) (dto.UserProfileResponse, error) {
+	_ = ctx
+	f.updateProfileReq = req
+	f.updateProfileWallet = walletAddress
+	if f.updateProfileResp.UserID == 0 {
+		f.updateProfileResp = dto.UserProfileResponse{
+			UserID:        req.UserID,
+			WalletAddress: walletAddress,
+			DisplayName:   req.DisplayName,
+			AvatarPreset:  req.AvatarPreset,
+		}
+	}
+	return f.updateProfileResp, f.updateProfileErr
 }
 
 func (f *fakeQueryStore) GetMarket(ctx context.Context, marketID int64) (dto.MarketResponse, error) {
@@ -327,10 +358,16 @@ func attachSignedBootstrapOrderOperator(t *testing.T, req *dto.CreateOrderReques
 	if err != nil {
 		t.Fatalf("GenerateKey returned error: %v", err)
 	}
+	return signBootstrapOrderOperator(t, key, time.Now().UnixMilli(), req)
+}
+
+func signBootstrapOrderOperator(t *testing.T, key *ecdsa.PrivateKey, requestedAt int64, req *dto.CreateOrderRequest) string {
+	t.Helper()
+
 	wallet := sharedauth.NormalizeHex(crypto.PubkeyToAddress(key.PublicKey).Hex())
 	req.Operator = &dto.OperatorAction{
 		WalletAddress: wallet,
-		RequestedAt:   time.Now().UnixMilli(),
+		RequestedAt:   requestedAt,
 	}
 	req.RequestedAtMillis = req.Operator.RequestedAt
 	req.Operator.Signature = signOperatorMessage(t, key, req.BootstrapOperatorMessage())
@@ -343,6 +380,15 @@ func (f *fakeQueryStore) GetSession(ctx context.Context, sessionID string) (dto.
 	return f.getSessionResp, f.getSessionErr
 }
 
+func (f *fakeQueryStore) GetOrder(ctx context.Context, orderID string) (dto.OrderResponse, error) {
+	_ = ctx
+	_ = orderID
+	if f.getOrderResp.OrderID == "" && f.getOrderErr == nil {
+		return dto.OrderResponse{}, ErrNotFound
+	}
+	return f.getOrderResp, f.getOrderErr
+}
+
 func (f *fakeQueryStore) RevokeSession(ctx context.Context, sessionID string) (dto.SessionResponse, error) {
 	_ = ctx
 	_ = sessionID
@@ -350,6 +396,16 @@ func (f *fakeQueryStore) RevokeSession(ctx context.Context, sessionID string) (d
 		return f.getSessionResp, f.revokeSessionErr
 	}
 	return f.revokeSessionResp, f.revokeSessionErr
+}
+
+func (f *fakeQueryStore) GetLatestFreezeByRef(ctx context.Context, refType, refID string) (dto.FreezeResponse, error) {
+	_ = ctx
+	_ = refType
+	_ = refID
+	if f.getFreezeResp.FreezeID == "" && f.getFreezeErr == nil {
+		return dto.FreezeResponse{}, ErrNotFound
+	}
+	return f.getFreezeResp, f.getFreezeErr
 }
 
 func (f *fakeQueryStore) AdvanceSessionNonce(ctx context.Context, sessionID string, nonce uint64) (dto.SessionResponse, error) {
@@ -566,6 +622,128 @@ func TestCreateOrderRejectsBareUserIDWithoutAuthEnvelope(t *testing.T) {
 	}
 }
 
+func TestCreateOrderRejectsReplayedOperatorBootstrapOrder(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	account := &fakeAccountClient{}
+	reqBody := dto.CreateOrderRequest{
+		UserID:      1001,
+		MarketID:    88,
+		Outcome:     "yes",
+		Side:        "sell",
+		Type:        "limit",
+		TimeInForce: "gtc",
+		Price:       10,
+		Quantity:    20,
+	}
+	wallet := attachSignedBootstrapOrderOperator(t, &reqBody)
+	orderID := reqBody.BootstrapOrderID()
+
+	handler := NewOrderHandler(Dependencies{
+		Logger:         slog.Default(),
+		KafkaPublisher: &fakePublisher{},
+		KafkaTopics:    kafka.NewTopics("funnyoption."),
+		AccountClient:  account,
+		QueryStore: &fakeQueryStore{
+			getFreezeResp: dto.FreezeResponse{
+				FreezeID: "frz_replay",
+				UserID:   1001,
+				Asset:    "POSITION:88:YES",
+				RefType:  "ORDER",
+				RefID:    orderID,
+				Status:   "ACTIVE",
+			},
+		},
+		OperatorWallets: []string{wallet},
+	})
+
+	raw, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = req
+
+	handler.CreateOrder(ctx)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), orderID) {
+		t.Fatalf("expected replay response to include order id, got %s", w.Body.String())
+	}
+	if account.preFreezeCalled {
+		t.Fatalf("expected replay to stop before pre-freeze")
+	}
+}
+
+func TestCreateOrderRejectsSemanticDuplicateBootstrapOrderWithFreshProof(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	account := &fakeAccountClient{}
+	reqBody := dto.CreateOrderRequest{
+		UserID:      1001,
+		MarketID:    88,
+		Outcome:     "yes",
+		Side:        "sell",
+		Type:        "limit",
+		TimeInForce: "gtc",
+		Price:       10,
+		Quantity:    20,
+	}
+
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey returned error: %v", err)
+	}
+
+	firstRequestedAt := time.Now().Add(-time.Second).UnixMilli()
+	wallet := signBootstrapOrderOperator(t, key, firstRequestedAt, &reqBody)
+	orderID := reqBody.BootstrapOrderID()
+
+	secondRequestedAt := time.Now().UnixMilli()
+	signBootstrapOrderOperator(t, key, secondRequestedAt, &reqBody)
+	if reqBody.BootstrapOrderID() != orderID {
+		t.Fatalf("expected semantic bootstrap order id to stay stable across requested_at changes")
+	}
+
+	handler := NewOrderHandler(Dependencies{
+		Logger:         slog.Default(),
+		KafkaPublisher: &fakePublisher{},
+		KafkaTopics:    kafka.NewTopics("funnyoption."),
+		AccountClient:  account,
+		QueryStore: &fakeQueryStore{
+			getOrderResp: dto.OrderResponse{
+				OrderID:  orderID,
+				UserID:   1001,
+				MarketID: 88,
+				Outcome:  "YES",
+				Side:     "SELL",
+			},
+		},
+		OperatorWallets: []string{wallet},
+	})
+
+	raw, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = req
+
+	handler.CreateOrder(ctx)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), orderID) {
+		t.Fatalf("expected duplicate response to include order id, got %s", w.Body.String())
+	}
+	if account.preFreezeCalled {
+		t.Fatalf("expected semantic duplicate to stop before pre-freeze")
+	}
+}
+
 func TestCreateSessionVerifiesWalletSignature(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -653,6 +831,109 @@ func TestRevokeSessionReturnsRevokedRecord(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "\"REVOKED\"") {
 		t.Fatalf("expected revoked response, got %s", w.Body.String())
+	}
+}
+
+func TestGetProfileReturnsRecord(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := &fakeQueryStore{
+		getProfileResp: dto.UserProfileResponse{
+			UserID:        1001,
+			WalletAddress: "0x00000000000000000000000000000000000000aa",
+			DisplayName:   "Alice",
+			AvatarPreset:  "ocean",
+		},
+	}
+	handler := NewOrderHandler(Dependencies{
+		Logger:     slog.Default(),
+		QueryStore: store,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/profile?user_id=1001", nil)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = req
+
+	handler.GetProfile(ctx)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "\"avatar_preset\":\"ocean\"") {
+		t.Fatalf("unexpected body: %s", w.Body.String())
+	}
+}
+
+func TestUpdateProfileRequiresActiveSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := &fakeQueryStore{
+		getSessionResp: dto.SessionResponse{
+			SessionID:       "sess_profile",
+			UserID:          1001,
+			WalletAddress:   "0x00000000000000000000000000000000000000aa",
+			Status:          "ACTIVE",
+			IssuedAtMillis:  time.Now().Add(-time.Minute).UnixMilli(),
+			ExpiresAtMillis: time.Now().Add(time.Hour).UnixMilli(),
+		},
+	}
+	handler := NewOrderHandler(Dependencies{
+		Logger:     slog.Default(),
+		QueryStore: store,
+	})
+
+	body := map[string]any{
+		"user_id":       1001,
+		"session_id":    "sess_profile",
+		"display_name":  "Alice",
+		"avatar_preset": "forest",
+	}
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/profile", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = req
+
+	handler.UpdateProfile(ctx)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if store.updateProfileReq.AvatarPreset != "forest" {
+		t.Fatalf("expected normalized preset to reach store, got %q", store.updateProfileReq.AvatarPreset)
+	}
+	if store.updateProfileWallet != "0x00000000000000000000000000000000000000aa" {
+		t.Fatalf("unexpected wallet propagated to store: %s", store.updateProfileWallet)
+	}
+}
+
+func TestUpdateProfileRejectsInvalidPreset(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewOrderHandler(Dependencies{
+		Logger:     slog.Default(),
+		QueryStore: &fakeQueryStore{},
+	})
+
+	body := map[string]any{
+		"user_id":       1001,
+		"session_id":    "sess_profile",
+		"display_name":  "Alice",
+		"avatar_preset": "not-real",
+	}
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/profile", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = req
+
+	handler.UpdateProfile(ctx)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -902,7 +1183,7 @@ func TestCreateOrderRejectsResolvedMarketBeforeFreeze(t *testing.T) {
 		Quantity:    20,
 	}
 	wallet := attachSignedBootstrapOrderOperator(t, &reqBody)
-	handler = NewOrderHandler(Dependencies{
+	handler := NewOrderHandler(Dependencies{
 		Logger:        slog.Default(),
 		KafkaTopics:   kafka.NewTopics("funnyoption."),
 		AccountClient: account,
@@ -1079,6 +1360,44 @@ func TestCreateMarketRejectsMissingOperatorProof(t *testing.T) {
 	}
 	if store.createMarketReq.Title != "" {
 		t.Fatalf("expected store create to be skipped, got %+v", store.createMarketReq)
+	}
+}
+
+func TestCreateMarketRejectsNonBinaryOpenOptions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := &fakeQueryStore{}
+	reqBody := dto.CreateMarketRequest{
+		Title:  "今晚英超谁会赢",
+		Status: "OPEN",
+		Options: []dto.MarketOption{
+			{Key: "ARS", Label: "阿森纳"},
+			{Key: "DRAW", Label: "平局"},
+			{Key: "MCI", Label: "曼城"},
+		},
+	}
+	wallet := attachSignedCreateMarketOperator(t, &reqBody)
+	handler := NewOrderHandler(Dependencies{
+		Logger:                slog.Default(),
+		QueryStore:            store,
+		OperatorWallets:       []string{wallet},
+		DefaultOperatorUserID: 42,
+	})
+
+	raw, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/markets", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = req
+
+	handler.CreateMarket(ctx)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", w.Code, w.Body.String())
+	}
+	if store.createMarketReq.Title != "" {
+		t.Fatalf("expected create market to be rejected before hitting store, got %+v", store.createMarketReq)
 	}
 }
 

@@ -45,6 +45,7 @@ type CreateMarketRequest struct {
 	MarketID        int64           `json:"market_id"`
 	Title           string          `json:"title" binding:"required"`
 	Description     string          `json:"description"`
+	CategoryKey     string          `json:"category_key"`
 	CollateralAsset string          `json:"collateral_asset"`
 	Status          string          `json:"status"`
 	OpenAt          int64           `json:"open_at"`
@@ -54,6 +55,7 @@ type CreateMarketRequest struct {
 	CoverImageURL   string          `json:"cover_image_url"`
 	CoverSourceURL  string          `json:"cover_source_url"`
 	CoverSourceName string          `json:"cover_source_name"`
+	Options         []MarketOption  `json:"options"`
 	Metadata        json.RawMessage `json:"metadata"`
 	Operator        *OperatorAction `json:"operator,omitempty"`
 }
@@ -87,12 +89,14 @@ type MarketResponse struct {
 	Title           string          `json:"title"`
 	Description     string          `json:"description"`
 	CollateralAsset string          `json:"collateral_asset"`
+	Category        *MarketCategory `json:"category,omitempty"`
 	Status          string          `json:"status"`
 	OpenAt          int64           `json:"open_at"`
 	CloseAt         int64           `json:"close_at"`
 	ResolveAt       int64           `json:"resolve_at"`
 	ResolvedOutcome string          `json:"resolved_outcome"`
 	CreatedBy       int64           `json:"created_by"`
+	Options         []MarketOption  `json:"options"`
 	Metadata        json.RawMessage `json:"metadata"`
 	Runtime         MarketRuntime   `json:"runtime"`
 	CreatedAt       int64           `json:"created_at"`
@@ -115,9 +119,28 @@ type MarketRuntime struct {
 }
 
 type ListMarketsRequest struct {
-	Status    string `form:"status"`
-	CreatedBy int64  `form:"created_by"`
-	Limit     int    `form:"limit"`
+	Status      string `form:"status"`
+	CreatedBy   int64  `form:"created_by"`
+	CategoryKey string `form:"category_key"`
+	Limit       int    `form:"limit"`
+}
+
+type MarketCategory struct {
+	CategoryID  int64           `json:"category_id"`
+	CategoryKey string          `json:"category_key"`
+	DisplayName string          `json:"display_name"`
+	Description string          `json:"description,omitempty"`
+	SortOrder   int             `json:"sort_order,omitempty"`
+	Metadata    json.RawMessage `json:"metadata,omitempty"`
+}
+
+type MarketOption struct {
+	Key        string          `json:"key"`
+	Label      string          `json:"label"`
+	ShortLabel string          `json:"short_label,omitempty"`
+	SortOrder  int             `json:"sort_order"`
+	IsActive   bool            `json:"is_active"`
+	Metadata   json.RawMessage `json:"metadata,omitempty"`
 }
 
 type ListOrdersRequest struct {

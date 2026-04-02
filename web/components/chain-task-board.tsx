@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { getChainMeta } from "@/lib/chain";
-import { formatTimestamp, formatToken, shortenAddress } from "@/lib/format";
+import { formatAssetAmount, formatTimestamp, shortenAddress } from "@/lib/format";
 import type { ChainTask } from "@/lib/types";
 import { fetchChainTasks } from "@/lib/session-client";
 import styles from "@/components/chain-task-board.module.css";
@@ -75,7 +75,11 @@ export function ChainTaskBoard({
                   <span>{task.chain_name}/{task.network_name}</span>
                   <span>{shortenAddress(task.wallet_address)}</span>
                   {task.payload?.market_id ? <span>market {task.payload.market_id}</span> : null}
-                  {task.payload?.payout_amount ? <span>payout {formatToken(Number(task.payload.payout_amount) / 100, 0)} USDT</span> : null}
+                  {task.payload?.payout_amount ? (
+                    <span>
+                      payout {formatAssetAmount(Number(task.payload.payout_amount), String(task.payload.payout_asset ?? "USDT"))} {String(task.payload.payout_asset ?? "USDT")}
+                    </span>
+                  ) : null}
                   <span>{formatTimestamp(task.updated_at || task.created_at)}</span>
                   {task.error_message ? <span>{task.error_message}</span> : null}
                 </div>

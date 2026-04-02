@@ -12,6 +12,7 @@ import type {
   Position,
   SessionGrant,
   Trade,
+  UserProfile,
   Withdrawal
 } from "@/lib/types";
 
@@ -245,6 +246,47 @@ export async function getOrders(userId = 1001, marketId?: number) {
 
 export async function getBalances(userId = 1001) {
   return fetchItems<Balance>(`/api/v1/balances?user_id=${userId}&limit=10`);
+}
+
+export async function getProfileRead(userId?: number, walletAddress?: string) {
+  const query = new URLSearchParams();
+  if (userId && userId > 0) {
+    query.set("user_id", String(userId));
+  }
+  if (walletAddress) {
+    query.set("wallet_address", walletAddress);
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  return fetchItem<UserProfile>(`/api/v1/profile${suffix}`);
+}
+
+export async function getProfile(userId = 1001) {
+  return (await getProfileRead(userId)).item;
+}
+
+export async function updateProfile(input: {
+  userId: number;
+  sessionId: string;
+  displayName?: string;
+  avatarPreset: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/profile`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      user_id: input.userId,
+      session_id: input.sessionId,
+      display_name: input.displayName ?? "",
+      avatar_preset: input.avatarPreset
+    })
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? `HTTP ${response.status}`);
+  }
+
+  return (await response.json()) as UserProfile;
 }
 
 export async function getPositions(userId = 1001) {

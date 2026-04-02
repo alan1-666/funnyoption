@@ -14,6 +14,7 @@ func registerPublicReadRoutes(api *gin.RouterGroup, orderHandler *handler.OrderH
 	api.GET("/balances", orderHandler.ListBalances)
 	api.GET("/positions", orderHandler.ListPositions)
 	api.GET("/payouts", orderHandler.ListPayouts)
+	api.GET("/profile", orderHandler.GetProfile)
 	api.GET("/freezes", orderHandler.ListFreezes)
 	api.GET("/ledger/entries", orderHandler.ListLedgerEntries)
 	api.GET("/ledger/entries/:entry_id/postings", orderHandler.ListLedgerPostings)

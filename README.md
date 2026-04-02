@@ -51,6 +51,7 @@ go run ./cmd/chain
 ```
 
 - starts `account / matching / ledger / settlement / chain / api / ws / web`
+- starts a managed local `anvil` chain too when `FUNNYOPTION_LOCAL_CHAIN_MODE=anvil`
 - applies local PostgreSQL migrations before boot
 - builds local Go service binaries into `/Users/zhangza/code/funnyoption/.run/dev/bin`
 - reuses an existing local `zookeeper + kafka-broker` first, otherwise falls back to the bundled local Kafka compose
@@ -69,6 +70,24 @@ Check process status:
 ```bash
 /Users/zhangza/code/funnyoption/scripts/dev-status.sh
 ```
+
+## Persistent local chain
+
+To switch the stack onto one persistent local chain instead of the default external BSC-testnet-style config:
+
+1. set `FUNNYOPTION_LOCAL_CHAIN_MODE=anvil` in `/Users/zhangza/code/funnyoption/.env.local`
+2. run `/Users/zhangza/code/funnyoption/scripts/dev-up.sh`
+
+The stack will then:
+
+- start `anvil` on `127.0.0.1:8545`
+- deploy local `MockUSDT` and `FunnyVault`
+- generate `/Users/zhangza/code/funnyoption/.run/dev/local-chain.env`
+- generate `/Users/zhangza/code/funnyoption/.run/dev/local-chain-wallets.env`
+
+Detailed runbook:
+
+- [/Users/zhangza/code/funnyoption/docs/operations/local-persistent-chain.md](/Users/zhangza/code/funnyoption/docs/operations/local-persistent-chain.md)
 
 ## Web frontend
 

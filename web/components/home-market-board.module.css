@@ -1,0 +1,434 @@
+.shell {
+  display: grid;
+  gap: 18px;
+  padding: 12px 0 40px;
+}
+
+.header {
+  display: grid;
+  grid-template-columns: auto minmax(360px, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.brandMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 28% 24%, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.08) 48%, transparent 60%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.04));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 10px 22px rgba(0, 0, 0, 0.22);
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  text-transform: lowercase;
+}
+
+.brandText {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+.searchBar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 54px;
+  padding: 0 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.032);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.028);
+}
+
+.searchIcon {
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 1.1rem;
+}
+
+.searchInput {
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #f7f7f8;
+  font-size: 1rem;
+  outline: none;
+}
+
+.searchInput::placeholder {
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.searchHint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.055);
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.84rem;
+}
+
+.actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.connectButton,
+.balanceDock {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: #f7f7f8;
+}
+
+.connectButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 126px;
+  min-height: 52px;
+  padding: 0 20px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.96rem;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.94);
+  color: #111214;
+  transition:
+    transform 0.22s ease,
+    border-color 0.22s ease,
+    background 0.22s ease;
+}
+
+.connectButton:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.16);
+  background: #ffffff;
+}
+
+.connectButton:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.balanceDock {
+  display: grid;
+  gap: 4px;
+  min-width: 188px;
+  min-height: 52px;
+  padding: 10px 16px;
+  border-radius: 18px;
+}
+
+.balanceLabel,
+.balanceMeta,
+.statusText,
+.bannerEyebrow,
+.bannerMetric span,
+.footerNote {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+}
+
+.statusText {
+  line-height: 1.4;
+}
+
+.balanceValue {
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+.filterRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 42px;
+}
+
+.filterRail {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filterChip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.48);
+  cursor: pointer;
+  font-size: 0.95rem;
+  transition: color 0.22s ease, border-color 0.22s ease;
+}
+
+.filterChip:hover,
+.filterChipActive {
+  color: #ffffff;
+  border-bottom-color: rgba(255, 255, 255, 0.86);
+}
+
+.banner {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) auto;
+  gap: 22px;
+  overflow: hidden;
+  min-height: 138px;
+  padding: 24px 26px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 30px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.008)),
+    linear-gradient(135deg, rgba(12, 12, 13, 0.98), rgba(8, 8, 9, 0.98));
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.bannerBackdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(255, 255, 255, 0.06), transparent 24%),
+    radial-gradient(circle at 82% 74%, rgba(156, 124, 255, 0.08), transparent 22%);
+  opacity: 0.9;
+  animation: drift 18s ease-in-out infinite alternate;
+}
+
+.bannerCopy,
+.bannerStats {
+  position: relative;
+  z-index: 1;
+}
+
+.bannerCopy {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+}
+
+.bannerEyebrow {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bannerTitle {
+  color: #fbfbfb;
+  font-size: clamp(1.4rem, 2.8vw, 2.3rem);
+  line-height: 1.02;
+  letter-spacing: -0.05em;
+  font-weight: 600;
+}
+
+.bannerMeta {
+  max-width: 56ch;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 0.95rem;
+}
+
+.bannerStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(110px, 1fr));
+  gap: 12px;
+  align-self: stretch;
+}
+
+.bannerMetric {
+  display: grid;
+  gap: 8px;
+  min-width: 120px;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.026);
+}
+
+.bannerMetric strong {
+  color: #ffffff;
+  font-size: 1.06rem;
+  font-weight: 600;
+}
+
+.tradeTape {
+  overflow: hidden;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  opacity: 0.92;
+}
+
+.tradeTrack {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  padding: 12px 0;
+  animation: tradeMove 28s linear infinite;
+}
+
+.tradeChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.025);
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.tradeChip strong {
+  color: #ffffff;
+  font-size: 12px;
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  grid-auto-flow: dense;
+}
+
+.emptyState {
+  display: grid;
+  place-items: center;
+  min-height: 280px;
+  padding: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.025);
+  color: rgba(255, 255, 255, 0.6);
+  text-align: center;
+}
+
+.footerNote {
+  text-align: right;
+}
+
+@keyframes drift {
+  from {
+    transform: translate3d(-1%, 0, 0);
+  }
+  to {
+    transform: translate3d(1.5%, 0.5%, 0);
+  }
+}
+
+@keyframes tradeMove {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (max-width: 1280px) {
+  .header {
+    grid-template-columns: auto minmax(280px, 1fr);
+  }
+
+  .actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+
+  .board {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .banner {
+    grid-template-columns: 1fr;
+  }
+
+  .bannerStats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 920px) {
+  .header {
+    grid-template-columns: 1fr;
+  }
+
+  .searchBar {
+    order: 3;
+  }
+
+  .actions {
+    justify-content: flex-start;
+  }
+
+  .filterRow {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .shell {
+    gap: 14px;
+  }
+
+  .searchBar {
+    min-height: 50px;
+    padding: 0 14px;
+  }
+
+  .connectButton,
+  .balanceDock {
+    width: 100%;
+  }
+
+  .banner {
+    min-height: 0;
+    padding: 20px 18px;
+    border-radius: 24px;
+  }
+
+  .bannerStats {
+    grid-template-columns: 1fr;
+  }
+
+  .board {
+    grid-template-columns: 1fr;
+  }
+}

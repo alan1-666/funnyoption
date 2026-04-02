@@ -98,6 +98,32 @@ nonce: sess_123456
 6. Backend credits `account_balances.available`
 7. Backend writes append-only `ledger` evidence
 
+### Amount precision rule
+
+FunnyOption V1 now uses one explicit collateral amount rule:
+
+- on-chain ERC-20 amount:
+  - raw token units
+  - `USDT` uses `6` decimals
+- backend accounting amount:
+  - fixed `2` decimal places
+  - `100.25 USDT` is stored as `10025`
+- frontend display amount:
+  - fixed `2` decimal places for collateral values
+
+The conversion boundary lives in `chain-service`:
+
+- deposit listener:
+  - converts `6`-decimal token amounts into `2`-decimal accounting amounts before crediting balances
+- claim / withdrawal submission:
+  - converts `2`-decimal accounting amounts back into `6`-decimal token amounts before sending on-chain transactions
+
+This keeps:
+
+- chain integration compatible with ERC-20 decimals
+- matching / account / settlement semantics consistent with cents-style accounting
+- UI values stable and predictable
+
 ### V1 rule
 
 Deposit credit should happen only after:
@@ -133,6 +159,18 @@ Deposit credit should happen only after:
 6. If V1 wants on-chain settlement anchoring, `chain-service` may later submit a settlement hash or payout batch reference
 
 V1 does **not** require every fill to be settled on-chain individually.
+
+### Winning payout rule
+
+For binary markets in the current MVP:
+
+- order prices are quoted in cents
+- one winning share settles to `100` collateral accounting units
+- with `USDT` as the collateral asset and `2` accounting decimals:
+  - `1` winning share pays `1.00 USDT`
+  - `10` winning shares pay `10.00 USDT`
+
+That means settlement must not use raw `settled_quantity` as the final collateral payout amount.
 
 ## Withdrawal flow
 

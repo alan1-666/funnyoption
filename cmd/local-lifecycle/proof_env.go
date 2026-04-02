@@ -167,6 +167,10 @@ func (e *listenerProofEnvironment) summary() proofEnvironmentSummary {
 	}
 }
 
+func (e *listenerProofEnvironment) depositChainID() int64 {
+	return e.chainID
+}
+
 func mockVaultInitCode() []byte {
 	runtime := mockVaultRuntimeCode()
 	initCode := []byte{

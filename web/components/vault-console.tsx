@@ -7,70 +7,98 @@ import { approveVault, depositToVault, ensureTargetChain, getChainMeta, queueWit
 import { shortenAddress } from "@/lib/format";
 import styles from "@/components/vault-console.module.css";
 
+const ACCOUNTING_DECIMALS = Number(process.env.NEXT_PUBLIC_COLLATERAL_ACCOUNTING_DECIMALS ?? "2");
+const ACCOUNTING_STEP = ACCOUNTING_DECIMALS <= 0 ? "1" : `0.${"0".repeat(ACCOUNTING_DECIMALS - 1)}1`;
+
+function validateAmountInput(rawAmount: string, tokenSymbol: string) {
+  const trimmed = rawAmount.trim();
+  if (!trimmed) {
+    throw new Error(`请输入金额（${tokenSymbol}）。`);
+  }
+  if (!/^\d+(\.\d+)?$/.test(trimmed)) {
+    throw new Error(`金额格式不正确（${tokenSymbol}）。`);
+  }
+
+  const [, decimals = ""] = trimmed.split(".");
+  if (decimals.length > ACCOUNTING_DECIMALS) {
+    throw new Error(`${tokenSymbol} 最多支持 ${ACCOUNTING_DECIMALS} 位小数。`);
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`金额（${tokenSymbol}）必须大于 0。`);
+  }
+  return trimmed;
+}
+
 export function VaultConsole() {
   const { wallet, session, busy, connect } = useTradingSession();
   const chain = useMemo(() => getChainMeta(), []);
   const [depositAmount, setDepositAmount] = useState("100");
   const [withdrawAmount, setWithdrawAmount] = useState("50");
   const [recipient, setRecipient] = useState("");
-  const [status, setStatus] = useState("Wallet vault lane idle");
+  const [status, setStatus] = useState("充值通道待命");
+  
 
   async function handleConnect() {
-    setStatus("Connecting wallet...");
+    setStatus("连接钱包中...");
     try {
       await connect();
-      setStatus("Wallet linked. Approve once, then deposit to the vault.");
+      setStatus("钱包已连接，请先授权，再充值到 Vault。");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Wallet connection failed");
+      setStatus(error instanceof Error ? error.message : "钱包连接失败");
     }
   }
 
   async function handleApprove() {
     if (!wallet) {
-      setStatus("Connect wallet first.");
+      setStatus("请先连接钱包。");
       return;
     }
-    setStatus("Switching chain and opening approval...");
+    setStatus("正在切换网络并发起授权...");
     try {
+      const normalizedAmount = validateAmountInput(depositAmount, chain.tokenSymbol);
       await ensureTargetChain();
-      const txHash = await approveVault(wallet.walletAddress, depositAmount);
-      setStatus(`Approve submitted: ${txHash}`);
+      const txHash = await approveVault(wallet.walletAddress, normalizedAmount);
+      setStatus(`授权已提交：${txHash}`);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Approve failed");
+      setStatus(error instanceof Error ? error.message : "授权失败");
     }
   }
 
   async function handleDeposit() {
     if (!wallet) {
-      setStatus("Connect wallet first.");
+      setStatus("请先连接钱包。");
       return;
     }
-    setStatus("Opening deposit transaction...");
+    setStatus("正在发起充值交易...");
     try {
+      const normalizedAmount = validateAmountInput(depositAmount, chain.tokenSymbol);
       await ensureTargetChain();
-      const txHash = await depositToVault(wallet.walletAddress, depositAmount);
-      setStatus(`Deposit submitted: ${txHash}`);
+      const txHash = await depositToVault(wallet.walletAddress, normalizedAmount);
+      setStatus(`充值交易已提交：${txHash}`);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Deposit failed");
+      setStatus(error instanceof Error ? error.message : "充值失败");
     }
   }
 
   async function handleWithdrawal() {
     if (!wallet) {
-      setStatus("Connect wallet first.");
+      setStatus("请先连接钱包。");
       return;
     }
     if (!recipient.trim()) {
-      setStatus("Recipient address is required.");
+      setStatus("请输入收款地址。");
       return;
     }
-    setStatus("Opening withdrawal request...");
+    setStatus("正在发起提现请求...");
     try {
+      const normalizedAmount = validateAmountInput(withdrawAmount, chain.tokenSymbol);
       await ensureTargetChain();
-      const { txHash, withdrawalId } = await queueWithdrawal(wallet.walletAddress, withdrawAmount, recipient.trim());
-      setStatus(`Withdrawal submitted: ${txHash} / ${withdrawalId}`);
+      const { txHash, withdrawalId } = await queueWithdrawal(wallet.walletAddress, normalizedAmount, recipient.trim());
+      setStatus(`提现请求已提交：${txHash} / ${withdrawalId}`);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Withdrawal failed");
+      setStatus(error instanceof Error ? error.message : "提现失败");
     }
   }
 
@@ -78,85 +106,85 @@ export function VaultConsole() {
     <section className={`panel ${styles.console}`}>
       <div className={styles.header}>
         <div>
-          <span className="eyebrow">Vault lane</span>
-          <p className={styles.copy}>Recharge now follows one clear path: connect wallet, approve the token, deposit into the vault, then wait for the deposit listener to credit your trading balance.</p>
+          <span className="eyebrow">充值与提现</span>
+          <p className={styles.copy}>流程很简单：连接钱包，授权代币，充值到 Vault，等待监听器把金额记入交易余额。</p>
         </div>
-        <span className="pill">{wallet ? shortenAddress(wallet.walletAddress) : "Wallet offline"}</span>
+        <span className="pill">{wallet ? shortenAddress(wallet.walletAddress) : "钱包未连接"}</span>
       </div>
 
       <div className={styles.guide}>
         <article className={styles.guideCard}>
           <span className={styles.stepNo}>01</span>
           <div>
-            <strong>Connect wallet</strong>
-            <p>We do not auto-touch the wallet on page load anymore. Connection starts only after your click.</p>
+            <strong>连接钱包</strong>
+            <p>页面不会自动弹钱包。只有在你点击后才会发起连接。</p>
           </div>
         </article>
         <article className={styles.guideCard}>
           <span className={styles.stepNo}>02</span>
           <div>
-            <strong>Approve {chain.tokenSymbol}</strong>
-            <p>The first approval lets the vault contract move the token. Usually you only need to do this once per allowance reset.</p>
+            <strong>授权 {chain.tokenSymbol}</strong>
+            <p>首次授权后，Vault 合约才能转走代币。通常每次 allowance 重置后再授权一次即可。</p>
           </div>
         </article>
         <article className={styles.guideCard}>
           <span className={styles.stepNo}>03</span>
           <div>
-            <strong>Deposit and wait for credit</strong>
-            <p>The backend listens for the vault event and mirrors the credited amount into your FunnyOption balance.</p>
+            <strong>充值并等待入账</strong>
+            <p>后端会监听 Vault 事件，并把到账金额同步到 FunnyOption 余额里。</p>
           </div>
         </article>
       </div>
 
       <div className={styles.metaGrid}>
         <div className={styles.metaCard}>
-          <span className={styles.label}>Network</span>
+          <span className={styles.label}>网络</span>
           <span className={styles.metaValue}>{chain.chainName} / {chain.chainId}</span>
         </div>
         <div className={styles.metaCard}>
           <span className={styles.label}>Vault</span>
-          <span className={styles.metaValue}>{chain.vaultAddress || "Set NEXT_PUBLIC_VAULT_ADDRESS"}</span>
+          <span className={styles.metaValue}>{chain.vaultAddress || "请先配置 NEXT_PUBLIC_VAULT_ADDRESS"}</span>
         </div>
         <div className={styles.metaCard}>
-          <span className={styles.label}>Credit path</span>
-          <span className={styles.metaValue}>{session ? "Wallet → Vault → Listener → Balance" : "Connect wallet to start"}</span>
+          <span className={styles.label}>入账路径</span>
+          <span className={styles.metaValue}>{session ? "钱包 → Vault → 监听器 → 余额" : "连接钱包后开始"}</span>
         </div>
       </div>
 
       <div className={styles.grid}>
         <div className={styles.card}>
           <div className={styles.cardHeader}>
-            <span className="pill">Top up</span>
-            <h3 className={styles.title}>Deposit into trading balance</h3>
-            <p className={styles.helper}>Approve first, then deposit. Your available USDT updates after the deposit listener credits the vault event.</p>
+            <span className="pill">充值</span>
+            <h3 className={styles.title}>充值到交易余额</h3>
+            <p className={styles.helper}>先授权，再充值。监听器完成入账后，可用 USDT 会更新。金额最多支持 {ACCOUNTING_DECIMALS} 位小数。</p>
           </div>
           <label className={styles.field}>
-            <span className={styles.label}>Amount ({chain.tokenSymbol})</span>
-            <input className={styles.input} value={depositAmount} onChange={(event) => setDepositAmount(event.target.value)} />
+            <span className={styles.label}>金额（{chain.tokenSymbol}）</span>
+            <input className={styles.input} value={depositAmount} onChange={(event) => setDepositAmount(event.target.value)} inputMode="decimal" step={ACCOUNTING_STEP} />
           </label>
           <div className={styles.actions}>
             {!wallet ? (
               <button className={styles.ghost} onClick={handleConnect}>
-                {busy === "connect" ? "Connecting..." : "Connect Wallet"}
+                {busy === "connect" ? "连接中..." : "连接钱包"}
               </button>
             ) : null}
-            <button className={styles.ghost} onClick={handleApprove}>Approve</button>
-            <button className={styles.button} onClick={handleDeposit}>Deposit</button>
+            <button className={styles.ghost} onClick={handleApprove}>授权</button>
+            <button className={styles.button} onClick={handleDeposit}>充值</button>
           </div>
         </div>
 
         <div className={styles.card}>
           <div className={styles.cardHeader}>
-            <span className="pill">Cash out</span>
-            <h3 className={styles.title}>Request withdrawal</h3>
-            <p className={styles.helper}>Withdrawals are also direct vault actions. Pick a recipient, sign once, and the request is recorded on-chain.</p>
+            <span className="pill">提现</span>
+            <h3 className={styles.title}>发起提现</h3>
+            <p className={styles.helper}>提现同样会直达 Vault。填写收款地址并签名后，请求会记录到链上。金额最多支持 {ACCOUNTING_DECIMALS} 位小数。</p>
           </div>
           <label className={styles.field}>
-            <span className={styles.label}>Amount ({chain.tokenSymbol})</span>
-            <input className={styles.input} value={withdrawAmount} onChange={(event) => setWithdrawAmount(event.target.value)} />
+            <span className={styles.label}>金额（{chain.tokenSymbol}）</span>
+            <input className={styles.input} value={withdrawAmount} onChange={(event) => setWithdrawAmount(event.target.value)} inputMode="decimal" step={ACCOUNTING_STEP} />
           </label>
           <label className={styles.field}>
-            <span className={styles.label}>Recipient</span>
+            <span className={styles.label}>收款地址</span>
             <input
               className={styles.input}
               value={recipient}
@@ -167,10 +195,10 @@ export function VaultConsole() {
           <div className={styles.actions}>
             {!wallet ? (
               <button className={styles.ghost} onClick={handleConnect}>
-                {busy === "connect" ? "Connecting..." : "Connect Wallet"}
+                {busy === "connect" ? "连接中..." : "连接钱包"}
               </button>
             ) : null}
-            <button className={styles.button} onClick={handleWithdrawal}>Withdraw</button>
+            <button className={styles.button} onClick={handleWithdrawal}>提现</button>
           </div>
         </div>
       </div>

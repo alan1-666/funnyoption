@@ -89,6 +89,10 @@ func (p *Processor) HandleMarketEvent(ctx context.Context, msg sharedkafka.Messa
 		return err
 	}
 	for _, position := range positions {
+		payoutAmount, err := assets.WinningPayoutAmount(position.Quantity)
+		if err != nil {
+			return err
+		}
 		settlement := sharedkafka.SettlementCompletedEvent{
 			EventID:          settlementEventID(position.MarketID, position.UserID, position.Outcome),
 			MarketID:         position.MarketID,
@@ -97,7 +101,7 @@ func (p *Processor) HandleMarketEvent(ctx context.Context, msg sharedkafka.Messa
 			PositionAsset:    assets.PositionAsset(position.MarketID, position.Outcome),
 			SettledQuantity:  position.Quantity,
 			PayoutAsset:      assets.DefaultCollateralAsset,
-			PayoutAmount:     position.Quantity,
+			PayoutAmount:     payoutAmount,
 			OccurredAtMillis: time.Now().UnixMilli(),
 		}
 		if err := p.publisher.PublishJSON(ctx, p.topics.SettlementDone, settlementKey(position.MarketID, position.UserID), settlement); err != nil {

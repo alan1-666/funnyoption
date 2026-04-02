@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_DIR="${ROOT_DIR}/.run/dev"
 KAFKA_COMPOSE_FILE="${ROOT_DIR}/deploy/kafka/docker-compose.yml"
 MANAGED_KAFKA_FILE="${RUN_DIR}/managed-kafka"
-SERVICE_PORTS=(8080 8081 9090 9091 9093 9094 9095 3000)
+SERVICE_PORTS=(8080 8081 9090 9091 9093 9094 9095 3000 3001)
 
 if [[ ! -d "${RUN_DIR}" ]]; then
   echo "no running pid directory: ${RUN_DIR}"

@@ -1,7 +1,7 @@
 .console {
   display: grid;
   gap: 18px;
-  padding: 24px;
+  padding: 20px;
 }
 
 .header {
@@ -27,8 +27,8 @@
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 12px;
-  padding: 16px;
-  border-radius: 20px;
+  padding: 14px;
+  border-radius: 14px;
   border: 1px solid var(--line);
   background:
     radial-gradient(circle at top left, rgba(128, 247, 255, 0.14), transparent 45%),
@@ -62,8 +62,8 @@
 .metaCard {
   display: grid;
   gap: 6px;
-  padding: 14px;
-  border-radius: 16px;
+  padding: 12px;
+  border-radius: 14px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.03);
 }
@@ -90,8 +90,8 @@
 .card {
   display: grid;
   gap: 14px;
-  padding: 18px;
-  border-radius: 22px;
+  padding: 16px;
+  border-radius: 16px;
   border: 1px solid var(--line);
   background:
     radial-gradient(circle at top right, rgba(185, 255, 66, 0.12), transparent 34%),
@@ -124,9 +124,9 @@
 
 .input {
   width: 100%;
-  min-height: 48px;
-  padding: 12px 14px;
-  border-radius: 16px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 14px;
   border: 1px solid var(--line);
   background: rgba(0, 0, 0, 0.22);
   color: var(--text);
@@ -140,9 +140,9 @@
 
 .button,
 .ghost {
-  min-height: 46px;
-  padding: 0 16px;
-  border-radius: 16px;
+  min-height: 42px;
+  padding: 0 14px;
+  border-radius: 14px;
   border: 1px solid var(--line);
   font-weight: 700;
 }

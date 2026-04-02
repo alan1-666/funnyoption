@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 
 import styles from "@/components/market-bootstrap.module.css";
 import { useOperatorAccess } from "@/components/operator-access-provider";
-import { formatTimestamp, formatToken, shortenAddress } from "@/lib/format";
+import { formatAssetAmount, formatTimestamp, formatToken, shortenAddress } from "@/lib/format";
+import { zhOutcome } from "@/lib/locale";
 import type { Market } from "@/lib/types";
 
 const DEFAULT_BOOTSTRAP_USER_ID = 1002;
@@ -38,7 +39,7 @@ export function MarketBootstrap({ markets }: MarketBootstrapProps) {
   const router = useRouter();
   const { wallet, busy: operatorBusy, signBootstrapMarket } = useOperatorAccess();
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState("Issue paired YES/NO inventory, then queue the first resting sell order from the same wallet-gated admin lane.");
+  const [status, setStatus] = useState("先发首发仓位，再挂第一笔卖单。");
   const openMarkets = useMemo(
     () => markets.filter((market) => market.status === "OPEN").sort((left, right) => right.updated_at - left.updated_at),
     [markets]
@@ -73,24 +74,24 @@ export function MarketBootstrap({ markets }: MarketBootstrapProps) {
     const quantity = Number.parseInt(form.quantity, 10);
 
     if (!Number.isFinite(marketId) || marketId <= 0) {
-      setStatus("Select a valid open market before bootstrapping liquidity.");
+      setStatus("请先选择一个有效的交易中市场。");
       return;
     }
     if (!Number.isFinite(userId) || userId <= 0) {
-      setStatus("Bootstrap user id must be positive.");
+      setStatus("做市用户 ID 必须大于 0。");
       return;
     }
     if (!Number.isFinite(price) || price <= 0) {
-      setStatus("Bootstrap price must be positive.");
+      setStatus("首发价格必须大于 0。");
       return;
     }
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      setStatus("Bootstrap quantity must be positive.");
+      setStatus("首发数量必须大于 0。");
       return;
     }
 
     setBusy(true);
-    setStatus(`Requesting operator wallet signature for market #${marketId} bootstrap...`);
+    setStatus(`等待市场 #${marketId} 的首发签名...`);
 
     try {
       const bootstrap = {
@@ -102,7 +103,7 @@ export function MarketBootstrap({ markets }: MarketBootstrapProps) {
       } as const;
       const operator = await signBootstrapMarket(bootstrap);
       if (!operator) {
-        setStatus("Connect an allowlisted wallet before issuing first-liquidity.");
+        setStatus("请先连接白名单运营钱包。");
         return;
       }
 
@@ -128,11 +129,11 @@ export function MarketBootstrap({ markets }: MarketBootstrapProps) {
       }
 
       setStatus(
-        `Issued paired inventory ${payload?.first_liquidity_id ?? "unknown"} and queued sell order ${payload?.order_id ?? "unknown"} for market #${marketId} as ${shortenAddress(payload?.operator_wallet_address ?? operator.walletAddress)}.`
+        `已发放首发仓位 ${payload?.first_liquidity_id ?? "未知"}，并创建卖单 ${payload?.order_id ?? "未知"}，签名钱包 ${shortenAddress(payload?.operator_wallet_address ?? operator.walletAddress)}。`
       );
       router.refresh();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Failed to bootstrap first-liquidity");
+      setStatus(error instanceof Error ? error.message : "首发流动性创建失败");
     } finally {
       setBusy(false);
     }
@@ -142,27 +143,23 @@ export function MarketBootstrap({ markets }: MarketBootstrapProps) {
     <section className={`panel ${styles.desk}`}>
       <div className={styles.header}>
         <div>
-          <span className="eyebrow">Bootstrap lane</span>
-          <h2 className={styles.title}>Issue explicit first-liquidity from the same operator wallet lane.</h2>
-          <p className={styles.copy}>
-            This replaces the old ungated Go/template bootstrap path. The dedicated admin runtime now signs the paired-inventory issuance and first sell-order submit behind the same allowlist enforced for create and resolve.
-          </p>
+          <span className="eyebrow">首发流动性</span>
+          <h2 className={styles.title}>发首发仓位并挂出第一笔单。</h2>
+          <p className={styles.copy}>给做市账户发仓位后，后台会用同一个运营钱包挂出第一笔单，让前台可以直接进入撮合。</p>
         </div>
         <div className={styles.badges}>
-          <span className="pill">{openMarkets.length} open</span>
-          <span className="pill">{wallet ? shortenAddress(wallet.walletAddress) : "Wallet required"}</span>
+          <span className="pill">交易中 {openMarkets.length}</span>
+          <span className="pill">{wallet ? shortenAddress(wallet.walletAddress) : "需要连接钱包"}</span>
         </div>
       </div>
 
-      <div className={styles.gateNote}>
-        First-liquidity is wallet-gated at the admin boundary. Requests from non-allowlisted wallets are denied before paired inventory or bootstrap orders reach the shared API.
-      </div>
+      <div className={styles.gateNote}>只有白名单运营钱包可以发放首发流动性，非白名单请求会在后台边界被直接拒绝。</div>
 
       <div className={styles.grid}>
         <form className={styles.form} onSubmit={handleSubmit}>
           <div className={styles.field}>
             <label className={styles.label} htmlFor="bootstrap-market">
-              Open market
+              选择市场
             </label>
             <select
               id="bootstrap-market"
@@ -172,10 +169,10 @@ export function MarketBootstrap({ markets }: MarketBootstrapProps) {
               onChange={(event) => patchForm({ marketId: event.target.value })}
               disabled={openMarkets.length === 0}
             >
-              {openMarkets.length === 0 ? <option value="">Create a market first</option> : null}
+              {openMarkets.length === 0 ? <option value="">请先创建市场</option> : null}
               {openMarkets.map((market) => (
                 <option key={market.market_id} value={market.market_id}>
-                  #{market.market_id} {market.title}
+                  #{market.market_id} · {market.title}
                 </option>
               ))}
             </select>
@@ -183,7 +180,7 @@ export function MarketBootstrap({ markets }: MarketBootstrapProps) {
 
           <div className={styles.field}>
             <label className={styles.label} htmlFor="bootstrap-user">
-              Bootstrap user id
+              做市用户 ID
             </label>
             <input
               id="bootstrap-user"
@@ -197,7 +194,7 @@ export function MarketBootstrap({ markets }: MarketBootstrapProps) {
           </div>
 
           <div className={styles.field}>
-            <span className={styles.label}>Sell outcome</span>
+            <span className={styles.label}>卖出方向</span>
             <div className={styles.toggleGroup}>
               {(["YES", "NO"] as const).map((outcome) => (
                 <button
@@ -206,7 +203,7 @@ export function MarketBootstrap({ markets }: MarketBootstrapProps) {
                   className={form.outcome === outcome ? styles.toggleActive : styles.toggle}
                   onClick={() => patchForm({ outcome })}
                 >
-                  {outcome}
+                  {zhOutcome(outcome)}
                 </button>
               ))}
             </div>
@@ -214,7 +211,7 @@ export function MarketBootstrap({ markets }: MarketBootstrapProps) {
 
           <div className={styles.field}>
             <label className={styles.label} htmlFor="bootstrap-price">
-              Sell price (cents)
+              卖出价格（美分）
             </label>
             <input
               id="bootstrap-price"
@@ -229,7 +226,7 @@ export function MarketBootstrap({ markets }: MarketBootstrapProps) {
 
           <div className={styles.field}>
             <label className={styles.label} htmlFor="bootstrap-quantity">
-              Paired quantity
+              首发数量
             </label>
             <input
               id="bootstrap-quantity"
@@ -247,25 +244,24 @@ export function MarketBootstrap({ markets }: MarketBootstrapProps) {
             type="submit"
             disabled={busy || operatorBusy === "connect" || operatorBusy === "sign" || openMarkets.length === 0}
           >
-            {busy ? "Bootstrapping..." : "Issue First-Liquidity"}
+            {busy ? "提交中..." : "发放首发流动性"}
           </button>
         </form>
 
         <aside className={styles.side}>
           {selectedMarket ? (
             <div className={styles.selectedCard}>
-              <span className="eyebrow">Selected market</span>
+              <span className="eyebrow">当前市场</span>
               <h3 className={styles.marketTitle}>#{selectedMarket.market_id} {selectedMarket.title}</h3>
-              <p className={styles.marketCopy}>{selectedMarket.description || "No market description provided."}</p>
               <div className={styles.marketMeta}>
-                <span>Close {formatTimestamp(selectedMarket.close_at)}</span>
-                <span>Resolve {formatTimestamp(selectedMarket.resolve_at)}</span>
-                <span>{selectedMarket.runtime.trade_count} trades</span>
-                <span>{formatToken(selectedMarket.runtime.matched_notional / 100, 0)} USDT matched</span>
+                <span>停止交易 {formatTimestamp(selectedMarket.close_at)}</span>
+                <span>结算时间 {formatTimestamp(selectedMarket.resolve_at)}</span>
+                <span>{selectedMarket.runtime.trade_count} 笔成交</span>
+                <span>成交额 {formatAssetAmount(selectedMarket.runtime.matched_notional, "USDT")} USDT</span>
               </div>
             </div>
           ) : (
-            <div className={styles.empty}>No open market is ready for bootstrap yet. Publish one in the market-intake lane first.</div>
+            <div className={styles.empty}>还没有可用于首发流动性的市场，请先在上方创建市场。</div>
           )}
 
           <div className={styles.marketList}>
@@ -276,9 +272,9 @@ export function MarketBootstrap({ markets }: MarketBootstrapProps) {
                 className={String(market.market_id) === form.marketId ? styles.marketCardActive : styles.marketCard}
                 onClick={() => patchForm({ marketId: String(market.market_id) })}
               >
-                <strong>#{market.market_id} {market.title}</strong>
-                <span>{market.runtime.active_order_count} active order(s)</span>
-                <span>Updated {formatTimestamp(market.updated_at)}</span>
+                <strong>#{market.market_id}</strong>
+                <span className={styles.marketCardTitle}>{market.title}</span>
+                <span>{market.runtime.active_order_count} 笔挂单 · {formatToken(market.runtime.matched_quantity, 0)} 已撮合</span>
               </button>
             ))}
           </div>

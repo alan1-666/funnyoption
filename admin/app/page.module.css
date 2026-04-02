@@ -1,72 +1,68 @@
 .pageShell {
   display: grid;
-  gap: 24px;
+  gap: 20px;
 }
 
 .topbar,
 .hero,
 .adminGrid,
-.snapshotGrid,
-.feedGrid {
+.snapshotGrid {
   display: grid;
-  gap: 18px;
+  gap: 16px;
 }
 
 .topbar {
-  grid-template-columns: minmax(0, 1.3fr) auto;
-  align-items: end;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
 }
 
 .brandBlock {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .title {
   margin: 0;
-  max-width: 15ch;
+  max-width: 18ch;
   font-family: var(--font-display), sans-serif;
-  font-size: clamp(3.1rem, 8vw, 5.7rem);
-  line-height: 0.92;
-  text-transform: uppercase;
+  font-size: clamp(1.6rem, 2.7vw, 2.3rem);
+  line-height: 1.14;
+  font-weight: 700;
 }
 
 .topbarActions {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
 .linkCard {
-  min-height: 48px;
+  min-height: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0 18px;
-  border-radius: 16px;
+  padding: 0 14px;
+  border-radius: 12px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
+  background: #fff;
   color: var(--text);
 }
 
 .hero {
-  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
 }
 
 .heroPrimary,
 .heroSide,
 .snapshotCard,
 .feedCard {
-  padding: 24px;
+  padding: 18px;
 }
 
 .heroPrimary {
   display: grid;
-  gap: 18px;
-  background:
-    radial-gradient(circle at top left, rgba(128, 247, 255, 0.12), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(255, 200, 87, 0.12), transparent 25%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
+  gap: 14px;
+  background: var(--panel);
 }
 
 .heroCopy,
@@ -74,66 +70,59 @@
 .sideMeta {
   margin: 0;
   color: var(--muted);
-  line-height: 1.7;
+  line-height: 1.6;
 }
 
-.metricGrid,
-.statGrid,
-.detailGrid {
+.metricGrid {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .metricGrid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.metricCard,
-.statBlock,
-.detailBlock {
-  border-radius: 18px;
+.metricCard {
+  border-radius: 14px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--panel-soft);
 }
 
 .metricCard {
-  padding: 18px;
+  padding: 14px;
 }
 
 .metricLabel,
 .detailLabel {
   color: var(--muted);
   font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  letter-spacing: 0.08em;
   font-family: var(--font-mono), monospace;
 }
 
 .heroSide {
   display: grid;
-  gap: 16px;
+  gap: 14px;
   align-content: start;
-  background:
-    radial-gradient(circle at top right, rgba(255, 122, 89, 0.16), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
+  background: var(--panel);
 }
 
 .sideTitle,
 .snapshotTitle {
   margin: 0;
   font-family: var(--font-display), sans-serif;
-  font-size: clamp(1.8rem, 4vw, 3.1rem);
-  line-height: 0.95;
-  text-transform: uppercase;
+  font-size: clamp(1.05rem, 1.6vw, 1.3rem);
+  line-height: 1.15;
+  font-weight: 700;
 }
 
 .command {
   display: block;
-  padding: 16px 18px;
-  border-radius: 18px;
+  padding: 14px 16px;
+  border-radius: 14px;
   border: 1px solid var(--line);
-  background: rgba(0, 0, 0, 0.24);
-  color: var(--cyan);
+  background: var(--panel-soft);
+  color: #1e3a8a;
   overflow-x: auto;
   font-family: var(--font-mono), monospace;
   font-size: 13px;
@@ -141,109 +130,86 @@
 }
 
 .adminGrid {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.18fr) minmax(360px, 0.82fr);
+  align-items: start;
+}
+
+.adminGrid > :nth-child(1),
+.adminGrid > :nth-child(4) {
+  grid-column: 1 / -1;
 }
 
 .sectionHeader {
   display: flex;
   justify-content: space-between;
-  gap: 18px;
+  gap: 16px;
   align-items: flex-end;
 }
 
 .snapshotGrid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .snapshotCard {
   display: grid;
-  gap: 18px;
+  gap: 14px;
 }
 
-.snapshotHeader,
-.feedHeader {
+.snapshotHeader {
   display: flex;
   justify-content: space-between;
   gap: 14px;
   align-items: flex-start;
 }
 
-.statGrid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.statBlock,
-.detailBlock {
-  padding: 14px 16px;
+.snapshotList {
   display: grid;
-  gap: 6px;
+  gap: 0;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
 }
 
-.statBlock span,
-.detailBlock p {
+.snapshotRow {
+  padding: 11px 13px;
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.snapshotRow:last-child {
+  border-bottom: none;
+}
+
+.rowMeta {
   color: var(--muted);
-}
-
-.statBlock strong {
-  font-family: var(--font-display), sans-serif;
-  font-size: 2rem;
-  line-height: 0.95;
-}
-
-.detailGrid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.detailBlock p {
   margin: 0;
   line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 
-.feedGrid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.feedCard {
-  display: grid;
-  gap: 16px;
-}
-
-.feedList {
-  display: grid;
-  gap: 12px;
-}
-
-.feedRow,
-.emptyState {
-  border-radius: 16px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
-  padding: 14px 16px;
-}
-
-.feedRow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 10px;
-  align-items: center;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.feedRow strong {
+.rowValue {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.95rem;
+  line-height: 1.4;
   color: var(--text);
-}
-
-.emptyState {
-  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 1180px) {
   .hero,
   .snapshotGrid,
-  .feedGrid,
-  .metricGrid {
+  .metricGrid,
+  .adminGrid {
     grid-template-columns: 1fr;
+  }
+
+  .adminGrid > :nth-child(1),
+  .adminGrid > :nth-child(4) {
+    grid-column: auto;
   }
 }
 
@@ -256,5 +222,10 @@
 
   .sectionHeader {
     display: grid;
+  }
+
+  .snapshotRow {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
   }
 }

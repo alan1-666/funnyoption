@@ -5,29 +5,31 @@ import Link from "next/link";
 import styles from "@/components/site-header.module.css";
 import { shortenAddress } from "@/lib/format";
 import { useTradingSession } from "@/components/trading-session-provider";
+import { getChainMeta } from "@/lib/chain";
 
 const links = [
-  { href: "/" as const, label: "Tape" },
-  { href: "/portfolio" as const, label: "Portfolio" }
+  { href: "/" as const, label: "市场" },
+  { href: "/portfolio" as const, label: "资产" }
 ];
 
 export function SiteHeader() {
   const { wallet, session, busy, statusMessage, connect, createSession, revokeCurrentSession } = useTradingSession();
+  const chain = getChainMeta();
   const sessionTag = session ? `${session.sessionId.slice(0, 12)}…` : null;
   const actionLabel =
     busy === "connect"
-      ? "Connecting..."
+      ? "连接中..."
       : busy === "session"
-        ? "Authorizing..."
+        ? "授权中..."
         : session
-          ? "Trading Enabled"
+          ? "已开启交易"
           : wallet
-            ? "Enable Trading"
-            : "Connect Wallet";
+            ? "开启交易"
+            : "连接钱包";
   const statusLabel = session
-    ? `Trading enabled · ${sessionTag} · ${statusMessage}`
+    ? `已开启交易 · ${sessionTag} · ${statusMessage}`
     : wallet
-      ? `Wallet connected · ${statusMessage}`
+      ? `钱包已连接 · ${statusMessage}`
       : statusMessage;
 
   async function handleAction() {
@@ -45,7 +47,10 @@ export function SiteHeader() {
     <header className={`${styles.header} float-in`}>
       <Link href="/" className={styles.brand}>
         <span className={styles.mark}>∿</span>
-        <span>FunnyOption</span>
+        <span className={styles.brandText}>
+          <strong>FunnyOption</strong>
+          <span>交易前台</span>
+        </span>
       </Link>
 
       <nav className={styles.nav}>
@@ -57,11 +62,11 @@ export function SiteHeader() {
       </nav>
 
       <div className={styles.actions}>
-        <span className="pill">BSC Testnet</span>
+        <span className="pill">{chain.chainName}</span>
         {wallet ? <span className={styles.identity}>{shortenAddress(wallet.walletAddress)}</span> : null}
         {session ? (
           <button className={styles.ghost} onClick={revokeCurrentSession}>
-            Revoke Session
+            撤销会话
           </button>
         ) : null}
         <button className={styles.button} onClick={handleAction}>

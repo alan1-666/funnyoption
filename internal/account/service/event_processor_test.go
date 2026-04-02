@@ -324,3 +324,38 @@ func TestEventProcessorPassiveOrderUpdateKeepsRestoredFreeze(t *testing.T) {
 		t.Fatalf("expected restored freeze metadata to survive passive update, got %+v", mirrored)
 	}
 }
+
+func TestEventProcessorSettlementCreditsFullWinningPayout(t *testing.T) {
+	book := NewBalanceBook()
+	book.SeedBalance(1001, "POSITION:1775124927529:YES", 10)
+
+	processor := NewEventProcessor(book, NewOrderRegistry())
+
+	settlementPayload, err := json.Marshal(sharedkafka.SettlementCompletedEvent{
+		EventID:         "evt_settlement_1775124927529_1001_YES",
+		MarketID:        1775124927529,
+		UserID:          1001,
+		WinningOutcome:  "YES",
+		PositionAsset:   "POSITION:1775124927529:YES",
+		SettledQuantity: 10,
+		PayoutAsset:     "USDT",
+		PayoutAmount:    1000,
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal returned error: %v", err)
+	}
+
+	if err := processor.HandleSettlementCompleted(context.Background(), sharedkafka.Message{Value: settlementPayload}); err != nil {
+		t.Fatalf("HandleSettlementCompleted returned error: %v", err)
+	}
+
+	position := book.GetBalance(1001, "POSITION:1775124927529:YES")
+	if position.Available != 0 || position.Frozen != 0 {
+		t.Fatalf("unexpected settled position balance: %+v", position)
+	}
+
+	usdt := book.GetBalance(1001, "USDT")
+	if usdt.Available != 1000 || usdt.Frozen != 0 {
+		t.Fatalf("unexpected settlement payout balance: %+v", usdt)
+	}
+}

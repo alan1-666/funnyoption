@@ -28,9 +28,22 @@ interface OperatorAccessContextValue {
 
 const OperatorAccessContext = createContext<OperatorAccessContextValue | null>(null);
 const ALLOWLISTED_WALLETS = parseOperatorWallets(process.env.NEXT_PUBLIC_OPERATOR_WALLETS ?? "");
+const TARGET_CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "97");
+const TARGET_CHAIN_NAME = process.env.NEXT_PUBLIC_CHAIN_NAME ?? "BSC Testnet";
 
 function formatError(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown wallet error";
+  return error instanceof Error ? error.message : "钱包操作失败";
+}
+
+function buildWalletStatusMessage(connection: WalletConnection) {
+  const allowlisted = ALLOWLISTED_WALLETS.includes(connection.walletAddress);
+  if (connection.chainId !== TARGET_CHAIN_ID) {
+    return `当前连接的是链 ${connection.chainId}，请切换到 ${TARGET_CHAIN_NAME}（${TARGET_CHAIN_ID}）。`;
+  }
+  if (allowlisted) {
+    return `运营钱包已就绪：${TARGET_CHAIN_NAME}（${TARGET_CHAIN_ID}）`;
+  }
+  return "钱包已连接，但不在运营白名单内";
 }
 
 export function OperatorAccessProvider({ children }: { children: React.ReactNode }) {
@@ -38,8 +51,8 @@ export function OperatorAccessProvider({ children }: { children: React.ReactNode
   const [busy, setBusy] = useState<"connect" | "sign" | null>(null);
   const [statusMessage, setStatusMessage] = useState(
     ALLOWLISTED_WALLETS.length > 0
-      ? "Connect an allowlisted wallet to unlock operator actions"
-      : "No operator wallets are configured for this admin service"
+      ? "请连接白名单运营钱包"
+      : "当前后台还没有配置运营钱包白名单"
   );
 
   const isWalletAllowlisted = useMemo(() => {
@@ -55,11 +68,7 @@ export function OperatorAccessProvider({ children }: { children: React.ReactNode
         if (!connection) return;
         startTransition(() => {
           setWallet(connection);
-          setStatusMessage(
-            ALLOWLISTED_WALLETS.includes(connection.walletAddress)
-              ? "Allowlisted operator wallet detected"
-              : "Wallet detected but not allowlisted for operator actions"
-          );
+          setStatusMessage(buildWalletStatusMessage(connection));
         });
       })
       .catch(() => undefined);
@@ -75,16 +84,15 @@ export function OperatorAccessProvider({ children }: { children: React.ReactNode
       startTransition(() => {
         if (!walletAddress) {
           setWallet(null);
-          setStatusMessage("Wallet disconnected");
+          setStatusMessage("钱包已断开");
           return;
         }
 
-        setWallet((current) => ({ walletAddress, chainId: current?.chainId ?? 0 }));
-        setStatusMessage(
-          ALLOWLISTED_WALLETS.includes(walletAddress)
-            ? "Allowlisted operator wallet detected"
-            : "Wallet detected but not allowlisted for operator actions"
-        );
+        setWallet((current) => {
+          const next = { walletAddress, chainId: current?.chainId ?? 0 };
+          setStatusMessage(buildWalletStatusMessage(next));
+          return next;
+        });
       });
     };
 
@@ -92,8 +100,14 @@ export function OperatorAccessProvider({ children }: { children: React.ReactNode
       if (typeof chainIdHex !== "string") return;
       const chainId = Number.parseInt(chainIdHex, 16);
       startTransition(() => {
-        setWallet((current) => (current ? { ...current, chainId } : current));
-        setStatusMessage(`Wallet connected on chain ${chainId}`);
+        setWallet((current) => {
+          if (!current) {
+            return current;
+          }
+          const next = { ...current, chainId };
+          setStatusMessage(buildWalletStatusMessage(next));
+          return next;
+        });
       });
     };
 
@@ -107,26 +121,22 @@ export function OperatorAccessProvider({ children }: { children: React.ReactNode
   }, []);
 
   async function handleConnect() {
-    if (wallet) {
+    if (wallet && wallet.chainId === TARGET_CHAIN_ID) {
       setStatusMessage(
         ALLOWLISTED_WALLETS.includes(wallet.walletAddress)
-          ? `Operator wallet ready on chain ${wallet.chainId}`
-          : "Wallet connected but not allowlisted for operator actions"
+          ? `运营钱包已连接到 ${TARGET_CHAIN_NAME}（${wallet.chainId}）`
+          : "钱包已连接，但不在运营白名单内"
       );
       return wallet;
     }
 
     setBusy("connect");
-    setStatusMessage("Connecting wallet...");
+    setStatusMessage("连接钱包中...");
     try {
       const connection = await connectWallet();
       startTransition(() => {
         setWallet(connection);
-        setStatusMessage(
-          ALLOWLISTED_WALLETS.includes(connection.walletAddress)
-            ? `Operator wallet linked on chain ${connection.chainId}`
-            : "Wallet connected but not allowlisted for operator actions"
-        );
+        setStatusMessage(buildWalletStatusMessage(connection));
       });
       return connection;
     } catch (error) {
@@ -138,20 +148,24 @@ export function OperatorAccessProvider({ children }: { children: React.ReactNode
   }
 
   async function signAuthorizedMessage(message: string, requestedAt: number) {
-    const activeWallet = wallet ?? (await handleConnect());
+    const activeWallet = !wallet || wallet.chainId !== TARGET_CHAIN_ID ? await handleConnect() : wallet;
     if (!activeWallet) {
       return null;
     }
+    if (activeWallet.chainId !== TARGET_CHAIN_ID) {
+      setStatusMessage(`请先切换到 ${TARGET_CHAIN_NAME}（${TARGET_CHAIN_ID}）`);
+      return null;
+    }
     if (!ALLOWLISTED_WALLETS.includes(activeWallet.walletAddress)) {
-      setStatusMessage("Wallet is not allowlisted for operator actions");
+      setStatusMessage("当前钱包不在运营白名单内");
       return null;
     }
 
     setBusy("sign");
-    setStatusMessage("Awaiting operator wallet signature...");
+    setStatusMessage("等待运营钱包签名...");
     try {
       const signature = await signPersonalMessage(message, activeWallet.walletAddress);
-      startTransition(() => setStatusMessage("Operator wallet signature captured"));
+      startTransition(() => setStatusMessage("签名已完成"));
       return {
         walletAddress: activeWallet.walletAddress,
         requestedAt,

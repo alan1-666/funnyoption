@@ -1,104 +1,137 @@
 .card {
   display: grid;
-  gap: 16px;
+  gap: 10px;
   padding: 0;
   min-height: 100%;
   color: inherit;
   overflow: hidden;
   background:
-    radial-gradient(circle at top right, color-mix(in srgb, var(--card-accent) 18%, transparent), transparent 35%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.025));
+    radial-gradient(circle at top right, color-mix(in srgb, var(--card-accent) 16%, transparent), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
   transition: transform 0.25s ease, border-color 0.25s ease, background 0.25s ease;
 }
 
 .card:hover {
-  transform: translateY(-6px);
-  border-color: rgba(255, 255, 255, 0.18);
+  transform: translateY(-4px);
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 22px 46px rgba(3, 7, 18, 0.34);
 }
 
 .visual {
   display: flex;
   justify-content: space-between;
   flex-direction: column;
-  min-height: 188px;
-  padding: 16px;
+  min-height: 132px;
+  padding: 12px;
   background:
     linear-gradient(180deg, rgba(9, 9, 11, 0.1), rgba(9, 9, 11, 0.76)),
-    linear-gradient(135deg, rgba(128, 247, 255, 0.26), rgba(185, 255, 66, 0.16));
+    linear-gradient(135deg, rgba(103, 232, 211, 0.18), rgba(92, 190, 242, 0.12));
   background-size: cover;
   background-position: center;
 }
 
 .sheen {
   align-self: flex-end;
-  width: 52%;
-  height: 78px;
+  width: 44%;
+  height: 58px;
   border-radius: 999px;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.16), transparent 68%);
-  filter: blur(12px);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.14), transparent 68%);
+  filter: blur(10px);
   pointer-events: none;
 }
 
 .meta {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   color: rgba(255, 255, 255, 0.88);
-  font-size: 12px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.08em;
   font-family: var(--font-mono), monospace;
 }
 
 .meta span {
-  padding: 8px 10px;
+  padding: 7px 9px;
   border-radius: 999px;
-  background: rgba(9, 9, 11, 0.38);
+  background: rgba(9, 9, 11, 0.42);
   backdrop-filter: blur(12px);
 }
 
-.title {
-  margin: 0 20px;
-  font-size: clamp(1.45rem, 2vw, 2.2rem);
-  line-height: 1;
-  text-transform: uppercase;
-  font-family: var(--font-display), sans-serif;
+.body {
+  display: grid;
+  gap: 6px;
+  padding: 0 16px;
 }
 
-.description {
-  margin: 0 20px;
+.title {
+  margin: 0;
+  font-size: clamp(1rem, 1.18vw, 1.18rem);
+  line-height: 1.38;
+  font-family: var(--font-display), sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.summaryRow {
+  display: grid;
+  gap: 3px;
   color: var(--muted);
-  line-height: 1.6;
-  min-height: 4.8em;
+  font-size: 12px;
+  font-family: var(--font-mono), monospace;
+  line-height: 1.5;
+}
+
+.summarySub {
+  color: rgba(214, 230, 245, 0.72);
+  font-size: 11px;
 }
 
 .odds {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin: 0 20px;
+  gap: 8px;
+  margin: 0 16px;
 }
 
 .oddsCard {
-  padding: 14px;
-  border-radius: 16px;
+  padding: 10px 11px;
+  border-radius: 12px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.035);
 }
 
 .oddsLabel {
   display: block;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   color: var(--muted);
   font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  letter-spacing: 0.08em;
   font-family: var(--font-mono), monospace;
 }
 
 .oddsValue {
-  font-size: 1.8rem;
+  font-size: 1.32rem;
   font-family: var(--font-display), sans-serif;
+}
+
+.flowRail {
+  display: flex;
+  gap: 6px;
+  height: 6px;
+  margin: 0 16px;
+}
+
+.flowYes,
+.flowNo {
+  border-radius: 999px;
+}
+
+.flowYes {
+  background: linear-gradient(90deg, rgba(103, 232, 211, 0.96), rgba(137, 240, 226, 0.76));
+  box-shadow: 0 0 18px rgba(103, 232, 211, 0.22);
+}
+
+.flowNo {
+  background: linear-gradient(90deg, rgba(92, 190, 242, 0.8), rgba(145, 189, 255, 0.52));
 }
 
 .footer {
@@ -106,17 +139,31 @@
   justify-content: space-between;
   align-items: center;
   gap: 10px;
-  margin: 0 20px 20px;
+  margin: 0 16px 16px;
+}
+
+.asset {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--font-mono), monospace;
 }
 
 .volume {
   color: var(--muted);
-  font-size: 14px;
+  font-size: 12px;
+  font-family: var(--font-mono), monospace;
 }
 
 @media (max-width: 760px) {
   .card {
-    gap: 14px;
+    gap: 12px;
   }
 
   .footer {
@@ -125,14 +172,16 @@
   }
 
   .visual {
-    min-height: 168px;
+    min-height: 126px;
   }
 
-  .title,
-  .description,
+  .body,
   .odds,
+  .flowRail,
   .footer {
-    margin-left: 16px;
-    margin-right: 16px;
+    padding-left: 0;
+    padding-right: 0;
+    margin-left: 14px;
+    margin-right: 14px;
   }
 }

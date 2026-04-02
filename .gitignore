@@ -20,3 +20,4 @@ admin/.next/
 admin/.next-dev/
 web/tsconfig.tsbuildinfo
 admin/tsconfig.tsbuildinfo
+deploy/staging/.env.staging

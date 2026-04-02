@@ -52,3 +52,10 @@ docker run --rm \
   -p 8080:8080 \
   funnyoption-api
 ```
+
+## Staging on BSC Testnet
+
+For the current recommended staging shape, see:
+
+- [configs/staging/funnyoption.env.example](/Users/zhangza/code/funnyoption/configs/staging/funnyoption.env.example)
+- [docs/deploy/staging-bsc-testnet.md](/Users/zhangza/code/funnyoption/docs/deploy/staging-bsc-testnet.md)

@@ -7,6 +7,7 @@ export function formatToken(amount: number, digits = 2) {
 
 const COLLATERAL_SYMBOL = (process.env.NEXT_PUBLIC_COLLATERAL_SYMBOL ?? "USDT").toUpperCase();
 const COLLATERAL_ACCOUNTING_DECIMALS = Number(process.env.NEXT_PUBLIC_COLLATERAL_ACCOUNTING_DECIMALS ?? "2");
+const DISPLAY_TIME_ZONE = process.env.NEXT_PUBLIC_DISPLAY_TIME_ZONE ?? "Asia/Shanghai";
 
 export function formatAssetAmount(amount: number, asset?: string, digits?: number) {
   if (!asset || asset.toUpperCase() !== COLLATERAL_SYMBOL) {
@@ -18,6 +19,7 @@ export function formatAssetAmount(amount: number, asset?: string, digits?: numbe
 export function formatTimestamp(value: number) {
   if (!value) return "—";
   return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: DISPLAY_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

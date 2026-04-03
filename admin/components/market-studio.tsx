@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
 import styles from "@/components/market-studio.module.css";
@@ -74,9 +74,9 @@ function toEpochSeconds(value: string) {
   return Number.isNaN(parsed) ? 0 : Math.floor(parsed / 1000);
 }
 
-function createOptionRow(seed?: Partial<OptionRow>, index = 0): OptionRow {
+function createOptionRow(seed?: Partial<OptionRow>, index = 0, stableID?: string): OptionRow {
   return {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: stableID ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     key: seed?.key ?? `OPTION_${index + 1}`,
     label: seed?.label ?? "",
     shortLabel: seed?.shortLabel ?? "",
@@ -93,7 +93,8 @@ function rowsFromOptions(options: MarketOptionDraft[]) {
         shortLabel: option.shortLabel ?? option.label,
         isActive: option.isActive
       },
-      index
+      index,
+      `option-${option.key}-${index + 1}`
     )
   );
 }
@@ -138,7 +139,6 @@ function isBinaryOptions(options: MarketOptionDraft[]) {
 }
 
 function defaultForm(): StudioForm {
-  const now = Math.floor(Date.now() / 1000);
   return {
     title: "",
     description: "",
@@ -150,9 +150,9 @@ function defaultForm(): StudioForm {
     sourceKind: "manual",
     status: "OPEN",
     collateralAsset: "USDT",
-    openAt: toDateTimeLocal(now),
-    closeAt: toDateTimeLocal(now + 7 * 24 * 60 * 60),
-    resolveAt: toDateTimeLocal(now + 14 * 24 * 60 * 60),
+    openAt: "",
+    closeAt: "",
+    resolveAt: "",
     options: rowsFromOptions(defaultBinaryOptions())
   };
 }
@@ -165,6 +165,21 @@ export function MarketStudio({ existingMarkets }: MarketStudioProps) {
   const [busy, setBusy] = useState(false);
   const [importInput, setImportInput] = useState("");
   const [imported, setImported] = useState<ImportedMarket | null>(null);
+
+  useEffect(() => {
+    setForm((current) => {
+      if (current.openAt || current.closeAt || current.resolveAt) {
+        return current;
+      }
+      const now = Math.floor(Date.now() / 1000);
+      return {
+        ...current,
+        openAt: toDateTimeLocal(now),
+        closeAt: toDateTimeLocal(now + 7 * 24 * 60 * 60),
+        resolveAt: toDateTimeLocal(now + 14 * 24 * 60 * 60)
+      };
+    });
+  }, []);
 
   const featuredCount = useMemo(() => existingMarkets.filter((market) => market.status === "OPEN").length, [existingMarkets]);
   const preparedOptions = useMemo(() => buildDraftOptions(form.options), [form.options]);

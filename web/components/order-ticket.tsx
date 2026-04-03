@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { useTradingSession } from "@/components/trading-session-provider";
-import { formatAssetAmount, formatTimestamp, formatToken } from "@/lib/format";
+import { formatAssetAmount, formatHeadlineTimestamp, formatTimestamp, formatToken } from "@/lib/format";
 import { presentMarketTitle } from "@/lib/market-display";
 import { zhMarketStatus, zhOutcome } from "@/lib/locale";
 import type { Market } from "@/lib/types";
@@ -11,18 +11,6 @@ import styles from "@/components/order-ticket.module.css";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8080";
 const QUANTITY_PRESETS = [1, 5, 10, 25, 100];
-
-function formatHeadlineDate(timestamp: number) {
-  if (!timestamp) {
-    return "待定";
-  }
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(timestamp * 1000));
-}
 
 function readOutcomePrice(market: Market, outcome: "YES" | "NO") {
   const metadata = market.metadata ?? {};
@@ -136,7 +124,7 @@ export function OrderTicket({ market }: { market: Market }) {
         )}
         <div className={styles.marketMeta}>
           <div className={styles.marketTopline}>
-            <span className={styles.marketDate}>{formatHeadlineDate(market.close_at)}</span>
+            <span className={styles.marketDate}>{formatHeadlineTimestamp(market.close_at)}</span>
             <span className={styles.marketState}>{zhMarketStatus(market.status)}</span>
           </div>
           <strong className={styles.marketTitle}>{displayTitle}</strong>

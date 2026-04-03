@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { createWsUrl } from "@/lib/ws";
-import { formatAssetAmount, formatTimestamp, formatToken } from "@/lib/format";
+import { formatAssetAmount, formatClockTimestamp, formatTimestamp, formatToken } from "@/lib/format";
 import { presentMarketDescription } from "@/lib/market-display";
 import { zhMarketStatus, zhOutcome, zhSide } from "@/lib/locale";
 import type { Market, Trade } from "@/lib/types";
@@ -252,7 +252,7 @@ function buildChartModel(yesCandles: QuoteCandle[], noCandles: QuoteCandle[]) {
     })),
     timeLabels: labelIndexes.map((index) => ({
       x: padding.left + (timestamps.length === 1 ? 0 : (index / (timestamps.length - 1)) * usableWidth),
-      label: new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date(timestamps[index]))
+      label: formatClockTimestamp(timestamps[index])
     }))
   };
 }

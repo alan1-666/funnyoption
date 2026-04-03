@@ -7,6 +7,7 @@ export function formatToken(amount: number, digits = 2) {
 
 const COLLATERAL_SYMBOL = (process.env.NEXT_PUBLIC_COLLATERAL_SYMBOL ?? "USDT").toUpperCase();
 const COLLATERAL_ACCOUNTING_DECIMALS = Number(process.env.NEXT_PUBLIC_COLLATERAL_ACCOUNTING_DECIMALS ?? "2");
+const UI_TIME_ZONE = process.env.NEXT_PUBLIC_DISPLAY_TIME_ZONE ?? "Asia/Shanghai";
 
 export function getAssetDecimals(asset?: string) {
   if (!asset) return 0;
@@ -38,8 +39,30 @@ export function formatTimestamp(value: number) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false
+    hour12: false,
+    timeZone: UI_TIME_ZONE
   }).format(new Date(value * 1000));
+}
+
+export function formatHeadlineTimestamp(value: number) {
+  if (!value) return "待定";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: UI_TIME_ZONE
+  }).format(new Date(value * 1000));
+}
+
+export function formatClockTimestamp(valueMillis: number) {
+  if (!valueMillis) return "—";
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: UI_TIME_ZONE
+  }).format(new Date(valueMillis));
 }
 
 export function fromBasisPrice(value: number) {

@@ -27,6 +27,13 @@ source with auditable evidence and a manual operator override.
   - persist observation / evidence
   - emit idempotent market resolution
   - preserve manual operator resolve as a safe fallback / override path
+- if the design needs any on-chain helper, adapter, or settlement-adjacent contract
+  placeholder, keep it on the repo's existing Foundry toolchain:
+  - reuse `foundry.toml`
+  - keep Solidity sources under `contracts/src`
+  - keep tests under `contracts/test`
+  - keep deployment / ops scripts under `contracts/script`
+  - do not introduce a second contract framework such as Hardhat or Truffle
 - define failure handling:
   - delayed price availability
   - source outage
@@ -47,6 +54,9 @@ source with auditable evidence and a manual operator override.
 - [/Users/zhangza/code/funnyoption/docs/architecture/order-flow.md](/Users/zhangza/code/funnyoption/docs/architecture/order-flow.md)
 - [/Users/zhangza/code/funnyoption/docs/architecture/market-taxonomy-and-options.md](/Users/zhangza/code/funnyoption/docs/architecture/market-taxonomy-and-options.md)
 - [/Users/zhangza/code/funnyoption/docs/sql/schema.md](/Users/zhangza/code/funnyoption/docs/sql/schema.md)
+- [/Users/zhangza/code/funnyoption/foundry.toml](/Users/zhangza/code/funnyoption/foundry.toml)
+- [/Users/zhangza/code/funnyoption/contracts/src/FunnyVault.sol](/Users/zhangza/code/funnyoption/contracts/src/FunnyVault.sol)
+- [/Users/zhangza/code/funnyoption/contracts/src/MockUSDT.sol](/Users/zhangza/code/funnyoption/contracts/src/MockUSDT.sol)
 - [/Users/zhangza/code/funnyoption/admin/components/market-studio.tsx](/Users/zhangza/code/funnyoption/admin/components/market-studio.tsx)
 - [/Users/zhangza/code/funnyoption/admin/app/api/operator/markets/route.ts](/Users/zhangza/code/funnyoption/admin/app/api/operator/markets/route.ts)
 - [/Users/zhangza/code/funnyoption/internal/api/handler/sql_store.go](/Users/zhangza/code/funnyoption/internal/api/handler/sql_store.go)
@@ -62,6 +72,7 @@ source with auditable evidence and a manual operator override.
 - `docs/harness/worklogs/WORKLOG-CHAIN-005.md`
 - if truly needed for the design handoff:
   - narrow DTO or schema placeholder changes only
+  - narrow Foundry-side contract / test / script placeholders only
   - no broad runtime resolver implementation in this task
 
 ## Acceptance criteria
@@ -76,6 +87,7 @@ source with auditable evidence and a manual operator override.
   worker can implement it without reopening architecture
 - existing manual operator resolve remains the fallback path in the design
 - any optional schema / DTO placeholders stay narrow and are justified
+- any optional on-chain placeholder stays within the existing Foundry layout
 
 ## Validation
 

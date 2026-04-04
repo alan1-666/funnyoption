@@ -65,5 +65,6 @@ Detailed execution lives in `docs/harness/plans/active/`.
 - Next worker focus:
   - `TASK-OFFCHAIN-014` is now the auth-first design lane because the requested Stark-style UX changes the current session-key architecture itself
   - `TASK-CHAIN-005` should run in parallel as a design-first lane for oracle-settled crypto markets, so the auto-resolution implementation follows one explicit metadata / evidence / resolver contract instead of widening ad hoc
+  - any on-chain contract surface added for the oracle lane should stay on the repo's existing Foundry toolchain, not a second Solidity framework
   - `TASK-OFFCHAIN-013` is paused behind `TASK-OFFCHAIN-014`; only resume it after the trading-key model is explicitly re-decided
 - Chain hardening: listener-driven local deposit proof is in place, and legacy local `chain_deposits` schema drift now has a documented repair path plus repair migration

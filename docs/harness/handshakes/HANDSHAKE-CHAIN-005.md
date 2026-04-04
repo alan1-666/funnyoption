@@ -19,6 +19,9 @@
 - `docs/architecture/order-flow.md`
 - `docs/architecture/market-taxonomy-and-options.md`
 - `docs/sql/schema.md`
+- `foundry.toml`
+- `contracts/src/FunnyVault.sol`
+- `contracts/src/MockUSDT.sol`
 - `admin/components/market-studio.tsx`
 - `admin/app/api/operator/markets/route.ts`
 - `internal/api/handler/sql_store.go`
@@ -34,6 +37,8 @@
 - `docs/harness/worklogs/WORKLOG-CHAIN-005.md`
 - optional narrow DTO / schema placeholders only if they directly support the
   design handoff
+- optional narrow Foundry-side contract / test / script placeholders only if
+  they directly support the design handoff
 
 ## Inputs from other threads
 
@@ -43,6 +48,9 @@
 - commander wants this lane to stay design-first so the implementation does not
   widen across admin, API, settlement, and chain services without one explicit
   contract
+- the repo already carries a Foundry layout for Solidity work; if this lane
+  needs any on-chain contract placeholder, it should stay on Foundry instead of
+  introducing a parallel contract framework
 
 ## Outputs back to commander
 
@@ -58,6 +66,8 @@
   design is already explicit and the change stays narrow
 - do not break current market creation / settlement semantics for non-oracle
   markets
+- do not introduce a second Solidity toolchain; reuse the existing Foundry
+  setup
 
 ## Status
 

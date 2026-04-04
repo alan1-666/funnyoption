@@ -67,12 +67,14 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
 - staging E2E may still need at least one funded non-operator user wallet in addition to the funded operator key already available locally
 - GitHub CI/CD requires server SSH credentials and deployment commands to be injected through GitHub Secrets, never plaintext repo files
 - staging chain deposits can stall after a deploy restart if the chain service replays from a static start block that is already pruned by the configured public RPC
+- oracle-market work can accidentally fork the Solidity toolchain unless the repo stays explicit that contracts remain Foundry-based
 
 ## Decision log
 
 - `AGENTS.md` is now a map, not a handbook
 - plans, tasks, handshakes, and worklogs live under `docs/harness/`
 - commander plans and routes; workers execute scoped tasks
+- Solidity contract work stays on the repo's existing Foundry layout (`foundry.toml`, `contracts/src`, `contracts/test`, `contracts/script`); do not introduce a second contract framework for the oracle lane
 - `TASK-OFFCHAIN-001` remains the umbrella lane, but worker threads should execute smaller tasks
 - next worker should close the local regression path before broader chain hardening
 - `TASK-OFFCHAIN-002` is the next worker thread and should return a pass/fail matrix plus reproducible local verification notes

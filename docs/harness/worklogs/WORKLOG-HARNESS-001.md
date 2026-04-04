@@ -605,3 +605,28 @@
 - next:
   - launch one design worker on `TASK-OFFCHAIN-014`
   - keep `TASK-CHAIN-005` running in parallel as the oracle-settlement design lane
+
+### 2026-04-04 21:26 CST
+
+- read:
+  - `foundry.toml`
+  - `contracts/src/FunnyVault.sol`
+  - `contracts/src/MockUSDT.sol`
+  - `TASK-CHAIN-005.md`
+  - `HANDSHAKE-CHAIN-005.md`
+- changed:
+  - clarified in repo memory that any oracle-lane contract work should stay on
+    the existing Foundry toolchain instead of introducing a second Solidity
+    framework
+  - updated `PLAN.md`, the active master plan, and the `TASK-CHAIN-005`
+    handshake/task pair accordingly
+- validated:
+  - the repo already has a minimal but real Foundry baseline:
+    - `foundry.toml` config exists
+    - contract layout is `contracts/src`, `contracts/test`, `contracts/script`
+    - current Solidity surface is still narrow
+- blockers:
+  - none
+- next:
+  - launch `TASK-CHAIN-005` with Foundry explicitly fixed as the contract
+    toolchain boundary

@@ -36,7 +36,7 @@ Instead, `cmd/local-lifecycle` now provisions its own deterministic listener-pro
 - session authorization is real and uses the same message/signature rules as the browser wallet flow
 - deposit credit is driven by a real wallet-signed transaction against an in-process proof vault on a go-ethereum simulated chain
 - the command boots a real `DepositListener` against that proof chain and waits for the normal listener -> processor -> account credit path to land
-- fresh-market first liquidity is issued explicitly through the admin first-liquidity path by debiting operator collateral and minting paired `YES` / `NO` inventory
+- fresh-market first liquidity is issued explicitly through the admin first-liquidity path by debiting operator collateral, minting paired `YES` / `NO` inventory, and queueing the bootstrap `SELL` order in one shot
 - matching, settlement, payout creation, and query readback still happen through the normal running services
 
 ## Proof environment
@@ -106,8 +106,8 @@ Create, resolve, and first-liquidity now all move through the same wallet-gated 
 - deploys an ephemeral proof vault on a local simulated chain
 - submits one real wallet-signed deposit transaction for user `1001`
 - boots a real `DepositListener` and waits for the resulting credit to appear through `GET /api/v1/deposits`
-- issues explicit paired first-liquidity inventory for user `1002` through `POST /api/v1/admin/markets/:market_id/first-liquidity`
-- places one sell order and one buy order on the same book
+- issues one-shot first-liquidity for user `1002` through `POST /api/v1/admin/markets/:market_id/first-liquidity`, which returns the queued bootstrap `SELL` order id
+- waits for that bootstrap `SELL` order to become visible, then places the crossing `BUY` order on the same book
 - waits for a matched trade
 - resolves the market to `YES`
 - waits for payout creation and terminal market status
@@ -118,6 +118,9 @@ Create, resolve, and first-liquidity now all move through the same wallet-gated 
   - `deposit_log_index`
   - `deposit_block_number`
   - `deposit_vault_address`
+  - `maker.first_liquidity_id`
+  - `bootstrap_order_id`
+  - `bootstrap_order_status`
   - buyer balance before deposit, after deposit, and after settlement
 
 ## Expected evidence
@@ -126,7 +129,7 @@ Create, resolve, and first-liquidity now all move through the same wallet-gated 
 - one credited deposit id
 - one deposit transaction hash
 - one deposit log index / block number pair
-- one sell order id
+- one bootstrap sell order id
 - one buy order id
 - one matched trade id
 - market status `RESOLVED`

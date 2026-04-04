@@ -42,10 +42,17 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
 | TASK-API-002 | completed | worker | TASK-API-001 | remove the transitional bare-`user_id` trade-write path by migrating admin bootstrap order placement onto an authenticated lane and then enforcing session-or-privileged auth on `/api/v1/orders` |
 | TASK-API-003 | completed | worker | TASK-API-002 | add replay/idempotency protection to privileged bootstrap orders so operator-signed bootstrap sell orders cannot be replayed within the current proof window |
 | TASK-API-004 | completed | worker | TASK-API-003 | define and enforce semantic uniqueness for privileged bootstrap orders so a fresh `requested_at` alone cannot silently authorize a second otherwise-identical bootstrap sell order |
-| TASK-OFFCHAIN-010 | paused | worker-validation | TASK-API-004 | rerun the local core business flow and return a pass/fail matrix plus regression evidence after the bootstrap-auth hardening sequence |
-| TASK-CHAIN-003 | paused | worker | TASK-CHAIN-002 | reconcile legacy local `chain_deposits` schema drift for reused databases with a safe repair path and validation notes |
-| TASK-STAGING-001 | next | worker-validation | TASK-API-004 | run the full staging E2E business flow on `https://funnyoption.xyz/` and `https://admin.funnyoption.xyz/` with evidence and a pass/fail matrix |
-| TASK-CICD-001 | blocked | worker-platform | TASK-API-004 | add GitHub push-to-deploy CI/CD for the current server deployment without committing plaintext secrets |
+| TASK-OFFCHAIN-010 | completed | worker-validation | TASK-API-004 | rerun the local core business flow and return a pass/fail matrix plus regression evidence after the bootstrap-auth hardening sequence |
+| TASK-CHAIN-003 | completed | worker | TASK-CHAIN-002 | reconcile legacy local `chain_deposits` schema drift for reused databases with a safe repair path and validation notes |
+| TASK-STAGING-001 | completed | worker-validation | TASK-API-004 | run the full staging E2E business flow on `https://funnyoption.xyz/` and `https://admin.funnyoption.xyz/` plus a bounded concurrent order/matching script, with evidence and a pass/fail matrix |
+| TASK-CHAIN-004 | completed | worker-platform + worker-chain | TASK-STAGING-001 | restore staging deposit ingestion after deploy restarts by fixing stale-start-block/pruned-RPC replay and documenting a restart-safe listener cursor strategy |
+| TASK-API-005 | completed | worker | TASK-STAGING-001 | make first-liquidity duplicate handling atomic/idempotent and charge collateral in the same accounting units as settlement payouts |
+| TASK-OFFCHAIN-011 | completed | worker | TASK-STAGING-001 | make `/portfolio` render balances, positions, orders, and payouts for the connected session user instead of default user `1001` |
+| TASK-OFFCHAIN-012 | completed | worker | TASK-OFFCHAIN-010 | realign `cmd/local-lifecycle` and the local lifecycle docs with the one-shot first-liquidity contract so the local wrapper proof no longer submits a duplicate maker sell |
+| TASK-CICD-001 | completed | worker-platform | TASK-API-004 | add GitHub push-to-deploy CI/CD for the current server deployment without committing plaintext secrets |
+| TASK-CICD-002 | completed | worker-platform | TASK-CICD-001 | optimize staging CI/CD so only services affected by a push are validated, rebuilt, and redeployed, while docs-only pushes skip service deployment |
+| TASK-CICD-003 | completed | worker-platform | TASK-CICD-002 | make selective deploy self-bootstrap-safe when the server checkout still has an older `scripts/deploy-staging.sh` that does not recognize new workflow-passed flags |
+| TASK-CICD-004 | completed | worker-platform | TASK-CICD-003 | simplify staging CI/CD so GitHub Actions becomes a thin trigger that calls one fixed server-side deploy entrypoint, while the server entrypoint fetches the exact target SHA and delegates selective rebuild/restart planning to the repo deploy script |
 
 ## Risks
 
@@ -56,6 +63,7 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
 - the current bootstrap policy intentionally blocks same-terms second bootstrap orders until the repo introduces an explicit operator action handle
 - staging E2E may still need at least one funded non-operator user wallet in addition to the funded operator key already available locally
 - GitHub CI/CD requires server SSH credentials and deployment commands to be injected through GitHub Secrets, never plaintext repo files
+- staging chain deposits can stall after a deploy restart if the chain service replays from a static start block that is already pruned by the configured public RPC
 
 ## Decision log
 
@@ -134,10 +142,66 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
   - user web: `https://funnyoption.xyz/`
   - admin web: `https://admin.funnyoption.xyz/`
 - `TASK-OFFCHAIN-010` and `TASK-CHAIN-003` are paused while staging validation and CI/CD setup take priority
-- `TASK-STAGING-001` is now the primary validation worker lane for a full deployed-environment E2E pass from admin market creation and first liquidity through user order matching and settlement
+- `TASK-STAGING-001` is now the primary validation worker lane for a full deployed-environment E2E pass from admin market creation and first liquidity through user order matching and settlement, plus a bounded concurrent order-placement/matching script that can surface duplicate-fill, overfill, negative-balance, or stale-freeze regressions under parallel writes
 - `TASK-CICD-001` is now the platform worker lane for GitHub push-to-deploy automation; it should keep all private keys and server SSH material in GitHub Secrets or server-only env files, and must not commit `.secrets` or plaintext private keys
 - `TASK-CICD-001` has landed the workflow/script/docs implementation, but first live deployment is blocked on external setup outside the repo:
   - GitHub Secrets: `STAGING_SSH_HOST`, `STAGING_SSH_USER`, `STAGING_SSH_PRIVATE_KEY`, `STAGING_DEPLOY_PATH`
   - optional GitHub Secrets: `STAGING_SSH_PORT`, `STAGING_SSH_KNOWN_HOSTS`
   - server-local env file: `deploy/staging/.env.staging`
 - commander review found no repo-code blocker in the CI/CD implementation itself; the next deploy action should be to provision those secrets/env values and trigger `staging-deploy`
+- `TASK-CICD-001` is now complete: first staging GitHub Actions deploy has run successfully after external secrets/env were configured and the server checkout was bootstrapped
+- commander review found one performance gap in the current CI/CD shape:
+  - workflow validation always runs all Go tests and both frontend builds
+  - remote deploy always runs `docker compose up -d --build --remove-orphans` for the whole stack
+  - because Go service Dockerfiles use `COPY . .`, docs/script-only changes can still force unnecessary image rebuild work
+- `TASK-CICD-002` is now the next platform worker lane and should introduce one explicit path-to-service change map plus a safe fallback policy for broad/shared changes
+- commander review of `TASK-CICD-002` found one rollout blocker in the remote invocation path:
+  - `.github/workflows/staging-deploy.yml` calls `bash ./scripts/deploy-staging.sh --service ...` inside the server's current checkout
+  - argument parsing in `scripts/deploy-staging.sh` happens before `sync_release_ref`
+  - if a push introduces new deploy-script flags while the server checkout still has an older script, the old parser can fail on those flags before it fetches the new ref
+- `TASK-CICD-003` should fix that self-bootstrap order problem without giving up the selective-deploy behavior from `TASK-CICD-002`
+- `TASK-CICD-003` is now complete: the workflow checks the server checkout for local tracked/staged edits, runs `git fetch --prune origin`, checks out the target ref, and only then invokes the checked-out deploy script with `--skip-git-sync` plus selected service flags
+- commander review validated `bash -n scripts/deploy-staging.sh`, YAML parsing for `.github/workflows/staging-deploy.yml`, `git diff --check`, and one `--print-plan --diff-base HEAD~1` dry-run that produced `skip_deploy=1` for a workflow-only change
+- `TASK-STAGING-001` now has a checked-in bounded concurrency script and a second staging evidence pass, but commander review found four release blockers:
+  - chain deposit ingestion is broken on staging after the chain service restarts because `internal/chain/service/listener.go` reinitializes `nextBlock` from stale `FUNNYOPTION_CHAIN_START_BLOCK=99452107`, while the current public RPC returns `History has been pruned for this block`; the latest blocked test deposit tx was `0x4129a4db5f66760ca8374a1dbe3df94652552df9768500ff0d49ec9654733a6c` at block `99674293`
+  - `admin/app/api/operator/markets/[marketId]/first-liquidity/route.ts` still performs first-liquidity issuance before the duplicate bootstrap order write, so a second same-terms call can return `409` after mutating maker inventory/balance
+  - `internal/api/handler/order_handler.go` still debits `req.Quantity` and returns `collateral_debit=req.Quantity` for one YES/NO pair, which under-collateralizes payouts that settle at `100` accounting units per winning share
+  - `web/app/portfolio/page.tsx` still server-fetches collection reads without the connected session user, and `web/lib/api.ts` defaults those reads to `user_id=1001`
+- `TASK-CHAIN-004`, `TASK-API-005`, and `TASK-OFFCHAIN-011` are the next parallel worker lanes; rerun `TASK-STAGING-001` only after those fixes land and the chain deposit listener is healthy again
+- `TASK-CHAIN-004` is now complete: the listener cursor implementation works, `go test ./internal/chain/service/...` passes, one fresh post-restart staging deposit reached `/api/v1/deposits` plus `/api/v1/balances`, `/opt/funnyoption-staging` is a clean detached checkout at `ea71dc8`, and the Actions dirty-check guard passes there
+- one non-blocking docs follow-up remains after `TASK-CHAIN-004`: the DSN-based recovery snippet in `docs/deploy/staging-bsc-testnet.md` still uses `source deploy/staging/.env.staging`, and the current server env file emits `Testnet: command not found` for an unquoted value with spaces even though the subsequent `psql "$FUNNYOPTION_POSTGRES_DSN"` probe succeeds; prefer a shell-safe one-variable loader before relying on that fallback path
+- `TASK-STAGING-001` is now complete across the combined staging evidence:
+  - chain-side validation is healthy on staging: fresh generated users received deposits, the bounded script submitted `8/8` orders successfully, matched `4` trades, resolved the market, and found no duplicate-fill / overfill / negative-balance / stale-freeze anomalies
+  - deployment verification on committed/staged `HEAD=125f9cd` confirmed the previously failing API/web checks are now green: duplicate bootstrap `409` is side-effect free, first-liquidity collateral debits `100 * quantity`, and `/portfolio` no-session plus connected-session reads are truthful and scoped to the active `session.userId`
+  - with staging E2E and CI/CD both validated, the paused local follow-up lanes `TASK-OFFCHAIN-010` and `TASK-CHAIN-003` can resume in parallel
+- `TASK-OFFCHAIN-010` is now complete as a validation lane:
+  - local runtime parity with staging is confirmed for listener-driven deposit credit, duplicate bootstrap behavior, session-backed order placement, resolution, and terminal read surfaces
+  - the only failure left is the local proof wrapper itself: `cmd/local-lifecycle` still places a second explicit maker `SELL` after `/api/v1/admin/markets/:market_id/first-liquidity` already queued the bootstrap order
+- `TASK-CHAIN-003` is now complete:
+  - repo truth and legacy drift for `chain_deposits` widths are documented explicitly
+  - `migrations/010_chain_deposits_tx_hash_width_repair.sql` plus `docs/operations/local-chain-deposits-schema-repair.md` provide the narrow repair path
+  - worker validated synthetic drift reproduction, rollback-safe dry run, real apply, idempotent re-apply, and `go test ./internal/chain/...`
+- `TASK-OFFCHAIN-012` is the next narrow local follow-up:
+  - it should remove the stale second-sell step from `cmd/local-lifecycle` and align the local lifecycle docs with the one-shot first-liquidity contract already validated in staging and direct local API/runtime checks
+- `TASK-OFFCHAIN-012` is now complete:
+  - `cmd/local-lifecycle` no longer submits the stale second maker `SELL`
+  - `./scripts/local-lifecycle.sh` is green again
+  - local lifecycle docs now describe first-liquidity as one-shot inventory issuance plus queued bootstrap `SELL`, followed by the crossing `BUY`
+  - a small non-blocking local-state caveat remains documented: persistent `anvil` plus reused local postgres can reuse deterministic deposit evidence across runs unless the local DB is reset
+- current deployment behavior works, but the operator experience is still heavier than needed because `.github/workflows/staging-deploy.yml` owns too much orchestration logic instead of acting as a thin authenticated trigger into one stable server-side entrypoint
+- `TASK-CICD-004` is now the next optional platform lane:
+  - GitHub Actions should shrink to SSH trigger plus audit trail
+  - the server should own one fixed deploy entrypoint with locking, clean-checkout guard, exact-SHA checkout, and the call into repo `scripts/deploy-staging.sh`
+  - selective rebuild/restart behavior and docs-only no-op deploys should stay intact
+- commander review of `TASK-CICD-004` found one correctness gap before closure:
+  - `deploy/staging/server-deploy-entrypoint.sh` resolves `${target_ref}^{commit}` and plain `${branch_ref}^{commit}` before the freshly fetched `origin/<ref>`
+  - for symbolic deploy refs like `main`, that can silently choose a stale local branch left behind in `/opt/funnyoption-staging` instead of the current remote branch tip
+  - the follow-up should keep exact-SHA deploys unchanged but make symbolic refs prefer remote-tracking refs after fetch
+- `TASK-CICD-004` is now complete:
+  - raw commit SHAs still deploy exactly as supplied
+  - symbolic branch refs like `main` and `refs/heads/main` now prefer the freshly fetched remote-tracking ref before any same-named local-branch fallback
+  - thin-trigger workflow, host lock, dirty-checkout guard, and selective/docs-only deploy behavior all remain intact
+- `TASK-API-005` is now complete at code/test level: duplicate same-terms bootstrap requests are rejected in the one-shot core first-liquidity handler before maker mutation, first-liquidity collateral debit uses `assets.WinningPayoutAmount(req.Quantity)`, the admin route no longer submits a second bootstrap `/api/v1/orders` call, and commander re-ran `go test ./internal/api/...` plus `admin && npm run build`
+- one runtime validation gap remains for `TASK-API-005`: the worker could not run a full local lifecycle replay because the dev stack was down, so the next `TASK-STAGING-001` rerun should explicitly recheck duplicate bootstrap side effects and maker collateral debit on the deployed environment
+- `TASK-OFFCHAIN-011` is now complete at code/test level: `/portfolio` SSR no longer fetches private collections with default user `1001`, `PortfolioShell` waits for `session.userId` then refreshes balances/positions/orders/payouts/profile for that user, disconnected/not-authorized states are explicit, and commander re-ran `web && npm run build`
+- one runtime validation gap remains for `TASK-OFFCHAIN-011`: the worker's browser proof used a local mock API plus injected localStorage session, so the next `TASK-STAGING-001` rerun should explicitly recheck `/portfolio` against a real generated staging session wallet

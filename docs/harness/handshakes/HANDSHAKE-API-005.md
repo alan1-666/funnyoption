@@ -61,6 +61,10 @@
 - successful first-liquidity requests now debit `100 * quantity` collateral units and return `order_id` / `order_status` for the bootstrap sell order
 - `admin/app/api/operator/markets/[marketId]/first-liquidity/route.ts` now relies on the one-shot core first-liquidity API and no longer submits a second `/api/v1/orders` call
 - full local lifecycle replay was not executed because `./scripts/dev-status.sh` shows the dev stack is down; regression evidence and compatibility notes are captured in `WORKLOG-API-005.md`
+- deploy closeout:
+  - committed on `main` as `125f9cd4af344680e78529c5a98358b39427e703` (`Deploy reviewed API-005 and OFFCHAIN-011 fixset`)
+  - GitHub Actions `staging-deploy` run `23977457019` completed `success`; both `validate` and `deploy-staging` jobs passed
+  - staging server checkout `/opt/funnyoption-staging` now reports `HEAD=125f9cd`, `git status --short` clean, and `GET https://funnyoption.xyz/healthz` returns `{"env":"staging","service":"api","status":"ok"}`
 
 ## Status
 

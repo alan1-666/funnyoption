@@ -1,0 +1,90 @@
+# WORKLOG-OFFCHAIN-012
+
+### 2026-04-04 19:40 Asia/Shanghai
+
+- read:
+  - `PLAN.md`
+  - `PLAN-2026-04-01-master.md`
+  - `TASK-OFFCHAIN-012.md`
+  - `HANDSHAKE-OFFCHAIN-012.md`
+  - `WORKLOG-OFFCHAIN-010.md`
+- changed:
+  - created this narrow local lifecycle wrapper/docs follow-up task set
+- validated:
+  - `TASK-OFFCHAIN-010` already proved shared runtime parity with staging
+  - the remaining failure is isolated to the local proof wrapper path
+- blockers:
+  - none yet
+- next:
+  - launch one worker on `TASK-OFFCHAIN-012`
+
+### 2026-04-04 19:58 Asia/Shanghai
+
+- read:
+  - `AGENTS.md`
+  - `docs/harness/README.md`
+  - `docs/harness/roles/WORKER.md`
+  - `docs/harness/PROJECT_MAP.md`
+  - `docs/harness/THREAD_PROTOCOL.md`
+  - `docs/harness/tasks/TASK-OFFCHAIN-012.md`
+  - `docs/harness/handshakes/HANDSHAKE-OFFCHAIN-012.md`
+  - `docs/harness/worklogs/WORKLOG-OFFCHAIN-012.md`
+  - `docs/operations/local-lifecycle-runbook.md`
+  - `docs/operations/local-offchain-lifecycle.md`
+  - `docs/harness/worklogs/WORKLOG-OFFCHAIN-010.md`
+  - `cmd/local-lifecycle/main.go`
+  - `scripts/local-lifecycle.sh`
+  - `internal/api/dto/order.go`
+  - `internal/api/handler/order_handler.go`
+  - `internal/api/handler/order_handler_test.go`
+- changed:
+  - updated `cmd/local-lifecycle/main.go` so the runner treats `POST /api/v1/admin/markets/:market_id/first-liquidity` as the one-shot source of the maker `SELL`
+  - removed the stale post-bootstrap `createSignedOrder(..., "SELL", ...)` call that previously retried the maker sell and tripped `insufficient available balance`
+  - taught the runner to require `order_id` / `order_status` from the first-liquidity response, wait for that bootstrap order to become visible, and report it in the JSON summary as `bootstrap_order_id` / `bootstrap_order_status`
+  - updated `docs/operations/local-lifecycle-runbook.md` and `docs/operations/local-offchain-lifecycle.md` so the docs now describe one-shot first-liquidity truthfully: paired inventory plus queued bootstrap `SELL`, then only the crossing `BUY`
+- validated:
+  - old behavior before this patch, as captured in `WORKLOG-OFFCHAIN-010`:
+    - after `first_liquidity_id=liq_1775302217259_519df16d2eb8` queued `bootstrap_order_id=ord_bootstrap_48c1970ee46193c456c29969718bfaf7`, the runner still called a second maker `SELL` and failed with `create sell order: POST /api/v1/orders: rpc error: code = FailedPrecondition desc = insufficient available balance`
+  - compile coverage:
+    - `go test ./cmd/local-lifecycle`
+  - end-to-end commands:
+    - `./scripts/dev-up.sh`
+    - `./scripts/local-lifecycle.sh`
+    - `curl -sS 'http://127.0.0.1:8080/api/v1/orders?user_id=1002&market_id=1775303823162&limit=20'`
+    - `curl -sS 'http://127.0.0.1:8080/api/v1/orders?user_id=1001&market_id=1775303823162&limit=20'`
+    - `curl -sS 'http://127.0.0.1:8080/api/v1/markets/1775303823162'`
+    - `curl -sS 'http://127.0.0.1:8080/api/v1/deposits?user_id=1001&limit=5'`
+    - `curl -sS 'http://127.0.0.1:8080/api/v1/balances?user_id=1001&limit=20'`
+  - current green run:
+    - `./scripts/local-lifecycle.sh` completed successfully and logged:
+      - `issued first-liquidity inventory liq_1775303823792_01db74daff9e and queued bootstrap sell ord_bootstrap_224b072c74d285f71a0a697889528b57 for maker=1002`
+      - `bootstrap sell order ord_bootstrap_224b072c74d285f71a0a697889528b57 is visible with status=NEW`
+      - `queued buy order ord_1775303824466_315f243e2a72`
+      - `matched trade trd_2 quantity=40 price=58`
+    - JSON summary completed with:
+      - `market_id=1775303823162`
+      - `maker.first_liquidity_id=liq_1775303823792_01db74daff9e`
+      - `bootstrap_order_id=ord_bootstrap_224b072c74d285f71a0a697889528b57`
+      - `bootstrap_order_status=NEW`
+      - `buy_order_id=ord_1775303824466_315f243e2a72`
+      - `trade_id=trd_2`
+      - `market_status=RESOLVED`
+      - `resolved_outcome=YES`
+  - API readback after the run proves no duplicate maker sell was queued:
+    - maker orders for `market_id=1775303823162` returned exactly one item, `ord_bootstrap_224b072c74d285f71a0a697889528b57`, with `side=SELL`, `quantity=40`, `filled_quantity=40`, `status=FILLED`
+    - buyer orders for the same market returned exactly one item, `ord_1775303824466_315f243e2a72`, with `side=BUY`, `quantity=40`, `filled_quantity=40`, `status=FILLED`
+    - `GET /api/v1/markets/1775303823162` returned `status=RESOLVED`, `resolved_outcome=YES`, `runtime.trade_count=1`, `runtime.active_order_count=0`
+  - key ids from the successful run:
+    - `market_id=1775303823162`
+    - `first_liquidity_id=liq_1775303823792_01db74daff9e`
+    - `bootstrap_order_id=ord_bootstrap_224b072c74d285f71a0a697889528b57`
+    - `buy_order_id=ord_1775303824466_315f243e2a72`
+    - `trade_id=trd_2`
+    - `deposit_id=dep_fd6fe3438271a7cbd94ee762ba1a4b98`
+    - `deposit_tx_hash=0xd888d0c8e2d4323a2a81d15776438bd2060cd7354242b8c72f41750699b0a9cb`
+- blockers:
+  - none for `TASK-OFFCHAIN-012` acceptance; the wrapper is green again and shared API/runtime semantics were not touched
+- next:
+  - hand back to commander with the narrow runner/docs diff and note one residual local-state caveat:
+    - on persistent `anvil`, the deterministic deposit tx hash and deposit row can be reused across runs if local postgres is not reset; in this run `GET /api/v1/deposits?user_id=1001&limit=5` still returned the pre-existing credited row created at `1775302217`, and the buyer summary therefore showed `initial_usdt == post_deposit_usdt`
+    - that deposit-state reuse caveat predates this patch and is outside the owned scope here; this task only realigned the one-shot first-liquidity bootstrap path

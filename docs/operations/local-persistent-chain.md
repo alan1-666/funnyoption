@@ -568,6 +568,14 @@ go run ./cmd/local-lifecycle
 
 因为当前 listener 会用“活动 session -> user_id”做归属映射，所以没有活动 session 的钱包不会被记账。
 
+如果这是一个复用过的本地 PostgreSQL，而且你怀疑 `chain_deposits` 还保留着旧宽度，也检查：
+
+1. `chain_deposits.deposit_id` 是否是 `VARCHAR(64)`
+2. `chain_deposits.tx_hash` 是否错误地还是 `VARCHAR(64)` 而不是 repo 期望的 `VARCHAR(128)`
+3. 如果命中了这类 drift，按
+   [local-chain-deposits-schema-repair.md](/Users/zhangza/code/funnyoption/docs/operations/local-chain-deposits-schema-repair.md)
+   里的 preflight / dry-run / apply 步骤修复，不要直接改业务代码
+
 ### 4. 前端没自动切到本地链
 
 优先检查：

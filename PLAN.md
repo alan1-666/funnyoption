@@ -9,7 +9,12 @@ Detailed execution lives in `docs/harness/plans/active/`.
 - Harness rollout task: [`docs/harness/tasks/TASK-HARNESS-001.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-HARNESS-001.md)
 - Off-chain umbrella task: [`docs/harness/tasks/TASK-OFFCHAIN-001.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-OFFCHAIN-001.md)
 - Staging E2E task: [`docs/harness/tasks/TASK-STAGING-001.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-STAGING-001.md)
-- GitHub CI/CD task: [`docs/harness/tasks/TASK-CICD-001.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CICD-001.md)
+- Staging chain-listener unblock task: [`docs/harness/tasks/TASK-CHAIN-004.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-004.md)
+- First-liquidity correctness task: [`docs/harness/tasks/TASK-API-005.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-API-005.md)
+- Portfolio connected-user read task: [`docs/harness/tasks/TASK-OFFCHAIN-011.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-OFFCHAIN-011.md)
+- Local lifecycle wrapper alignment task: [`docs/harness/tasks/TASK-OFFCHAIN-012.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-OFFCHAIN-012.md)
+- GitHub CI/CD optimization task: [`docs/harness/tasks/TASK-CICD-003.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CICD-003.md)
+- Thin-trigger CI/CD simplification task: [`docs/harness/tasks/TASK-CICD-004.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CICD-004.md)
 
 ## Strategic lanes
 
@@ -54,5 +59,5 @@ Detailed execution lives in `docs/harness/plans/active/`.
 - Off-chain MVP: code-complete, with truthful local deposit proof and explicit first-liquidity now in place
 - Admin/operator backend: dedicated admin service is converged and core privileged market mutations are now protected at the shared API boundary
 - API service hardening: modular routing, middleware layering, rate limiting, bare-`user_id` fallback removal, same-proof bootstrap replay protection, and bootstrap semantic uniqueness are now in place
-- Next worker focus: run a staging E2E business-flow pass on `funnyoption.xyz` / `admin.funnyoption.xyz`, and provision GitHub Secrets + server `.env.staging` for the new push-to-deploy workflow
-- Chain hardening: listener-driven local deposit proof is in place; legacy local DB schema drift cleanup is paused behind the current staging and CI/CD rollout tasks
+- Next worker focus: no blocking execution lane remains after `TASK-CICD-004` closure; staging deploy now uses a thin GitHub trigger plus a fixed host entrypoint, with exact-SHA deploys preserved and symbolic branch refs preferring freshly fetched remote-tracking refs over stale same-named local branches
+- Chain hardening: listener-driven local deposit proof is in place, and legacy local `chain_deposits` schema drift now has a documented repair path plus repair migration

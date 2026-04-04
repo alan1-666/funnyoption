@@ -152,6 +152,8 @@ type createOrderResult struct {
 type createFirstLiquidityResult struct {
 	FirstLiquidityID string `json:"first_liquidity_id"`
 	Status           string `json:"status"`
+	OrderID          string `json:"order_id"`
+	OrderStatus      string `json:"order_status"`
 }
 
 type lifecycleSummary struct {
@@ -172,16 +174,17 @@ type lifecycleSummary struct {
 		FinalUSDT        int64  `json:"final_usdt"`
 		FirstLiquidityID string `json:"first_liquidity_id"`
 	} `json:"maker"`
-	DepositID          string `json:"deposit_id"`
-	DepositTxHash      string `json:"deposit_tx_hash"`
-	DepositLogIndex    int64  `json:"deposit_log_index"`
-	DepositBlockNumber int64  `json:"deposit_block_number"`
-	DepositVault       string `json:"deposit_vault_address"`
-	DepositStatus      string `json:"deposit_status"`
-	BuyOrderID         string `json:"buy_order_id"`
-	SellOrderID        string `json:"sell_order_id"`
-	MarketStatus       string `json:"market_status"`
-	ResolvedOutcome    string `json:"resolved_outcome"`
+	DepositID            string `json:"deposit_id"`
+	DepositTxHash        string `json:"deposit_tx_hash"`
+	DepositLogIndex      int64  `json:"deposit_log_index"`
+	DepositBlockNumber   int64  `json:"deposit_block_number"`
+	DepositVault         string `json:"deposit_vault_address"`
+	DepositStatus        string `json:"deposit_status"`
+	BootstrapOrderID     string `json:"bootstrap_order_id"`
+	BootstrapOrderStatus string `json:"bootstrap_order_status"`
+	BuyOrderID           string `json:"buy_order_id"`
+	MarketStatus         string `json:"market_status"`
+	ResolvedOutcome      string `json:"resolved_outcome"`
 }
 
 func main() {
@@ -352,28 +355,34 @@ func main() {
 	}); err != nil {
 		log.Fatalf("wait for explicit first-liquidity inventory: %v", err)
 	}
-	log.Printf("issued first-liquidity inventory %s for maker=%d", firstLiquidity.FirstLiquidityID, maker.UserID)
-
-	sellResult, err := client.createSignedOrder(ctx, &makerSession, market.MarketID, "YES", "SELL", *price, *quantity)
-	if err != nil {
-		log.Fatalf("create sell order: %v", err)
+	if strings.TrimSpace(firstLiquidity.OrderID) == "" {
+		log.Fatalf("issue first-liquidity inventory: missing bootstrap order id in response")
 	}
-	log.Printf("queued sell order %s", sellResult.OrderID)
+	log.Printf(
+		"issued first-liquidity inventory %s and queued bootstrap sell %s for maker=%d",
+		firstLiquidity.FirstLiquidityID,
+		firstLiquidity.OrderID,
+		maker.UserID,
+	)
 
+	var bootstrapOrder orderResponse
 	if err := waitFor(ctx, 500*time.Millisecond, func() (bool, error) {
 		items, err := client.listOrders(ctx, maker.UserID, market.MarketID)
 		if err != nil {
 			return false, err
 		}
 		for _, item := range items {
-			if item.OrderID == sellResult.OrderID {
-				return true, nil
+			if item.OrderID != firstLiquidity.OrderID {
+				continue
 			}
+			bootstrapOrder = item
+			return item.Side == "SELL" && item.RemainingQuantity >= *quantity, nil
 		}
 		return false, nil
 	}); err != nil {
-		log.Fatalf("wait for sell order visibility: %v", err)
+		log.Fatalf("wait for bootstrap sell order visibility: %v", err)
 	}
+	log.Printf("bootstrap sell order %s is visible with status=%s", bootstrapOrder.OrderID, bootstrapOrder.Status)
 
 	buyResult, err := client.createSignedOrder(ctx, &buyerSession, market.MarketID, "YES", "BUY", *price, *quantity)
 	if err != nil {
@@ -443,19 +452,20 @@ func main() {
 	}
 
 	summary := lifecycleSummary{
-		ProofEnvironment:   depositEnv.summary(),
-		MarketID:           market.MarketID,
-		TradeID:            matchedTrade.TradeID,
-		DepositID:          creditedDeposit.DepositID,
-		DepositTxHash:      depositTxHash,
-		DepositLogIndex:    creditedDeposit.LogIndex,
-		DepositBlockNumber: creditedDeposit.BlockNumber,
-		DepositVault:       creditedDeposit.VaultAddress,
-		DepositStatus:      creditedDeposit.Status,
-		BuyOrderID:         buyResult.OrderID,
-		SellOrderID:        sellResult.OrderID,
-		MarketStatus:       finalMarket.Status,
-		ResolvedOutcome:    finalMarket.ResolvedOutcome,
+		ProofEnvironment:     depositEnv.summary(),
+		MarketID:             market.MarketID,
+		TradeID:              matchedTrade.TradeID,
+		DepositID:            creditedDeposit.DepositID,
+		DepositTxHash:        depositTxHash,
+		DepositLogIndex:      creditedDeposit.LogIndex,
+		DepositBlockNumber:   creditedDeposit.BlockNumber,
+		DepositVault:         creditedDeposit.VaultAddress,
+		DepositStatus:        creditedDeposit.Status,
+		BootstrapOrderID:     bootstrapOrder.OrderID,
+		BootstrapOrderStatus: bootstrapOrder.Status,
+		BuyOrderID:           buyResult.OrderID,
+		MarketStatus:         finalMarket.Status,
+		ResolvedOutcome:      finalMarket.ResolvedOutcome,
 	}
 	summary.Buyer.UserID = buyer.UserID
 	summary.Buyer.WalletAddress = buyer.Address

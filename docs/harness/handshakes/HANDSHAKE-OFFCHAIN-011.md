@@ -58,3 +58,9 @@
 ## Status
 
 - completed
+
+## Deployment closeout
+
+- committed on `main` as `125f9cd4af344680e78529c5a98358b39427e703` (`Deploy reviewed API-005 and OFFCHAIN-011 fixset`)
+- GitHub Actions `staging-deploy` run `23977457019` completed `success`; `validate` and `deploy-staging` both passed
+- staging server checkout `/opt/funnyoption-staging` now reports `HEAD=125f9cd`, `git status --short` clean, and `GET https://funnyoption.xyz/healthz` returns `{"env":"staging","service":"api","status":"ok"}`

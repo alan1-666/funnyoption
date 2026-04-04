@@ -52,4 +52,16 @@
 
 ## Status
 
-- paused
+- completed
+
+## Handoff notes
+
+- repo truth and legacy drift are now documented explicitly:
+  - expected: `chain_deposits.deposit_id = VARCHAR(64)`, `chain_deposits.tx_hash = VARCHAR(128)`
+  - observed legacy reused-local drift: `deposit_id = VARCHAR(64)`, `tx_hash = VARCHAR(64)`
+- narrow repair path shipped as:
+  - `migrations/010_chain_deposits_tx_hash_width_repair.sql`
+  - `docs/operations/local-chain-deposits-schema-repair.md`
+  - supporting doc updates in `docs/sql/schema.md` and `docs/operations/local-persistent-chain.md`
+- worker validated the repair path with synthetic drift reproduction, dry-run rollback, real apply, re-apply idempotency, and `go test ./internal/chain/...`
+- no product-runtime chain code change was required; residual evidence boundary is documented explicitly because no preserved legacy local DB volume existed in this workspace

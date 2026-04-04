@@ -18,6 +18,8 @@
 
 `/Users/zhangza/code/funnyoption/migrations/009_chain_listener_cursors.sql` adds a persisted restart cursor for vault event scans.
 
+`/Users/zhangza/code/funnyoption/migrations/010_chain_deposits_tx_hash_width_repair.sql` reconciles reused local `chain_deposits.tx_hash` width drift back to the repo truth.
+
 ## Trading domain
 
 - `markets`: market master data and lifecycle state
@@ -46,6 +48,21 @@
 - `chain_deposits`: direct frontend-to-vault deposit mirror keyed by transaction event identity
 - `chain_withdrawals`: mirrored `queueWithdrawal` events keyed by transaction event identity
 - `chain_listener_cursors`: persisted `next_block` checkpoint for restart-safe vault log scans
+
+## `chain_deposits` width notes
+
+- repo truth:
+  - `deposit_id = VARCHAR(64)`
+  - `tx_hash = VARCHAR(128)`
+- observed legacy local drift from reused databases:
+  - `deposit_id = VARCHAR(64)`
+  - `tx_hash = VARCHAR(64)`
+- current listener-driven local proof still works on that drifted local shape because the chain listener stores:
+  - deterministic deposit ids that fit within `VARCHAR(64)`
+  - normalized lowercase tx hashes without the `0x` prefix, which fit within `VARCHAR(64)`
+- repo-local repair path:
+  - [`migrations/010_chain_deposits_tx_hash_width_repair.sql`](/Users/zhangza/code/funnyoption/migrations/010_chain_deposits_tx_hash_width_repair.sql)
+  - [`docs/operations/local-chain-deposits-schema-repair.md`](/Users/zhangza/code/funnyoption/docs/operations/local-chain-deposits-schema-repair.md)
 
 ## Wallet and session domain
 

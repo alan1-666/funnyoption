@@ -45,21 +45,66 @@ deployment config or GitHub Actions secrets, not in plaintext docs.
 GitHub push-to-deploy is wired through:
 
 - [.github/workflows/staging-deploy.yml](/Users/zhangza/code/funnyoption/.github/workflows/staging-deploy.yml)
+- [deploy/staging/server-deploy-entrypoint.sh](/Users/zhangza/code/funnyoption/deploy/staging/server-deploy-entrypoint.sh)
 - [scripts/deploy-staging.sh](/Users/zhangza/code/funnyoption/scripts/deploy-staging.sh)
 
 ### Workflow behavior
 
 - `push` to `main` triggers a staging deployment.
 - `workflow_dispatch` can redeploy a specific commit SHA or git ref through
-  the `deploy_ref` input.
-- the `validate` job runs:
-  - `go test ./...`
-  - `npm ci && npm run build` for `web`
-  - `npm run build` for `admin`
-  - `bash -n scripts/*.sh`
-- the `deploy-staging` job SSHes into the staging server, checks out the target
-  ref in the server-side repo clone, runs migrations, rebuilds the compose
-  stack, and performs HTTP smoke checks.
+  the `deploy_ref` input, and can force a full rebuild with
+  `deploy_scope=full`.
+- GitHub Actions is now a thin trigger:
+  - it resolves the exact target SHA/ref
+  - it configures SSH with pinned host verification
+  - it invokes `/usr/local/bin/funnyoption-staging-deploy --repo /opt/funnyoption-staging --ref <target>`
+  - it appends `--all-services` only for the manual full-deploy override
+- the fixed server entrypoint is the orchestration source of truth:
+  - it acquires `/var/lock/funnyoption-staging-deploy.lock` with `flock`
+  - it rejects tracked/staged checkout drift before deploy
+  - it records the current deployed repo `HEAD` as `diff_base`
+  - it fetches `origin` and checks out the exact requested target commit in detached `HEAD`
+  - it delegates to the checked-out repo script with `--skip-git-sync` and either `--diff-base <previous_head>` or `--all-services`
+- ref resolution on the host entrypoint is intentionally asymmetric:
+  - raw commit SHAs still resolve exactly as supplied
+  - symbolic branch refs like `main` or `refs/heads/main` first resolve against the freshly fetched remote-tracking ref such as `origin/main`
+  - only after that does the entrypoint fall back to a same-named local ref when that is explicitly reasonable
+- selective service planning, docs-only no-op deploys, migration decisions, and
+  post-deploy HTTP smoke checks still live in
+  [scripts/deploy-staging.sh](/Users/zhangza/code/funnyoption/scripts/deploy-staging.sh).
+- GitHub Actions no longer embeds the selective plan or validation matrix; the
+  live deploy path now lives on the server entrypoint plus the repo deploy
+  script.
+
+### Path-to-service map
+
+| Changed path | Rebuild / restart services | Validation |
+| --- | --- | --- |
+| `cmd/api/**`, `internal/api/**` | `api` | Go tests |
+| `cmd/ws/**`, `internal/ws/**` | `ws` | Go tests |
+| `cmd/matching/**`, `internal/matching/**` | `matching` | Go tests |
+| `cmd/account/**`, `internal/account/model/**`, `internal/account/repository/**`, `internal/account/service/**` | `account` | Go tests |
+| `internal/account/client/**`, `internal/gen/accountv1/**` | `account`, `api`, `chain` | Go tests |
+| `cmd/ledger/**`, `internal/ledger/**` | `ledger` | Go tests |
+| `cmd/settlement/**`, `internal/settlement/**` | `settlement` | Go tests |
+| `cmd/chain/**`, `internal/chain/**` | `chain` | Go tests |
+| `web/**` except `web/package.json` and `web/package-lock.json` | `web` | `web` build |
+| `web/package.json`, `web/package-lock.json` | `web`, `admin` | `web` and `admin` builds |
+| `admin/**` | `admin` | `admin` build |
+| `migrations/**` | `account`, `matching`, `ledger`, `settlement`, `chain`, `api`, `ws` | run `migrate` profile |
+
+### Fallback policy
+
+- `go.mod`, `go.sum`, `internal/shared/**`, and `proto/**` trigger all backend
+  services.
+- `deploy/docker/**`, `deploy/staging/**`, and `scripts/deploy-staging.sh`
+  trigger all app services plus the `migrate` profile.
+- unclassified `*.go`, `cmd/**`, or `internal/**` changes fall back to all
+  backend services instead of risking a missed rebuild.
+- if the requested diff base commit is unavailable, the plan falls back to a
+  full service deploy.
+- docs-only pushes, including `docs/harness/**`, produce `skip_deploy=1` and do
+  not rebuild or restart services.
 
 ### Required GitHub Secrets
 
@@ -68,7 +113,6 @@ Configure these in the `staging` environment or repository secrets:
 - `STAGING_SSH_HOST`: staging server hostname or IP
 - `STAGING_SSH_USER`: SSH login user
 - `STAGING_SSH_PRIVATE_KEY`: private key for the deploy user
-- `STAGING_DEPLOY_PATH`: absolute path to the server-side repo clone
 - `STAGING_SSH_PORT`: optional SSH port, defaults to `22`
 - `STAGING_SSH_KNOWN_HOSTS`: optional pinned `known_hosts` entry
 
@@ -81,36 +125,78 @@ server-only env file described below.
 
 Prepare the server once before enabling the workflow:
 
-1. Clone this repository to the path stored in `STAGING_DEPLOY_PATH`.
+1. Clone this repository to `/opt/funnyoption-staging`.
 2. Create `deploy/staging/.env.staging` inside that clone from
    [configs/staging/funnyoption.env.example](/Users/zhangza/code/funnyoption/configs/staging/funnyoption.env.example)
    and fill all secret-bearing values on the server only.
-3. Ensure the deploy user can run `git fetch`, `docker compose`, and `curl`.
-4. Ensure the server has outbound HTTPS access to container registries, npm
+3. Install or refresh the fixed host-side entrypoint and lock file:
+
+   ```bash
+   sudo install -m 0755 /opt/funnyoption-staging/deploy/staging/server-deploy-entrypoint.sh /usr/local/bin/funnyoption-staging-deploy
+   sudo install -o <deploy-user> -g <deploy-group> -m 0664 /dev/null /var/lock/funnyoption-staging-deploy.lock
+   ```
+
+4. Ensure the deploy user can run `git fetch`, `docker compose`, `curl`,
+   `flock`, and `/usr/local/bin/funnyoption-staging-deploy`.
+5. Ensure the deploy user can write `/var/lock/funnyoption-staging-deploy.lock`.
+6. Ensure the server has outbound HTTPS access to container registries, npm
    package downloads, and `fonts.googleapis.com` during image builds.
-5. Install the reverse proxy config from
+7. Install the reverse proxy config from
    [deploy/staging/funnyoption.xyz.conf](/Users/zhangza/code/funnyoption/deploy/staging/funnyoption.xyz.conf)
    and keep TLS termination outside the repo.
 
+Normal app deploys reuse the installed `/usr/local/bin/funnyoption-staging-deploy`
+path. If a future change edits
+[deploy/staging/server-deploy-entrypoint.sh](/Users/zhangza/code/funnyoption/deploy/staging/server-deploy-entrypoint.sh)
+itself, rerun the `sudo install ... /usr/local/bin/funnyoption-staging-deploy`
+command after checking out the intended repo version on the server.
+
 ### Manual deploy and rollback
 
-From the server-side repo clone:
+Manual deploy of one exact target:
 
 ```bash
-FUNNYOPTION_DEPLOY_REF=origin/main ./scripts/deploy-staging.sh
+/usr/local/bin/funnyoption-staging-deploy --repo /opt/funnyoption-staging --ref <commit-sha-or-ref>
+```
+
+When `--ref` is a branch-like symbolic ref such as `main` or
+`refs/heads/main`, the entrypoint deploys the freshly fetched remote branch tip
+first. Raw commit SHAs keep their exact-SHA behavior unchanged.
+
+Redeploy the currently checked-out commit as a full stack refresh:
+
+```bash
+/usr/local/bin/funnyoption-staging-deploy \
+  --repo /opt/funnyoption-staging \
+  --ref "$(git -C /opt/funnyoption-staging rev-parse HEAD)" \
+  --all-services
 ```
 
 Rollback to a known-good commit:
 
 ```bash
-./scripts/deploy-staging.sh --ref <previous-good-sha>
+/usr/local/bin/funnyoption-staging-deploy --repo /opt/funnyoption-staging --ref <previous-good-sha>
 ```
 
-If the new release is already checked out and you only want to re-run compose
-with the local tree as-is:
+Force a full rollback rebuild if you do not want diff-based selection:
 
 ```bash
-./scripts/deploy-staging.sh --skip-git-sync
+/usr/local/bin/funnyoption-staging-deploy --repo /opt/funnyoption-staging --ref <previous-good-sha> --all-services
+```
+
+Preview the selective plan from the current checkout without touching compose:
+
+```bash
+cd /opt/funnyoption-staging
+./scripts/deploy-staging.sh --skip-git-sync --print-plan --diff-base HEAD^
+```
+
+If you need a narrow, manual service-only intervention outside the standard
+entrypoint flow, use the checked-out repo script directly:
+
+```bash
+cd /opt/funnyoption-staging
+./scripts/deploy-staging.sh --skip-git-sync --service api --skip-migrations
 ```
 
 If deployment fails before these commands can be exercised, the usual blocker
@@ -118,7 +204,6 @@ is one of these missing server-specific values:
 
 - `STAGING_SSH_HOST`
 - `STAGING_SSH_USER`
-- `STAGING_DEPLOY_PATH`
 - the server-local `deploy/staging/.env.staging`
 
 ## Required secrets and addresses
@@ -270,7 +355,81 @@ After the stack is up, verify these in order:
 - `FUNNYOPTION_CHAIN_CONFIRMATIONS=6` is a reasonable testing default.
 - `FUNNYOPTION_CHAIN_START_BLOCK` should be set deliberately on staging.
   - Use `0` only for first-time bring-up or disposable environments.
-  - For redeploys, move it forward so `chain` does not rescan a huge range.
+  - For redeploys, keep it as a lower-bound bootstrap value only. The chain
+    listener now persists its restart cursor in `chain_listener_cursors` and
+    resumes from `max(FUNNYOPTION_CHAIN_START_BLOCK, persisted_next_block)`.
+    Lowering `FUNNYOPTION_CHAIN_START_BLOCK` alone no longer rewinds the scan
+    cursor once a checkpoint row exists.
+
+### Chain listener restart and recovery
+
+Steady-state restart behavior:
+
+- `chain` logs `vault scan cursor initialized` with the configured lower-bound
+  start block, the persisted checkpoint, and the effective `next_block`.
+- after each confirmed block-range scan, `chain` updates
+  `chain_listener_cursors.next_block` so another restart can resume without
+  replaying from a stale static block.
+- if the RPC returns `History has been pruned for this block`, `chain` logs
+  `skip pruned vault history`, fast-forwards `next_block` to `safeHead + 1`,
+  persists that cursor, and continues with new blocks.
+
+One-time recovery when staging was already wedged on an old pruned start block:
+
+1. Read the current cursor row and the chain logs:
+
+   ```bash
+   docker compose \
+     --env-file deploy/staging/.env.staging \
+     -f deploy/staging/docker-compose.staging.yml \
+     exec postgres \
+     sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT chain_name, network_name, vault_address, next_block, updated_at FROM chain_listener_cursors ORDER BY updated_at DESC;"'
+
+   docker compose \
+     --env-file deploy/staging/.env.staging \
+     -f deploy/staging/docker-compose.staging.yml \
+     logs --since 30m chain
+   ```
+
+   The `postgres` service does not load `deploy/staging/.env.staging`, so do
+   not use `psql "$FUNNYOPTION_POSTGRES_DSN"` inside that container unless you
+   explicitly inject the DSN from the host shell first:
+
+   ```bash
+   set -a
+   source deploy/staging/.env.staging
+   set +a
+
+   docker compose \
+     --env-file deploy/staging/.env.staging \
+     -f deploy/staging/docker-compose.staging.yml \
+     exec -e FUNNYOPTION_POSTGRES_DSN postgres \
+     sh -lc 'psql "$FUNNYOPTION_POSTGRES_DSN" -c "SELECT 1;"'
+   ```
+
+2. If no cursor row exists yet and the static start block is already pruned,
+   restart `chain` after deploying the fix and confirm the fast-forward log.
+   If you intentionally skip an old range, record the exact `[from_block,
+   to_block]` interval from `skip pruned vault history` in the handoff. The
+   tradeoff is that deposit / withdrawal events that exist only inside that
+   skipped pruned range cannot be replayed from the current public RPC and
+   require an archival RPC or manual backfill.
+
+3. If you need an explicit manual fast-forward before restart, update only the
+   target vault row and document the skipped range:
+
+   ```bash
+   docker compose \
+     --env-file deploy/staging/.env.staging \
+     -f deploy/staging/docker-compose.staging.yml \
+     exec postgres \
+     psql -U funnyoption -d funnyoption \
+     -c "INSERT INTO chain_listener_cursors (chain_name, network_name, vault_address, next_block, updated_at)
+         VALUES ('bsc', 'testnet', lower('<vault-address>'), <next-block>, EXTRACT(EPOCH FROM NOW())::BIGINT)
+         ON CONFLICT (chain_name, network_name, vault_address) DO UPDATE
+         SET next_block = GREATEST(chain_listener_cursors.next_block, EXCLUDED.next_block),
+             updated_at = EXCLUDED.updated_at;"
+   ```
 
 ## Current staging assets
 

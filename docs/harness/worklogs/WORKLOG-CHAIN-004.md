@@ -1,0 +1,231 @@
+# WORKLOG-CHAIN-004
+
+### 2026-04-04 17:24 Asia/Shanghai
+
+- read:
+  - `WORKLOG-STAGING-001.md`
+  - `HANDSHAKE-STAGING-001.md`
+  - `internal/chain/service/listener.go`
+- changed:
+  - created `TASK-CHAIN-004` and this handshake/worklog set for the staging deposit-listener unblock
+- validated:
+  - `ssh root@76.13.220.236 'cd /opt/funnyoption-staging && docker compose -f deploy/staging/docker-compose.staging.yml logs --since 4h chain | tail -n 300'`
+  - chain logs repeatedly report `deposit poll failed` with `History has been pruned for this block`
+  - server env currently has `FUNNYOPTION_CHAIN_RPC_URL=https://bsc-testnet-rpc.publicnode.com` and `FUNNYOPTION_CHAIN_START_BLOCK=99452107`
+  - the blocked test deposit tx was mined at block `99674293`, so the listener restart lag from static start block is `222186` blocks
+- blockers:
+  - `TASK-STAGING-001` cannot complete concurrent order/matching verification until fresh deposits are ingested again on staging
+- next:
+  - launch one chain/platform worker on `TASK-CHAIN-004`
+
+### 2026-04-04 17:31 Asia/Shanghai
+
+- read:
+  - `docs/harness/tasks/TASK-CHAIN-004.md`
+  - `docs/harness/handshakes/HANDSHAKE-CHAIN-004.md`
+  - `docs/harness/worklogs/WORKLOG-CHAIN-004.md`
+  - `docs/harness/worklogs/WORKLOG-STAGING-001.md`
+  - `docs/deploy/staging-bsc-testnet.md`
+  - `docs/architecture/direct-deposit-session-key.md`
+  - `internal/chain/service/listener.go`
+  - `internal/chain/service/sql_store.go`
+  - `internal/chain/service/server.go`
+  - `internal/chain/service/rpc_pool.go`
+  - `internal/chain/service/listener_test.go`
+  - `internal/chain/service/processor.go`
+  - `internal/chain/service/processor_test.go`
+  - `docs/sql/schema.md`
+  - `migrations/003_wallet_sessions_and_deposits.sql`
+  - `migrations/006_chain_withdrawals.sql`
+- changed:
+  - `internal/chain/service/listener.go`
+  - `internal/chain/service/sql_store.go`
+  - `internal/chain/service/listener_test.go`
+  - `internal/chain/service/processor_test.go`
+  - `migrations/009_chain_listener_cursors.sql`
+  - `docs/sql/schema.md`
+  - `docs/deploy/staging-bsc-testnet.md`
+  - `docs/harness/handshakes/HANDSHAKE-CHAIN-004.md`
+  - `docs/harness/worklogs/WORKLOG-CHAIN-004.md`
+- root cause:
+  - before this patch, `DepositListener` reconstructed `nextBlock` from the static `FUNNYOPTION_CHAIN_START_BLOCK` on every process start and never persisted scan progress after a successful range scan
+  - if the configured start block had already fallen behind the public RPC retention window, `FilterLogs` returned `History has been pruned for this block`, `pollOnce` returned an error before advancing `nextBlock`, and every restart or next tick retried the same stale range forever
+  - current staging evidence from commander/staging worklogs: `FUNNYOPTION_CHAIN_START_BLOCK=99452107`, blocked deposit tx `0x4129a4db5f66760ca8374a1dbe3df94652552df9768500ff0d49ec9654733a6c` at block `99674293`, repeated chain logs `deposit poll failed: History has been pruned for this block`
+- restart-safe cursor strategy:
+  - added `chain_listener_cursors(chain_name, network_name, vault_address, next_block, updated_at)`
+  - startup now loads the persisted checkpoint and resumes from `max(FUNNYOPTION_CHAIN_START_BLOCK, persisted_next_block)`
+  - after each confirmed range scan, the listener persists `next_block = toBlock + 1`
+  - when the RPC reports pruned history, the listener logs `skip pruned vault history`, records the skipped `[from_block, to_block]` interval, fast-forwards to `safeHead + 1`, and persists that cursor so the next restart cannot fall back to the old static start block
+- validated:
+  - `gofmt -w internal/chain/service/listener.go internal/chain/service/sql_store.go internal/chain/service/listener_test.go internal/chain/service/processor_test.go`
+  - `go test ./internal/chain/service/...`
+  - `go test -run TestDepositListenerPollOnceCreditsFreshDepositAfterPrunedFastForwardRestart -v ./internal/chain/service/...`
+  - `git diff --check`
+- fresh deposit proof:
+  - the new restart regression test simulates a first process hitting pruned history at `[100, 1000]`, persisting `next_block=1001`, then a restarted process loading that checkpoint and scanning a fresh `Deposited` log at block `1002`
+  - test assertions verify one balance credit call, Kafka publish topic `funnyoption.chain.deposit`, `dep_fresh` marked credited, and the cursor advanced to `1011`
+  - proof output:
+    - `INFO vault scan cursor initialized configured_start_block=100 checkpoint_next_block=0 next_block=100 safe_head=1000 ...`
+    - `WARN skip pruned vault history from_block=100 to_block=1000 next_block=1001 ... err="History has been pruned for this block"`
+    - `INFO vault scan cursor initialized configured_start_block=100 checkpoint_next_block=1001 next_block=1001 safe_head=1010 ...`
+    - `--- PASS: TestDepositListenerPollOnceCreditsFreshDepositAfterPrunedFastForwardRestart (0.00s)`
+- skipped-range tradeoff:
+  - any events that exist only in a skipped pruned interval cannot be replayed from the current public RPC after fast-forward and need an archival RPC or manual backfill
+  - if staging intentionally fast-forwards past the currently missing tx block `99674293`, that historical deposit will remain absent until a manual backfill is performed; fresh deposits after the new checkpoint should ingest normally
+- one-time staging recovery command:
+  - deploy this patch plus `migrations/009_chain_listener_cursors.sql`
+  - restart `chain`
+  - inspect `vault scan cursor initialized` and `skip pruned vault history` in `docker compose -f deploy/staging/docker-compose.staging.yml logs --since 30m chain`
+  - query `chain_listener_cursors` and then submit one new vault deposit from a session-bound wallet; verify `/api/v1/deposits` and `/api/v1/balances` for that user
+- blockers:
+  - no code/test blocker in this thread
+  - live staging `/api/v1/deposits` + `/api/v1/balances` proof still needs a commander-triggered deploy of this local patch from a clean server clone, because the current worktree also contains unrelated edits from other active threads
+- next:
+  - hand the patch and restart/runbook notes back to commander for staging deploy smoke
+
+### 2026-04-04 17:48 Asia/Shanghai
+
+- read:
+  - `AGENTS.md`
+  - `PLAN.md`
+  - `docs/harness/README.md`
+  - `docs/harness/roles/WORKER.md`
+  - `docs/harness/PROJECT_MAP.md`
+  - `docs/harness/THREAD_PROTOCOL.md`
+  - `docs/harness/tasks/TASK-CHAIN-004.md`
+  - `docs/harness/handshakes/HANDSHAKE-CHAIN-004.md`
+  - `docs/harness/worklogs/WORKLOG-CHAIN-004.md`
+  - `docs/deploy/staging-bsc-testnet.md`
+  - `deploy/staging/docker-compose.staging.yml`
+  - `scripts/staging-concurrency-orders.mjs`
+- changed:
+  - `docs/deploy/staging-bsc-testnet.md`
+  - `docs/harness/handshakes/HANDSHAKE-CHAIN-004.md`
+  - `docs/harness/worklogs/WORKLOG-CHAIN-004.md`
+- runbook fix:
+  - replaced recovery snippets with `docker compose --env-file deploy/staging/.env.staging ... exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"` so they match the real `postgres` container env
+  - documented the host-env injection path for DSN-style commands:
+    - `set -a`
+    - `source deploy/staging/.env.staging`
+    - `set +a`
+- live staging deploy:
+  - remote checkout `/opt/funnyoption-staging` was still at `fbdcc5f` and did not have `migrations/009_chain_listener_cursors.sql`
+  - `./scripts/deploy-staging.sh --skip-git-sync --service chain` failed there with `deploy-staging: unknown argument: --service`
+  - applied only these runtime patch files to the remote checkout:
+    - `internal/chain/service/listener.go`
+    - `internal/chain/service/sql_store.go`
+    - `migrations/009_chain_listener_cursors.sql`
+  - ran:
+    - `ssh root@76.13.220.236 'cd /opt/funnyoption-staging && docker compose --env-file deploy/staging/.env.staging -f deploy/staging/docker-compose.staging.yml --profile ops run --rm migrate && docker compose --env-file deploy/staging/.env.staging -f deploy/staging/docker-compose.staging.yml up -d --build chain'`
+  - migration output included `applying /workspace/migrations/009_chain_listener_cursors.sql`, `CREATE TABLE`, `CREATE INDEX`, `COMMIT`
+- live staging cursor/log proof:
+  - cursor row:
+    - `chain_name=bsc`
+    - `network_name=testnet`
+    - `vault_address=0x7665d943c62268d27ffcbed29c6a8281f7364534`
+    - `next_block=99680038`
+    - `updated_at=1775296076`
+  - chain log key lines:
+    - `{"msg":"chain service bootstrapped","chain_rpc_url":"https://bsc-testnet-rpc.publicnode.com","vault_address":"0x7665d943c62268d27ffcbed29c6a8281f7364534","confirmations":6,"start_block":99452107,...}`
+    - `{"msg":"vault scan cursor initialized","configured_start_block":99452107,"checkpoint_next_block":0,"next_block":99452107,"safe_head":99679358,...}`
+    - `{"msg":"skip pruned vault history","from_block":99452107,"to_block":99679358,"next_block":99679359,...,"err":"History has been pruned for this block. ..."}`
+- fresh deposit proof:
+  - ran `node /tmp/task_chain_004_live_smoke.mjs` with local sandbox network escalation and no private-key plaintext output
+  - script flow:
+    - generated a fresh one-off user wallet in memory
+    - created a session via `POST https://funnyoption.xyz/api/v1/sessions`
+    - funded the wallet from the operator wallet
+    - submitted `approve` and `vault.deposit(1 USDT)`
+    - polled `/api/v1/deposits?user_id=1430496&limit=20` and `/api/v1/balances?user_id=1430496&limit=20`
+  - result:
+    - `user_id=1430496`
+    - `wallet_address=0x3f19b72882286428f05d03d0b7a7e812e4d5577c`
+    - `session_id=sess_d3017fcd6c8b0b800cc08a728f0f3241`
+    - `fund_tbnb_tx=0xb3392f5f364889386a6b3e9272dcd6b73564cac90e95a6782a2aabd2a39d9c3f`
+    - `fund_usdt_tx=0xcd104bb5958dc00e9e7f46fd7b9c30cde87267a1bb5c860941623fd880dc3cca`
+    - `approve_tx=0x9bd63a663e1d54f9b9d131ecb5df6b70b9508fc6215035cfc9bc8416075bc161`
+    - `deposit_tx=0xa598e8cf7022a67ee27f4ba7f075ed4b3d6d027a93f9f2e96047b1a5094759b0`
+    - `deposit_block=99679976`
+    - `deposit_id=dep_09caa085db59579b1543683f64ae8238`
+    - `credited_at=1775296050`
+    - `balance=USDT available=100 frozen=0`
+  - API proof snapshots:
+    - `GET https://funnyoption.xyz/api/v1/deposits?user_id=1430496&limit=20` returned `deposit_id=dep_09caa085db59579b1543683f64ae8238`, `tx_hash=a598e8cf7022a67ee27f4ba7f075ed4b3d6d027a93f9f2e96047b1a5094759b0`, `status=CREDITED`, `amount=100`, `credited_at=1775296050`
+    - `GET https://funnyoption.xyz/api/v1/balances?user_id=1430496&limit=20` returned `asset=USDT`, `available=100`, `frozen=0`
+- skipped-range tradeoff:
+  - `chain` intentionally skipped `[99452107,99679358]` because the public BSC Testnet RPC reported pruned history for that range
+  - deposit/withdrawal events that exist only inside that skipped range, including the old failed staging tx at block `99674293`, still need an archival RPC replay or manual DB/account backfill
+- validated:
+  - `git diff --check`
+  - `ssh root@76.13.220.236 'cd /opt/funnyoption-staging && docker compose --env-file deploy/staging/.env.staging -f deploy/staging/docker-compose.staging.yml exec -T postgres psql -U funnyoption -d funnyoption -c "SELECT chain_name, network_name, vault_address, next_block, updated_at FROM chain_listener_cursors ORDER BY updated_at DESC;"'`
+  - `ssh root@76.13.220.236 'cd /opt/funnyoption-staging && docker compose --env-file deploy/staging/.env.staging -f deploy/staging/docker-compose.staging.yml logs --since 20m chain | grep -E "vault scan cursor initialized|skip pruned vault history|deposit poll failed|chain service bootstrapped" | tail -n 200'`
+  - `ssh root@76.13.220.236 'curl -sS "https://funnyoption.xyz/api/v1/deposits?user_id=1430496&limit=20" && printf "\n" && curl -sS "https://funnyoption.xyz/api/v1/balances?user_id=1430496&limit=20"'`
+- blockers:
+  - none for `TASK-CHAIN-004` closure
+- next:
+  - commander can mark `TASK-CHAIN-004` done and continue `TASK-STAGING-001` with remaining API/portfolio blockers
+
+### 2026-04-04 18:08 Asia/Shanghai
+
+- read:
+  - `AGENTS.md`
+  - `PLAN.md`
+  - `docs/harness/roles/WORKER.md`
+  - `docs/harness/PROJECT_MAP.md`
+  - `docs/harness/THREAD_PROTOCOL.md`
+  - `docs/harness/tasks/TASK-CHAIN-004.md`
+  - `docs/harness/handshakes/HANDSHAKE-CHAIN-004.md`
+  - `docs/harness/worklogs/WORKLOG-CHAIN-004.md`
+  - `docs/deploy/staging-bsc-testnet.md`
+  - `.github/workflows/staging-deploy.yml`
+- changed:
+  - `docs/harness/handshakes/HANDSHAKE-CHAIN-004.md`
+  - `docs/harness/worklogs/WORKLOG-CHAIN-004.md`
+- blocker 1 closeout:
+  - verified the recovery cursor query now runs `psql -U "$POSTGRES_USER" -d
+    "$POSTGRES_DB"` inside `docker compose exec postgres sh -lc '...'`, so the
+    variables are expanded by the container shell instead of the operator's
+    host shell
+  - verified the manual cursor fast-forward snippet uses
+    `psql -U funnyoption -d funnyoption`
+  - verified DSN-based commands document `set -a`, `source
+    deploy/staging/.env.staging`, `set +a`, then
+    `docker compose ... exec -e FUNNYOPTION_POSTGRES_DSN postgres sh -lc 'psql
+    "$FUNNYOPTION_POSTGRES_DSN" -c "SELECT 1;"'`
+- blocker 2 closeout:
+  - committed and pushed the chain cursor patch:
+    - `git commit -m "Persist chain listener scan cursor"`
+    - `git push origin main`
+    - commit `ea71dc8`
+  - normalized the server checkout and rechecked the Actions dirty guard:
+    - `ssh root@76.13.220.236 'cd /opt/funnyoption-staging && git fetch --prune origin && git add internal/chain/service/listener.go internal/chain/service/sql_store.go migrations/009_chain_listener_cursors.sql && git checkout --detach ea71dc8 && printf "HEAD=" && git rev-parse --short HEAD && printf "\nSTATUS\n" && git status --short && if ! git diff --quiet --ignore-submodules -- || ! git diff --cached --quiet --ignore-submodules --; then echo "dirty guard would fail" >&2; exit 1; fi && printf "\nDIRTY_GUARD=clean\n" && docker compose --env-file deploy/staging/.env.staging -f deploy/staging/docker-compose.staging.yml ps chain'`
+  - server output:
+    - `HEAD=ea71dc8`
+    - `STATUS` had no files listed
+    - `DIRTY_GUARD=clean`
+    - `funnyoption-staging-chain-1   funnyoption-staging-chain   "/app/chain"   chain   Up`
+- fresh staging verification after server checkout normalization:
+  - command:
+    - `ssh root@76.13.220.236 'curl -sS "https://funnyoption.xyz/api/v1/deposits?user_id=1430496&limit=20" && printf "\n" && curl -sS "https://funnyoption.xyz/api/v1/balances?user_id=1430496&limit=20"'`
+  - `/api/v1/deposits` returned:
+    - `deposit_id=dep_09caa085db59579b1543683f64ae8238`
+    - `user_id=1430496`
+    - `tx_hash=a598e8cf7022a67ee27f4ba7f075ed4b3d6d027a93f9f2e96047b1a5094759b0`
+    - `block_number=99679976`
+    - `status=CREDITED`
+    - `amount=100`
+  - `/api/v1/balances` returned:
+    - `user_id=1430496`
+    - `asset=USDT`
+    - `available=100`
+    - `frozen=0`
+- validated:
+  - `rg -n '\$POSTGRES_USER|\$POSTGRES_DB|FUNNYOPTION_POSTGRES_DSN' docs/deploy/staging-bsc-testnet.md`
+  - `git status --short`
+- residual risk:
+  - the listener intentionally skipped pruned range `[99452107,99679358]`
+  - deposit / withdrawal events that exist only in that interval, including the
+    old staging tx at block `99674293`, still require archival RPC replay or a
+    manual backfill
+- next:
+  - `TASK-CHAIN-004` can be closed from the chain side

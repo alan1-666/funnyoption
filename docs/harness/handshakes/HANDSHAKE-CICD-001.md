@@ -60,7 +60,7 @@
 
 ## Status
 
-- blocked
+- completed
 
 ## Handoff notes
 

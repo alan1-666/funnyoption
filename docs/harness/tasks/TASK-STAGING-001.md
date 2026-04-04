@@ -18,6 +18,11 @@ Run a full staging E2E business-flow pass on the deployed server environment and
   - user buy/sell order placement and matching
   - admin market resolution
   - user portfolio / open orders / settlement reads
+- add a script-driven concurrent order-placement and matching pass against staging:
+  - create one fresh market with first liquidity
+  - launch concurrent session-signed buy/sell order requests across multiple taker users against the same market
+  - record success/fail counts, latency summary, matched trade count, remaining open-order count, and any duplicate-fill / overfill / negative-balance / stale-freeze anomalies
+  - keep concurrency bounded and configurable so the script can be rerun without accidentally hammering the shared staging environment
 - record a pass/fail matrix, exact URLs/endpoints, key response snippets, tx / market / order / trade / payout identifiers, and failure logs or screenshots
 - explicitly verify the current bootstrap semantic-uniqueness policy in staging:
   - first bootstrap sell succeeds
@@ -40,6 +45,7 @@ Run a full staging E2E business-flow pass on the deployed server environment and
 ## Owned files
 
 - `docs/harness/worklogs/WORKLOG-STAGING-001.md`
+- `scripts/staging-concurrency-orders.mjs`
 - no product code files by default
 
 ## Acceptance criteria
@@ -48,12 +54,15 @@ Run a full staging E2E business-flow pass on the deployed server environment and
 - at least one admin-created market goes through first liquidity, user order matching, and resolution
 - proof snippets include the deployed URLs plus the core business identifiers needed to debug regressions
 - bootstrap duplicate behavior is verified against the deployed API/admin flow
+- one checked-in script can run the concurrent order/matching pass with configurable concurrency and prints a concise machine-readable summary plus human-readable anomalies
+- the worklog records the exact script command, concurrency settings, aggregate counters, latency summary, and any order/trade/freeze consistency violations observed under concurrency
 - if staging E2E is blocked by missing funded user-wallet credentials, RPC/network issues, or server errors, the handoff states the exact blocker and the smallest follow-up owner area
 
 ## Validation
 
 - browser/API validation against `https://funnyoption.xyz/` and `https://admin.funnyoption.xyz/`
 - `curl` / script-based checks for health and key read APIs when helpful
+- `node scripts/staging-concurrency-orders.mjs ...` for concurrent order-placement and matching validation
 - optional Playwright/browser screenshots if useful for operator or user UI evidence
 
 ## Dependencies
@@ -64,5 +73,6 @@ Run a full staging E2E business-flow pass on the deployed server environment and
 ## Handoff
 
 - return the E2E pass/fail matrix, proof snippets, and all created market/order/trade/payout ids
+- return the concurrency script path, command line, aggregate result summary, and any suspected consistency bug signatures
 - redact any wallet private keys or secret-bearing values from worklog and chat
 - suggest one narrow follow-up task per confirmed staging regression

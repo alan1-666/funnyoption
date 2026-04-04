@@ -79,3 +79,41 @@
   - no blocker in the declared portfolio ownership scope
 - next:
   - commander can route staging retest for `/portfolio` and keep `TASK-API-005` / `TASK-CHAIN-004` separate
+
+### 2026-04-04 18:58 Asia/Shanghai
+
+- read:
+  - `docs/harness/handshakes/HANDSHAKE-OFFCHAIN-011.md`
+  - `docs/harness/worklogs/WORKLOG-OFFCHAIN-011.md`
+  - `docs/harness/handshakes/HANDSHAKE-STAGING-001.md`
+  - `docs/harness/worklogs/WORKLOG-STAGING-001.md`
+  - local `git status --short`
+  - GitHub Actions run `23977457019`
+- changed:
+  - committed the reviewed `TASK-API-005` + `TASK-OFFCHAIN-011` fixset on `main` as `125f9cd4af344680e78529c5a98358b39427e703`
+  - pushed `main` and let the current GitHub Actions staging workflow deploy that commit
+  - appended deploy closeout details to the relevant API/OFFCHAIN/STAGING handshakes and worklogs
+- validated:
+  - local pre-push verification:
+    - `go test ./internal/api/...`
+    - `npm run build` in `admin/`
+    - `npm run build` in `web/`
+    - `git diff --check -- <API-005/OFFCHAIN-011 file set>`
+  - push:
+    - `git push origin main` => `ea71dc8..125f9cd  main -> main`
+  - GitHub Actions:
+    - workflow: `staging-deploy`
+    - run id: `23977457019`
+    - run URL: `https://github.com/alan1-666/funnyoption/actions/runs/23977457019`
+    - result: `success`
+    - `validate` job `success`
+    - `deploy-staging` job `success`
+  - staging server:
+    - `ssh root@76.13.220.236 'cd /opt/funnyoption-staging && git rev-parse --short HEAD && git status --short && curl -sS https://funnyoption.xyz/healthz'`
+    - checkout `HEAD=125f9cd`
+    - checkout status: clean
+    - `GET https://funnyoption.xyz/healthz` => `{"env":"staging","service":"api","status":"ok"}`
+- blockers:
+  - none for deploy closeout of this fixset
+- next:
+  - rerun `TASK-STAGING-001` against deployed `125f9cd` to verify `/portfolio` now follows the connected session user on staging

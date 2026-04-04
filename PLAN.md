@@ -8,7 +8,8 @@ Detailed execution lives in `docs/harness/plans/active/`.
 - Active orchestration plan: [`docs/harness/plans/active/PLAN-2026-04-01-master.md`](/Users/zhangza/code/funnyoption/docs/harness/plans/active/PLAN-2026-04-01-master.md)
 - Harness rollout task: [`docs/harness/tasks/TASK-HARNESS-001.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-HARNESS-001.md)
 - Off-chain umbrella task: [`docs/harness/tasks/TASK-OFFCHAIN-001.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-OFFCHAIN-001.md)
-- Next execution task: [`docs/harness/tasks/TASK-API-004.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-API-004.md)
+- Staging E2E task: [`docs/harness/tasks/TASK-STAGING-001.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-STAGING-001.md)
+- GitHub CI/CD task: [`docs/harness/tasks/TASK-CICD-001.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CICD-001.md)
 
 ## Strategic lanes
 
@@ -52,6 +53,6 @@ Detailed execution lives in `docs/harness/plans/active/`.
 - Harness framework: active
 - Off-chain MVP: code-complete, with truthful local deposit proof and explicit first-liquidity now in place
 - Admin/operator backend: dedicated admin service is converged and core privileged market mutations are now protected at the shared API boundary
-- API service hardening: modular routing, middleware layering, rate limiting, bare-`user_id` fallback removal, and same-proof bootstrap replay protection are now in place
-- Next worker focus: define and enforce semantic uniqueness for privileged bootstrap orders so re-signing the same bootstrap sell order with a fresh `requested_at` cannot silently create a second accepted bootstrap order
-- Chain hardening: active
+- API service hardening: modular routing, middleware layering, rate limiting, bare-`user_id` fallback removal, same-proof bootstrap replay protection, and bootstrap semantic uniqueness are now in place
+- Next worker focus: run a staging E2E business-flow pass on `funnyoption.xyz` / `admin.funnyoption.xyz`, and provision GitHub Secrets + server `.env.staging` for the new push-to-deploy workflow
+- Chain hardening: listener-driven local deposit proof is in place; legacy local DB schema drift cleanup is paused behind the current staging and CI/CD rollout tasks

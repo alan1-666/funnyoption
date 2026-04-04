@@ -41,13 +41,21 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
 | TASK-API-001 | completed | worker | TASK-ADMIN-004 | apply Gin best practices to the API service with modular route registration, middleware-based auth layering, and rate limiting on sensitive paths |
 | TASK-API-002 | completed | worker | TASK-API-001 | remove the transitional bare-`user_id` trade-write path by migrating admin bootstrap order placement onto an authenticated lane and then enforcing session-or-privileged auth on `/api/v1/orders` |
 | TASK-API-003 | completed | worker | TASK-API-002 | add replay/idempotency protection to privileged bootstrap orders so operator-signed bootstrap sell orders cannot be replayed within the current proof window |
-| TASK-API-004 | next | worker | TASK-API-003 | define and enforce semantic uniqueness for privileged bootstrap orders so a fresh `requested_at` alone cannot silently authorize a second otherwise-identical bootstrap sell order |
+| TASK-API-004 | completed | worker | TASK-API-003 | define and enforce semantic uniqueness for privileged bootstrap orders so a fresh `requested_at` alone cannot silently authorize a second otherwise-identical bootstrap sell order |
+| TASK-OFFCHAIN-010 | paused | worker-validation | TASK-API-004 | rerun the local core business flow and return a pass/fail matrix plus regression evidence after the bootstrap-auth hardening sequence |
+| TASK-CHAIN-003 | paused | worker | TASK-CHAIN-002 | reconcile legacy local `chain_deposits` schema drift for reused databases with a safe repair path and validation notes |
+| TASK-STAGING-001 | next | worker-validation | TASK-API-004 | run the full staging E2E business flow on `https://funnyoption.xyz/` and `https://admin.funnyoption.xyz/` with evidence and a pass/fail matrix |
+| TASK-CICD-001 | blocked | worker-platform | TASK-API-004 | add GitHub push-to-deploy CI/CD for the current server deployment without committing plaintext secrets |
 
 ## Risks
 
 - agent threads drift without explicit file ownership
 - task context balloons if `AGENTS.md` becomes large again
 - chain work may start before off-chain behavior is stable
+- reused local databases may still carry legacy `chain_deposits` column widths even though current repo migrations are wider
+- the current bootstrap policy intentionally blocks same-terms second bootstrap orders until the repo introduces an explicit operator action handle
+- staging E2E may still need at least one funded non-operator user wallet in addition to the funded operator key already available locally
+- GitHub CI/CD requires server SSH credentials and deployment commands to be injected through GitHub Secrets, never plaintext repo files
 
 ## Decision log
 
@@ -116,3 +124,20 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
   - a second operator proof with a new `requested_at` can still intentionally authorize an otherwise-identical bootstrap sell order because the current uniqueness handle is derived from the signed proof itself
   - the repo does not yet state whether that behavior is intended bootstrap policy or an accidental duplicate path
 - `TASK-API-004` is now the next worker lane and should define one explicit semantic-uniqueness policy for privileged bootstrap orders, then enforce that policy consistently across the admin service and shared API
+- `TASK-API-004` is now complete: same-terms privileged bootstrap sell orders resolve to a deterministic semantic `order_id` derived from `market_id`, `user_id`, `quantity`, `outcome`, and `price`, so re-signing with a fresh `requested_at` is rejected as an already-accepted bootstrap action
+- the chosen bootstrap policy is intentionally narrow:
+  - `requested_at` is proof freshness only, not a distinct-action handle
+  - same-terms second bootstrap actions remain out of contract until a future task introduces an explicit operator action handle
+- `TASK-OFFCHAIN-010` is now the next validation worker lane and should rerun the local core business flow after the API bootstrap-auth hardening sequence before larger product work resumes
+- `TASK-CHAIN-003` can run in parallel with `TASK-OFFCHAIN-010` because it owns only schema-drift repair docs/migrations for reused local DBs and should stay out of order/session API code
+- current priority changed because the local flow has already been tested and the app is deployed on a server:
+  - user web: `https://funnyoption.xyz/`
+  - admin web: `https://admin.funnyoption.xyz/`
+- `TASK-OFFCHAIN-010` and `TASK-CHAIN-003` are paused while staging validation and CI/CD setup take priority
+- `TASK-STAGING-001` is now the primary validation worker lane for a full deployed-environment E2E pass from admin market creation and first liquidity through user order matching and settlement
+- `TASK-CICD-001` is now the platform worker lane for GitHub push-to-deploy automation; it should keep all private keys and server SSH material in GitHub Secrets or server-only env files, and must not commit `.secrets` or plaintext private keys
+- `TASK-CICD-001` has landed the workflow/script/docs implementation, but first live deployment is blocked on external setup outside the repo:
+  - GitHub Secrets: `STAGING_SSH_HOST`, `STAGING_SSH_USER`, `STAGING_SSH_PRIVATE_KEY`, `STAGING_DEPLOY_PATH`
+  - optional GitHub Secrets: `STAGING_SSH_PORT`, `STAGING_SSH_KNOWN_HOSTS`
+  - server-local env file: `deploy/staging/.env.staging`
+- commander review found no repo-code blocker in the CI/CD implementation itself; the next deploy action should be to provision those secrets/env values and trigger `staging-deploy`

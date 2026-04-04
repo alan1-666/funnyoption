@@ -30,6 +30,97 @@ Recommended public endpoints:
 - `https://app-staging.example.com` -> `web:3000`
 - `https://admin-staging.example.com` -> `admin:3001`
 
+## Current deployed domains
+
+The current server deployment is reachable at:
+
+- User web: [https://funnyoption.xyz/](https://funnyoption.xyz/)
+- Admin web: [https://admin.funnyoption.xyz/](https://admin.funnyoption.xyz/)
+
+Record environment-specific API / WebSocket upstream details in server-side
+deployment config or GitHub Actions secrets, not in plaintext docs.
+
+## Push-to-deploy CI/CD
+
+GitHub push-to-deploy is wired through:
+
+- [.github/workflows/staging-deploy.yml](/Users/zhangza/code/funnyoption/.github/workflows/staging-deploy.yml)
+- [scripts/deploy-staging.sh](/Users/zhangza/code/funnyoption/scripts/deploy-staging.sh)
+
+### Workflow behavior
+
+- `push` to `main` triggers a staging deployment.
+- `workflow_dispatch` can redeploy a specific commit SHA or git ref through
+  the `deploy_ref` input.
+- the `validate` job runs:
+  - `go test ./...`
+  - `npm ci && npm run build` for `web`
+  - `npm run build` for `admin`
+  - `bash -n scripts/*.sh`
+- the `deploy-staging` job SSHes into the staging server, checks out the target
+  ref in the server-side repo clone, runs migrations, rebuilds the compose
+  stack, and performs HTTP smoke checks.
+
+### Required GitHub Secrets
+
+Configure these in the `staging` environment or repository secrets:
+
+- `STAGING_SSH_HOST`: staging server hostname or IP
+- `STAGING_SSH_USER`: SSH login user
+- `STAGING_SSH_PRIVATE_KEY`: private key for the deploy user
+- `STAGING_DEPLOY_PATH`: absolute path to the server-side repo clone
+- `STAGING_SSH_PORT`: optional SSH port, defaults to `22`
+- `STAGING_SSH_KNOWN_HOSTS`: optional pinned `known_hosts` entry
+
+Do not store `FUNNYOPTION_CHAIN_OPERATOR_PRIVATE_KEY`, database passwords, or
+other runtime secrets in GitHub unless the server bootstrap process explicitly
+needs them there. The deploy workflow expects those values to stay in the
+server-only env file described below.
+
+### One-time server setup
+
+Prepare the server once before enabling the workflow:
+
+1. Clone this repository to the path stored in `STAGING_DEPLOY_PATH`.
+2. Create `deploy/staging/.env.staging` inside that clone from
+   [configs/staging/funnyoption.env.example](/Users/zhangza/code/funnyoption/configs/staging/funnyoption.env.example)
+   and fill all secret-bearing values on the server only.
+3. Ensure the deploy user can run `git fetch`, `docker compose`, and `curl`.
+4. Ensure the server has outbound HTTPS access to container registries, npm
+   package downloads, and `fonts.googleapis.com` during image builds.
+5. Install the reverse proxy config from
+   [deploy/staging/funnyoption.xyz.conf](/Users/zhangza/code/funnyoption/deploy/staging/funnyoption.xyz.conf)
+   and keep TLS termination outside the repo.
+
+### Manual deploy and rollback
+
+From the server-side repo clone:
+
+```bash
+FUNNYOPTION_DEPLOY_REF=origin/main ./scripts/deploy-staging.sh
+```
+
+Rollback to a known-good commit:
+
+```bash
+./scripts/deploy-staging.sh --ref <previous-good-sha>
+```
+
+If the new release is already checked out and you only want to re-run compose
+with the local tree as-is:
+
+```bash
+./scripts/deploy-staging.sh --skip-git-sync
+```
+
+If deployment fails before these commands can be exercised, the usual blocker
+is one of these missing server-specific values:
+
+- `STAGING_SSH_HOST`
+- `STAGING_SSH_USER`
+- `STAGING_DEPLOY_PATH`
+- the server-local `deploy/staging/.env.staging`
+
 ## Required secrets and addresses
 
 Before building or starting containers, prepare these values:
@@ -181,13 +272,11 @@ After the stack is up, verify these in order:
   - Use `0` only for first-time bring-up or disposable environments.
   - For redeploys, move it forward so `chain` does not rescan a huge range.
 
-## Current known gaps
+## Current staging assets
 
-This repo now has service-level Dockerfiles, but it does not yet ship a
-blessed `docker-compose.yml` or Kubernetes manifests. For the first staging
-deployment, the fastest path is:
+This repo now ships a staging compose stack and a deploy helper:
 
-- use the Dockerfiles in [deploy/docker](/Users/zhangza/code/funnyoption/deploy/docker)
-- use the env template in [configs/staging/funnyoption.env.example](/Users/zhangza/code/funnyoption/configs/staging/funnyoption.env.example)
-- wire the services together in your server-side orchestration of choice
-
+- service Dockerfiles in [deploy/docker](/Users/zhangza/code/funnyoption/deploy/docker)
+- staging compose file in [deploy/staging/docker-compose.staging.yml](/Users/zhangza/code/funnyoption/deploy/staging/docker-compose.staging.yml)
+- reverse proxy template in [deploy/staging/funnyoption.xyz.conf](/Users/zhangza/code/funnyoption/deploy/staging/funnyoption.xyz.conf)
+- server env template in [configs/staging/funnyoption.env.example](/Users/zhangza/code/funnyoption/configs/staging/funnyoption.env.example)

@@ -1,0 +1,120 @@
+name: staging-deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      deploy_ref:
+        description: Git ref or commit SHA to deploy. Defaults to the workflow ref/SHA.
+        required: false
+        type: string
+
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run Go tests
+        run: go test ./...
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build web app
+        working-directory: web
+        run: npm run build
+
+      - name: Build admin app
+        working-directory: admin
+        run: npm run build
+
+      - name: Check shell script syntax
+        run: bash -n scripts/*.sh
+
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: validate
+    environment: staging
+    steps:
+      - name: Resolve deploy ref
+        id: deploy-ref
+        env:
+          DEPLOY_REF_INPUT: ${{ github.event.inputs.deploy_ref }}
+        run: |
+          if [[ -n "${DEPLOY_REF_INPUT}" ]]; then
+            printf 'value=%s\n' "${DEPLOY_REF_INPUT}" >> "${GITHUB_OUTPUT}"
+          else
+            printf 'value=%s\n' "${{ github.sha }}" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Validate required secrets
+        env:
+          STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          STAGING_SSH_USER: ${{ secrets.STAGING_SSH_USER }}
+          STAGING_SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          STAGING_DEPLOY_PATH: ${{ secrets.STAGING_DEPLOY_PATH }}
+        run: |
+          [[ -n "${STAGING_SSH_HOST}" ]] || { echo "missing STAGING_SSH_HOST"; exit 1; }
+          [[ -n "${STAGING_SSH_USER}" ]] || { echo "missing STAGING_SSH_USER"; exit 1; }
+          [[ -n "${STAGING_SSH_PRIVATE_KEY}" ]] || { echo "missing STAGING_SSH_PRIVATE_KEY"; exit 1; }
+          [[ -n "${STAGING_DEPLOY_PATH}" ]] || { echo "missing STAGING_DEPLOY_PATH"; exit 1; }
+
+      - name: Configure SSH
+        env:
+          STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          STAGING_SSH_PORT: ${{ secrets.STAGING_SSH_PORT || '22' }}
+          STAGING_SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          STAGING_SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${STAGING_SSH_PRIVATE_KEY}" > ~/.ssh/funnyoption_staging
+          chmod 600 ~/.ssh/funnyoption_staging
+          if [[ -n "${STAGING_SSH_KNOWN_HOSTS}" ]]; then
+            printf '%s\n' "${STAGING_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "${STAGING_SSH_PORT}" "${STAGING_SSH_HOST}" >> ~/.ssh/known_hosts
+          fi
+
+      - name: Deploy over SSH
+        env:
+          DEPLOY_REF: ${{ steps.deploy-ref.outputs.value }}
+          STAGING_DEPLOY_PATH: ${{ secrets.STAGING_DEPLOY_PATH }}
+          STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          STAGING_SSH_PORT: ${{ secrets.STAGING_SSH_PORT || '22' }}
+          STAGING_SSH_USER: ${{ secrets.STAGING_SSH_USER }}
+        run: |
+          deploy_path_q="$(printf '%q' "${STAGING_DEPLOY_PATH}")"
+          deploy_ref_q="$(printf '%q' "${DEPLOY_REF}")"
+          ssh \
+            -i ~/.ssh/funnyoption_staging \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -p "${STAGING_SSH_PORT}" \
+            "${STAGING_SSH_USER}@${STAGING_SSH_HOST}" \
+            "cd ${deploy_path_q} && FUNNYOPTION_DEPLOY_REF=${deploy_ref_q} ./scripts/deploy-staging.sh"

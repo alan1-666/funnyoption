@@ -12,15 +12,18 @@ import (
 )
 
 type fakeDepositStore struct {
-	deposit        chainmodel.Deposit
-	withdrawal     chainmodel.Withdrawal
-	lastDeposit    chainmodel.Deposit
-	lastWithdrawal chainmodel.Withdrawal
-	upsertErr      error
-	markCreditedID string
-	markDebitedID  string
-	walletUsers    map[string]int64
-	claimTasks     []claimmodel.ClaimTask
+	deposit          chainmodel.Deposit
+	withdrawal       chainmodel.Withdrawal
+	lastDeposit      chainmodel.Deposit
+	lastWithdrawal   chainmodel.Withdrawal
+	upsertErr        error
+	markCreditedID   string
+	markDebitedID    string
+	walletUsers      map[string]int64
+	scanCursor       uint64
+	hasScanCursor    bool
+	savedScanCursors []uint64
+	claimTasks       []claimmodel.ClaimTask
 }
 
 func (f *fakeDepositStore) UpsertDeposit(ctx context.Context, deposit chainmodel.Deposit) (chainmodel.Deposit, error) {
@@ -67,6 +70,25 @@ func (f *fakeDepositStore) LookupActiveUserByWallet(ctx context.Context, walletA
 		return userID, nil
 	}
 	return 0, ErrWalletSessionNotFound
+}
+
+func (f *fakeDepositStore) LoadVaultScanCursor(ctx context.Context, chainName string, networkName string, vaultAddress string) (uint64, bool, error) {
+	_ = ctx
+	_ = chainName
+	_ = networkName
+	_ = vaultAddress
+	return f.scanCursor, f.hasScanCursor, nil
+}
+
+func (f *fakeDepositStore) SaveVaultScanCursor(ctx context.Context, chainName string, networkName string, vaultAddress string, nextBlock uint64) error {
+	_ = ctx
+	_ = chainName
+	_ = networkName
+	_ = vaultAddress
+	f.scanCursor = nextBlock
+	f.hasScanCursor = true
+	f.savedScanCursors = append(f.savedScanCursors, nextBlock)
+	return nil
 }
 
 func (f *fakeDepositStore) ListPendingClaims(ctx context.Context, limit int) ([]claimmodel.ClaimTask, error) {

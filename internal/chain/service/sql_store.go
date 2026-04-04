@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -21,6 +23,8 @@ type DepositStore interface {
 	UpsertWithdrawal(ctx context.Context, withdrawal chainmodel.Withdrawal) (chainmodel.Withdrawal, error)
 	MarkWithdrawalDebited(ctx context.Context, withdrawalID string, debitedAt int64) error
 	LookupActiveUserByWallet(ctx context.Context, walletAddress string) (int64, error)
+	LoadVaultScanCursor(ctx context.Context, chainName string, networkName string, vaultAddress string) (uint64, bool, error)
+	SaveVaultScanCursor(ctx context.Context, chainName string, networkName string, vaultAddress string, nextBlock uint64) error
 	ListPendingClaims(ctx context.Context, limit int) ([]claimmodel.ClaimTask, error)
 	MarkClaimSubmitted(ctx context.Context, id int64, txHash string) error
 	MarkClaimFailed(ctx context.Context, id int64, errMsg string) error
@@ -214,6 +218,43 @@ func (s *SQLStore) LookupActiveUserByWallet(ctx context.Context, walletAddress s
 	return userID, nil
 }
 
+func (s *SQLStore) LoadVaultScanCursor(ctx context.Context, chainName string, networkName string, vaultAddress string) (uint64, bool, error) {
+	var nextBlock int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT next_block
+		FROM chain_listener_cursors
+		WHERE chain_name = $1
+		  AND network_name = $2
+		  AND vault_address = $3
+	`, normalizeChainName(chainName), normalizeNetworkName(networkName), normalizeVaultAddress(vaultAddress)).Scan(&nextBlock)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	if nextBlock <= 0 {
+		return 0, false, nil
+	}
+	return uint64(nextBlock), true, nil
+}
+
+func (s *SQLStore) SaveVaultScanCursor(ctx context.Context, chainName string, networkName string, vaultAddress string, nextBlock uint64) error {
+	if nextBlock > math.MaxInt64 {
+		return fmt.Errorf("vault scan cursor exceeds int64: %d", nextBlock)
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO chain_listener_cursors (
+			chain_name, network_name, vault_address, next_block, updated_at
+		)
+		VALUES ($1, $2, $3, $4, EXTRACT(EPOCH FROM NOW())::BIGINT)
+		ON CONFLICT (chain_name, network_name, vault_address) DO UPDATE
+		SET next_block = GREATEST(chain_listener_cursors.next_block, EXCLUDED.next_block),
+			updated_at = EXCLUDED.updated_at
+	`, normalizeChainName(chainName), normalizeNetworkName(networkName), normalizeVaultAddress(vaultAddress), int64(nextBlock))
+	return err
+}
+
 func (s *SQLStore) ListPendingClaims(ctx context.Context, limit int) ([]claimmodel.ClaimTask, error) {
 	if limit <= 0 {
 		limit = 20
@@ -299,4 +340,8 @@ func truncateString(value string, size int) string {
 		return trimmed
 	}
 	return trimmed[:size]
+}
+
+func normalizeVaultAddress(vaultAddress string) string {
+	return strings.ToLower(strings.TrimSpace(vaultAddress))
 }

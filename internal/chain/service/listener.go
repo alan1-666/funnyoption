@@ -40,6 +40,7 @@ type DepositListener struct {
 	confirmations uint64
 	startBlock    uint64
 	nextBlock     uint64
+	cursorReady   bool
 	pollInterval  time.Duration
 }
 
@@ -113,12 +114,8 @@ func (l *DepositListener) pollOnce(ctx context.Context) error {
 	if !ok {
 		return nil
 	}
-	if l.nextBlock == 0 {
-		if l.startBlock > 0 {
-			l.nextBlock = l.startBlock
-		} else {
-			l.nextBlock = safeHead + 1
-		}
+	if err := l.ensureScanCursor(ctx, safeHead); err != nil {
+		return err
 	}
 	if l.nextBlock > safeHead {
 		return nil
@@ -132,6 +129,24 @@ func (l *DepositListener) pollOnce(ctx context.Context) error {
 		Topics:    [][]common.Hash{{depositEventTopic, withdrawalEventTopic}},
 	})
 	if err != nil {
+		if isPrunedHistoryError(err) {
+			skippedFromBlock := l.nextBlock
+			l.nextBlock = safeHead + 1
+			if saveErr := l.persistScanCursor(ctx); saveErr != nil {
+				return saveErr
+			}
+			l.logger.Warn(
+				"skip pruned vault history",
+				"from_block", skippedFromBlock,
+				"to_block", safeHead,
+				"next_block", l.nextBlock,
+				"vault_address", normalizeVaultAddress(l.vaultAddress.Hex()),
+				"chain_name", normalizeChainName(l.cfg.ChainName),
+				"network_name", normalizeNetworkName(l.cfg.NetworkName),
+				"err", err,
+			)
+			return nil
+		}
 		return err
 	}
 
@@ -147,7 +162,51 @@ func (l *DepositListener) pollOnce(ctx context.Context) error {
 	}
 
 	l.nextBlock = toBlock + 1
+	if err := l.persistScanCursor(ctx); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (l *DepositListener) ensureScanCursor(ctx context.Context, safeHead uint64) error {
+	if l.cursorReady {
+		return nil
+	}
+
+	nextBlock := l.startBlock
+	checkpoint, ok, err := l.store.LoadVaultScanCursor(ctx, l.cfg.ChainName, l.cfg.NetworkName, l.vaultAddress.Hex())
+	if err != nil {
+		return err
+	}
+	if ok && checkpoint > nextBlock {
+		nextBlock = checkpoint
+	}
+	if nextBlock == 0 {
+		nextBlock = safeHead + 1
+	}
+
+	l.nextBlock = nextBlock
+	l.cursorReady = true
+	if err := l.persistScanCursor(ctx); err != nil {
+		l.cursorReady = false
+		return err
+	}
+
+	l.logger.Info(
+		"vault scan cursor initialized",
+		"configured_start_block", l.startBlock,
+		"checkpoint_next_block", checkpoint,
+		"next_block", l.nextBlock,
+		"safe_head", safeHead,
+		"vault_address", normalizeVaultAddress(l.vaultAddress.Hex()),
+		"chain_name", normalizeChainName(l.cfg.ChainName),
+		"network_name", normalizeNetworkName(l.cfg.NetworkName),
+	)
+	return nil
+}
+
+func (l *DepositListener) persistScanCursor(ctx context.Context) error {
+	return l.store.SaveVaultScanCursor(ctx, l.cfg.ChainName, l.cfg.NetworkName, l.vaultAddress.Hex(), l.nextBlock)
 }
 
 func (l *DepositListener) handleVaultLog(ctx context.Context, logEntry types.Log) error {
@@ -283,4 +342,12 @@ func maxInt64(value int64, floor int64) int64 {
 		return floor
 	}
 	return value
+}
+
+func isPrunedHistoryError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(message, "history has been pruned")
 }

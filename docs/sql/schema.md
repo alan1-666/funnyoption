@@ -14,6 +14,10 @@
 
 `/Users/zhangza/code/funnyoption/migrations/007_market_taxonomy_and_options.sql` adds formal market categories plus per-market option-set JSON storage.
 
+`/Users/zhangza/code/funnyoption/migrations/008_user_profiles.sql` adds user profile display metadata.
+
+`/Users/zhangza/code/funnyoption/migrations/009_chain_listener_cursors.sql` adds a persisted restart cursor for vault event scans.
+
 ## Trading domain
 
 - `markets`: market master data and lifecycle state
@@ -41,6 +45,7 @@
 - `chain_transactions`: deposit / withdraw / settlement on-chain references
 - `chain_deposits`: direct frontend-to-vault deposit mirror keyed by transaction event identity
 - `chain_withdrawals`: mirrored `queueWithdrawal` events keyed by transaction event identity
+- `chain_listener_cursors`: persisted `next_block` checkpoint for restart-safe vault log scans
 
 ## Wallet and session domain
 

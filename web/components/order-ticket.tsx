@@ -75,7 +75,7 @@ export function OrderTicket({ market }: { market: Market }) {
       );
 
       if (!orderPayload) {
-        throw new Error("Failed to sign order with session key");
+        throw new Error("Failed to sign order with trading key");
       }
 
       const response = await fetch(`${API_BASE_URL}/api/v1/orders`, {

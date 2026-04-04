@@ -630,3 +630,293 @@
 - next:
   - launch `TASK-CHAIN-005` with Foundry explicitly fixed as the contract
     toolchain boundary
+
+### 2026-04-04 21:52 CST
+
+- read:
+  - `HANDSHAKE-OFFCHAIN-014.md`
+  - `WORKLOG-OFFCHAIN-014.md`
+  - `HANDSHAKE-CHAIN-005.md`
+  - `WORKLOG-CHAIN-005.md`
+  - `docs/architecture/direct-deposit-session-key.md`
+  - `docs/architecture/oracle-settled-crypto-markets.md`
+  - `internal/settlement/service/sql_store.go`
+- changed:
+  - accepted `TASK-OFFCHAIN-014` and `TASK-CHAIN-005` as completed design tasks
+  - updated `PLAN.md` and the active master plan with their completed status
+  - created follow-up implementation lanes:
+    - `TASK-OFFCHAIN-015`
+    - `TASK-CHAIN-006`
+- validated:
+  - auth design result:
+    - reject deterministic signature-derived trading keys
+    - accept wallet-authorized browser-local trading keys
+    - first implementation slice is challenge issuance plus `EIP-712`
+      registration
+  - oracle design result:
+    - use `markets.metadata.resolution`
+    - use one dedicated oracle worker
+    - reuse `market_resolutions` for first cut
+  - commander review found one required runtime truthfulness guard for the
+    oracle lane:
+    - manual fallback must overwrite stale oracle ownership fields in
+      `market_resolutions` when the operator wins from earlier error states
+- blockers:
+  - `TASK-OFFCHAIN-013` remains blocked because its old session-key UX wording
+    no longer matches the new trading-key baseline
+- next:
+  - launch `TASK-OFFCHAIN-015`
+  - launch `TASK-CHAIN-006`
+
+### 2026-04-05 00:10 CST
+
+- read:
+  - `HANDSHAKE-OFFCHAIN-015.md`
+  - `WORKLOG-OFFCHAIN-015.md`
+  - `HANDSHAKE-CHAIN-006.md`
+  - `WORKLOG-CHAIN-006.md`
+  - `internal/api/routes_auth.go`
+  - `cmd/local-lifecycle/main.go`
+  - `scripts/staging-concurrency-orders.mjs`
+  - `internal/oracle/service/worker.go`
+  - `internal/settlement/service/processor.go`
+  - `internal/account/service/event_processor.go`
+- changed:
+  - marked `TASK-OFFCHAIN-015` and `TASK-CHAIN-006` back to blocked after
+    commander review
+  - updated `PLAN.md` and the active master plan so the blockers are explicit in
+    repo memory
+- validated:
+  - OFFCHAIN-015 blocker:
+    - the new V2 auth slice removed `POST /api/v1/sessions`, but existing repo
+      lifecycle / staging proof clients still call that route
+  - OFFCHAIN-015 residual risk:
+    - `wallet_sessions` compatibility storage still collapses active-key scope
+      to `wallet + chain` because `vault_address` is not durably stored there
+  - CHAIN-006 blocker:
+    - the oracle worker republishes the same resolved `market.event` while the
+      row is still `OBSERVED`
+    - downstream settlement/account side effects are not idempotent enough for
+      duplicate emits
+- blockers:
+  - keep both implementation workers on their current task ids until those
+    review blockers are closed
+- next:
+  - continue `TASK-OFFCHAIN-015`
+  - continue `TASK-CHAIN-006`
+
+### 2026-04-04 23:22 CST
+
+- read:
+  - `HANDSHAKE-OFFCHAIN-015.md`
+  - `WORKLOG-OFFCHAIN-015.md`
+  - `HANDSHAKE-CHAIN-006.md`
+  - `WORKLOG-CHAIN-006.md`
+  - `internal/api/routes_auth.go`
+  - `internal/api/router_test.go`
+  - `internal/oracle/service/worker.go`
+  - `internal/oracle/service/worker_test.go`
+  - `docs/architecture/direct-deposit-session-key.md`
+  - `docs/sql/schema.md`
+- changed:
+  - accepted the follow-up fixes and marked `TASK-OFFCHAIN-015` and
+    `TASK-CHAIN-006` completed in `PLAN.md` and the active master plan
+  - refreshed commander memory so those lanes are no longer shown as
+    review-blocked
+- validated:
+  - `go test ./internal/oracle/service ./internal/settlement/service ./internal/account/service`
+  - `go test ./internal/api/... ./cmd/local-lifecycle`
+  - `node --check scripts/staging-concurrency-orders.mjs`
+  - `TASK-CHAIN-006` closure:
+    - duplicate polling of an already-recorded oracle `OBSERVED` outcome now
+      skips publish instead of replaying the same resolved `market.event`
+    - manual resolve conflict guard and operator-owned overwrite semantics stay
+      intact
+  - `TASK-OFFCHAIN-015` closure:
+    - `POST /api/v1/sessions` is restored as a deprecated compatibility route
+      for repo proof tooling
+    - canonical browser auth remains `POST /api/v1/trading-keys/challenge` plus
+      `POST /api/v1/trading-keys`
+    - truthful restore remains active, and the remaining durable-scope caveat
+      is explicitly documented as a single-vault-per-environment assumption
+- blockers:
+  - no release blocker remains in either task slice
+- next:
+  - `TASK-OFFCHAIN-013` can resume against the landed V2 trading-key baseline
+  - a later oracle follow-up may add an explicit dispatch marker / retry
+    contract for the narrower case of publish failure after writing `OBSERVED`
+
+### 2026-04-05 00:08 CST
+
+- read:
+  - `HANDSHAKE-OFFCHAIN-013.md`
+  - `WORKLOG-OFFCHAIN-013.md`
+  - `web/lib/session-client.ts`
+  - `web/components/trading-session-provider.tsx`
+  - `web/components/session-console.tsx`
+  - `web/components/site-header.tsx`
+- changed:
+  - accepted `TASK-OFFCHAIN-013` as completed
+  - updated `PLAN.md` and the active master plan so this lane is no longer
+    shown as resumable / blocked
+- validated:
+  - `cd web && npm run build`
+  - commander review confirmed the browser canonical flow still uses
+    `POST /api/v1/trading-keys/challenge` +
+    `POST /api/v1/trading-keys`
+  - restore now reconciles before prompting a new wallet signature, and UI
+    state honestly distinguishes restore-in-progress vs reauthorization-needed
+- blockers:
+  - no blocker in this task slice
+- next:
+  - if product wants to remove the remaining single-vault-per-environment
+    assumption, a later auth/schema task should add durable `vault_address` to
+    the server-side trading-key carrier
+
+### 2026-04-05 00:31 CST
+
+- read:
+  - `HANDSHAKE-OFFCHAIN-013.md`
+  - `WORKLOG-OFFCHAIN-013.md`
+  - `HANDSHAKE-OFFCHAIN-015.md`
+  - `WORKLOG-OFFCHAIN-015.md`
+  - `HANDSHAKE-CHAIN-006.md`
+  - `WORKLOG-CHAIN-006.md`
+- changed:
+  - created two narrow follow-up tasks so the remaining auth and oracle
+    tradeoffs are recorded in repo memory instead of chat only:
+    - `TASK-OFFCHAIN-016`
+    - `TASK-CHAIN-007`
+  - added matching handshake / worklog files
+  - updated `PLAN.md` and the active master plan with their pending status and
+    scope
+- validated:
+  - `TASK-OFFCHAIN-016` isolates the remaining durable `vault_address`
+    truthfulness gap without reopening the wider V2 auth design
+  - `TASK-CHAIN-007` isolates the remaining oracle dispatch retry gap without
+    reopening duplicate-emit or multi-provider scope
+- blockers:
+  - none; these are queued follow-up lanes, not release blockers
+- next:
+  - launch one worker on `TASK-OFFCHAIN-016`
+  - optionally launch a second worker on `TASK-CHAIN-007` in parallel
+
+### 2026-04-05 01:02 CST
+
+- read:
+  - `HANDSHAKE-OFFCHAIN-016.md`
+  - `WORKLOG-OFFCHAIN-016.md`
+  - `HANDSHAKE-CHAIN-007.md`
+  - `WORKLOG-CHAIN-007.md`
+  - `internal/api/handler/sql_store.go`
+  - `internal/api/handler/sql_store_scope_test.go`
+  - `migrations/003_wallet_sessions_and_deposits.sql`
+  - `migrations/012_wallet_sessions_vault_scope.sql`
+  - `internal/oracle/service/worker.go`
+  - `internal/oracle/service/worker_test.go`
+  - `internal/settlement/service/processor.go`
+- changed:
+  - accepted `TASK-CHAIN-007` as completed
+  - moved `TASK-OFFCHAIN-016` back to blocked in the handshake, `PLAN.md`, and
+    active master plan after commander review
+- validated:
+  - `OFFCHAIN-016`:
+    - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/api/handler -run TestListSessionsPassesVaultFilter`
+    - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/api/...`
+    - `zsh -lc 'source .env.local; GOCACHE=/tmp/funnyoption-gocache go test ./internal/api/handler -run TestSQLStoreRegisterTradingKeyScopesByVault'`
+    - `cd web && npm run build`
+    - `zsh -lc 'source .env.local; psql "$FUNNYOPTION_POSTGRES_DSN" -v ON_ERROR_STOP=1 -c "BEGIN" -f migrations/012_wallet_sessions_vault_scope.sql -c "ROLLBACK"'`
+    - commander also confirmed the remaining gap with a temp SQL probe:
+      - the legacy `UNIQUE (wallet_address, session_public_key)` rule still
+        rejects reusing the same trading public key across two vault scopes
+  - `CHAIN-007`:
+    - `go test ./internal/oracle/service ./internal/settlement/service`
+    - `go test ./cmd/oracle ./internal/account/service`
+    - dispatch checkpoint behavior and repeated-poll safety match the worker
+      summary
+- blockers:
+  - `TASK-OFFCHAIN-016` still needs one narrow schema / uniqueness follow-up
+    before the server contract is fully truthful to `wallet + chain + vault`
+- next:
+  - continue `TASK-OFFCHAIN-016`
+
+### 2026-04-05 01:12 CST
+
+- read:
+  - `HANDSHAKE-OFFCHAIN-016.md`
+  - `WORKLOG-OFFCHAIN-016.md`
+  - `migrations/013_wallet_sessions_vault_key_uniqueness.sql`
+  - `migrations/003_wallet_sessions_and_deposits.sql`
+  - `internal/api/handler/sql_store.go`
+  - `internal/api/handler/sql_store_scope_test.go`
+  - `docs/sql/schema.md`
+  - `docs/architecture/direct-deposit-session-key.md`
+- changed:
+  - accepted `TASK-OFFCHAIN-016` as completed
+  - updated `PLAN.md`, the active master plan, and the handshake so this lane
+    is no longer shown as review-blocked
+  - refreshed plan memory to record the remaining truth as a compatibility
+    tradeoff, not a correctness blocker
+- validated:
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/api/handler -run TestListSessionsPassesVaultFilter -count=1`
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/api/...`
+  - `zsh -lc 'set -a; source .env.local; set +a; GOCACHE=/tmp/funnyoption-gocache go test ./internal/api/handler -run TestSQLStoreRegisterTradingKeyScopesByVaultEvenWithSamePublicKey -count=1'`
+  - `zsh -lc 'set -a; source .env.local; set +a; psql "$FUNNYOPTION_POSTGRES_DSN" -v ON_ERROR_STOP=1 -f migrations/013_wallet_sessions_vault_key_uniqueness.sql'`
+  - commander confirmed on the real database that `wallet_sessions` now keeps
+    only:
+    - `wallet_sessions_wallet_chain_vault_public_key_key`
+    - `UNIQUE (wallet_address, chain_id, vault_address, session_public_key)`
+- blockers:
+  - no release blocker remains in this task slice
+- next:
+  - any later auth cleanup should focus on retiring deprecated
+    `/api/v1/sessions` only after repo proof tooling migrates off the
+    blank-vault compatibility contract
+
+### 2026-04-05 02:02 CST
+
+- read:
+  - `WORKLOG-HARNESS-002.md`
+  - `cmd/local-lifecycle/main.go`
+  - `cmd/local-lifecycle/trading_key_oracle_flow.go`
+  - `cmd/local-lifecycle/trading_key_oracle_flow_test.go`
+  - `scripts/local-full-flow.sh`
+  - `docs/operations/local-full-flow-acceptance.md`
+- changed:
+  - accepted the new local `trading-key-oracle` full-flow harness as landed
+    proof infrastructure
+  - recorded one remaining harness-truthfulness caveat from commander rerun:
+    deposit credit can still false-pass on reused local postgres because the
+    flow only matches a credited row by deterministic tx hash instead of
+    proving a fresh balance delta or fresh row boundary
+- validated:
+  - `bash -n scripts/local-lifecycle.sh scripts/local-full-flow.sh`
+  - `go test ./cmd/local-lifecycle`
+  - reran in one persistent PTY session:
+    - `./scripts/dev-up.sh`
+    - `./scripts/local-full-flow.sh`
+  - independent readback after the rerun:
+    - `curl -sS 'http://127.0.0.1:8080/api/v1/sessions?wallet_address=0x1532d37232c783c531bf0ce9860cb15f5f68aeb3&vault_address=0xe7f1725e7734ce288f8367e1bb143e90bb3f0512&status=ACTIVE&limit=20'`
+    - `curl -sS 'http://127.0.0.1:8080/api/v1/markets/1775325169450'`
+    - `curl -sS 'http://127.0.0.1:8080/api/v1/payouts?user_id=1001&market_id=1775325169450&limit=20'`
+    - `psql 'postgres://funnyoption:funnyoption@127.0.0.1:5432/funnyoption?sslmode=disable' -c "SELECT market_id, status, resolved_outcome, resolver_type, resolver_ref FROM market_resolutions WHERE market_id = 1775325169450;"`
+  - rerun result:
+    - trading-key auth, truthful restore, oracle market creation, matching,
+      oracle auto settlement, and payout/readback all reproduced as PASS
+    - resolution row read back as `RESOLVED / YES / ORACLE_PRICE` with
+      `resolver_ref=oracle_price:BINANCE:BTCUSDT:1775325189`
+    - payout read back as
+      `evt_settlement_1775325169450_1001_YES payout_amount=4000`
+  - residual truthfulness caveat:
+    - the rerun summary still showed `initial_usdt == post_deposit_usdt`
+      while step 3 reported PASS
+    - on persistent anvil plus reused local postgres, the deterministic
+      deposit tx hash / deposit row can be reused across runs unless the
+      harness proves freshness explicitly
+- blockers:
+  - no product-runtime blocker
+  - one local-harness P2 follow-up remains if we want the deposit step to prove
+    fresh credit rather than reuse prior evidence
+- next:
+  - if we want this harness to become the strongest local acceptance gate,
+    add a narrow follow-up to prove deposit freshness explicitly

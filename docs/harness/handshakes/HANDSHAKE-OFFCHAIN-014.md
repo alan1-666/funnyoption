@@ -56,6 +56,18 @@
   wallet-authorized locally generated trading key
 - recommended first implementation slice
 
+## Handoff notes
+
+- final design rejects deterministic key derivation from wallet signatures
+- accepted model is:
+  - browser-local random trading key
+  - wallet-signed `EIP-712` authorization of that public key
+  - later order signatures by the local trading key
+- initial implementation should keep the current `ED25519` order verifier and
+  `wallet_sessions.last_order_nonce` replay counter as a compatibility layer
+- deposit and withdrawal attribution should move toward durable wallet binding
+  semantics instead of "active wallet session exists" semantics
+
 ## Blockers
 
 - do not widen into full StarkEx prover / DA / escape-hatch scope
@@ -65,4 +77,4 @@
 
 ## Status
 
-- queued
+- completed

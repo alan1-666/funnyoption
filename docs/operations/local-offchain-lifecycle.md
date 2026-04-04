@@ -11,6 +11,12 @@ Run one deterministic local proof for:
 5. the market resolves
 6. settlement updates the terminal reads
 
+If you need the stronger acceptance path that also verifies canonical
+trading-key auth plus oracle auto settlement, use:
+
+- [/Users/zhangza/code/funnyoption/docs/operations/local-full-flow-acceptance.md](/Users/zhangza/code/funnyoption/docs/operations/local-full-flow-acceptance.md)
+- `/Users/zhangza/code/funnyoption/scripts/local-full-flow.sh`
+
 ## Persistent local-chain mode
 
 If you set `FUNNYOPTION_LOCAL_CHAIN_MODE=anvil`, the repo now supports a persistent local-chain path in addition to the older in-process proof environment.

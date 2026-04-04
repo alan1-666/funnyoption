@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"time"
 
 	"funnyoption/internal/api/dto"
 	chainmodel "funnyoption/internal/chain/model"
@@ -202,13 +201,11 @@ func (s *SQLStore) LookupActiveUserByWallet(ctx context.Context, walletAddress s
 	var userID int64
 	err := s.db.QueryRowContext(ctx, `
 		SELECT user_id
-		FROM wallet_sessions
+		FROM user_profiles
 		WHERE wallet_address = $1
-		  AND status = 'ACTIVE'
-		  AND (expires_at = 0 OR expires_at >= $2)
-		ORDER BY expires_at DESC, updated_at DESC
+		ORDER BY updated_at DESC
 		LIMIT 1
-	`, strings.ToLower(strings.TrimSpace(walletAddress)), time.Now().UnixMilli()).Scan(&userID)
+	`, strings.ToLower(strings.TrimSpace(walletAddress))).Scan(&userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, ErrWalletSessionNotFound

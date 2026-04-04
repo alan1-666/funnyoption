@@ -42,6 +42,8 @@ type sessionContext struct {
 	SessionPubKey string
 	SessionPriv   ed25519.PrivateKey
 	LastNonce     uint64
+	ChainID       int64
+	VaultAddress  string
 }
 
 type apiClient struct {
@@ -139,7 +141,12 @@ type remoteSession struct {
 	UserID           int64  `json:"user_id"`
 	WalletAddress    string `json:"wallet_address"`
 	SessionPublicKey string `json:"session_public_key"`
+	Scope            string `json:"scope"`
+	ChainID          int64  `json:"chain_id"`
+	VaultAddress     string `json:"vault_address"`
 	LastOrderNonce   uint64 `json:"last_order_nonce"`
+	Status           string `json:"status"`
+	ExpiresAtMillis  int64  `json:"expires_at"`
 }
 
 type createOrderResult struct {
@@ -192,6 +199,7 @@ func main() {
 	cfg := config.Load("chain")
 	apiCfg := config.Load("api")
 
+	flow := flag.String("flow", "legacy", "lifecycle flow to run: legacy or trading-key-oracle")
 	baseURLFlag := flag.String("base-url", httpBaseURL(apiCfg.HTTPAddr), "API base URL")
 	depositAmount := flag.Int64("deposit-amount", 50000000, "listener-driven deposit amount in chain base units (for example 50000000 = 50.00 USDT)")
 	price := flag.Int64("price", 58, "limit price in cents")
@@ -203,11 +211,26 @@ func main() {
 		log.Fatal("deposit-amount, price, and quantity must be positive")
 	}
 
-	buyer := mustWallet("buyer", 1001, "59c6995e998f97a5a004497e5daef0d4f7dcd0cfd5401397dbeed52b21965b1d")
-	maker := mustWallet("maker", 1002, "8b3a350cf5c34c9194ca85829f093d784c2f2c6c3a0eb1f3f3f94a639a6a39d1")
+	opts := lifecycleOptions{
+		BaseURL:       strings.TrimRight(*baseURLFlag, "/"),
+		DepositAmount: *depositAmount,
+		Price:         *price,
+		Quantity:      *quantity,
+		Timeout:       *timeout,
+	}
+
+	buyer := mustWalletFromEnv("buyer", 1001, "FUNNYOPTION_LOCAL_CHAIN_BUYER_PRIVATE_KEY", "59c6995e998f97a5a004497e5daef0d4f7dcd0cfd5401397dbeed52b21965b1d")
+	maker := mustWalletFromEnv("maker", 1002, "FUNNYOPTION_LOCAL_CHAIN_MAKER_PRIVATE_KEY", "8b3a350cf5c34c9194ca85829f093d784c2f2c6c3a0eb1f3f3f94a639a6a39d1")
 	operator := mustOperatorWallet(cfg)
 
-	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	if strings.EqualFold(strings.TrimSpace(*flow), "trading-key-oracle") {
+		if err := runTradingKeyOracleLifecycle(opts, logger, cfg, apiCfg, buyer, maker, operator); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
 	defer cancel()
 
 	depositEnv, err := buildDepositEnvironment(ctx, cfg, buyer)
@@ -217,7 +240,7 @@ func main() {
 	defer depositEnv.Close()
 
 	client := &apiClient{
-		baseURL: strings.TrimRight(*baseURLFlag, "/"),
+		baseURL: opts.BaseURL,
 		client:  &http.Client{Timeout: 5 * time.Second},
 	}
 
@@ -498,6 +521,14 @@ func mustWallet(label string, userID int64, privateKeyHex string) walletIdentity
 	}
 }
 
+func mustWalletFromEnv(label string, userID int64, envKey, fallbackPrivateKeyHex string) walletIdentity {
+	privateKeyHex := strings.TrimSpace(os.Getenv(envKey))
+	if privateKeyHex == "" {
+		privateKeyHex = fallbackPrivateKeyHex
+	}
+	return mustWallet(label, userID, privateKeyHex)
+}
+
 func mustOperatorWallet(cfg config.ServiceConfig) walletIdentity {
 	privateKeyHex := strings.TrimSpace(cfg.ChainOperatorPrivateKey)
 	if privateKeyHex == "" {
@@ -632,6 +663,8 @@ func (c *apiClient) createSession(ctx context.Context, wallet walletIdentity, ch
 		SessionPubKey: remote.SessionPublicKey,
 		SessionPriv:   priv,
 		LastNonce:     remote.LastOrderNonce,
+		ChainID:       remote.ChainID,
+		VaultAddress:  strings.ToLower(strings.TrimSpace(remote.VaultAddress)),
 	}, nil
 }
 

@@ -9,12 +9,20 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	ethmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 )
 
 const (
-	DefaultSessionScope = "TRADE"
+	DefaultSessionScope               = "TRADE"
+	DefaultTradingKeyScheme           = "ED25519"
+	DefaultWalletSignatureStandard    = "EIP712_V4"
+	TradingAuthorizationDomainName    = "FunnyOption Trading Authorization"
+	TradingAuthorizationDomainVersion = "2"
+	AuthorizeTradingKeyAction         = "AUTHORIZE_TRADING_KEY"
 )
 
 type SessionGrant struct {
@@ -41,6 +49,18 @@ type OrderIntent struct {
 	ClientOrderID     string
 	Nonce             uint64
 	RequestedAtMillis int64
+}
+
+type TradingKeyAuthorization struct {
+	WalletAddress            string
+	TradingPublicKey         string
+	TradingKeyScheme         string
+	Scope                    string
+	Challenge                string
+	ChallengeExpiresAtMillis int64
+	KeyExpiresAtMillis       int64
+	ChainID                  int64
+	VaultAddress             string
 }
 
 func (g SessionGrant) Normalize() SessionGrant {
@@ -166,9 +186,127 @@ func (i OrderIntent) Message() string {
 	)
 }
 
+func (a TradingKeyAuthorization) Normalize() TradingKeyAuthorization {
+	a.WalletAddress = NormalizeHex(a.WalletAddress)
+	a.TradingPublicKey = NormalizeHex(a.TradingPublicKey)
+	a.TradingKeyScheme = strings.ToUpper(strings.TrimSpace(a.TradingKeyScheme))
+	if a.TradingKeyScheme == "" {
+		a.TradingKeyScheme = DefaultTradingKeyScheme
+	}
+	a.Scope = strings.ToUpper(strings.TrimSpace(a.Scope))
+	if a.Scope == "" {
+		a.Scope = DefaultSessionScope
+	}
+	a.Challenge = NormalizeHex(a.Challenge)
+	a.VaultAddress = NormalizeHex(a.VaultAddress)
+	return a
+}
+
+func (a TradingKeyAuthorization) Validate(now time.Time) error {
+	normalized := a.Normalize()
+	if !common.IsHexAddress(normalized.WalletAddress) {
+		return fmt.Errorf("wallet address is invalid")
+	}
+	if !common.IsHexAddress(normalized.VaultAddress) {
+		return fmt.Errorf("vault address is invalid")
+	}
+	if normalized.ChainID <= 0 {
+		return fmt.Errorf("chain_id must be positive")
+	}
+	if normalized.TradingKeyScheme != DefaultTradingKeyScheme {
+		return fmt.Errorf("trading_key_scheme must be %s", DefaultTradingKeyScheme)
+	}
+	if normalized.Scope == "" {
+		return fmt.Errorf("scope is required")
+	}
+	if err := validateFixedHex("trading public key", normalized.TradingPublicKey, ed25519.PublicKeySize); err != nil {
+		return err
+	}
+	if err := validateFixedHex("challenge", normalized.Challenge, 32); err != nil {
+		return err
+	}
+	if normalized.ChallengeExpiresAtMillis <= 0 {
+		return fmt.Errorf("challenge_expires_at is required")
+	}
+	if now.UnixMilli() > normalized.ChallengeExpiresAtMillis {
+		return fmt.Errorf("challenge expired")
+	}
+	if normalized.KeyExpiresAtMillis < 0 {
+		return fmt.Errorf("key_expires_at must be zero or positive")
+	}
+	if normalized.KeyExpiresAtMillis > 0 && normalized.KeyExpiresAtMillis <= now.UnixMilli() {
+		return fmt.Errorf("key authorization expired")
+	}
+	return nil
+}
+
+func (a TradingKeyAuthorization) TradingKeyID() string {
+	normalized := a.Normalize()
+	sum := sha256.Sum256([]byte(
+		normalized.WalletAddress +
+			":" + fmt.Sprintf("%d", normalized.ChainID) +
+			":" + normalized.VaultAddress +
+			":" + normalized.TradingPublicKey,
+	))
+	return "tk_" + hex.EncodeToString(sum[:16])
+}
+
+func (a TradingKeyAuthorization) TypedData() apitypes.TypedData {
+	normalized := a.Normalize()
+	return apitypes.TypedData{
+		Types: apitypes.Types{
+			"EIP712Domain": {
+				{Name: "name", Type: "string"},
+				{Name: "version", Type: "string"},
+				{Name: "chainId", Type: "uint256"},
+				{Name: "verifyingContract", Type: "address"},
+			},
+			"AuthorizeTradingKey": {
+				{Name: "action", Type: "string"},
+				{Name: "wallet", Type: "address"},
+				{Name: "tradingPublicKey", Type: "bytes32"},
+				{Name: "tradingKeyScheme", Type: "string"},
+				{Name: "scope", Type: "string"},
+				{Name: "challenge", Type: "bytes32"},
+				{Name: "challengeExpiresAt", Type: "uint64"},
+				{Name: "keyExpiresAt", Type: "uint64"},
+			},
+		},
+		PrimaryType: "AuthorizeTradingKey",
+		Domain: apitypes.TypedDataDomain{
+			Name:              TradingAuthorizationDomainName,
+			Version:           TradingAuthorizationDomainVersion,
+			ChainId:           ethmath.NewHexOrDecimal256(normalized.ChainID),
+			VerifyingContract: normalized.VaultAddress,
+		},
+		Message: apitypes.TypedDataMessage{
+			"action":             AuthorizeTradingKeyAction,
+			"wallet":             normalized.WalletAddress,
+			"tradingPublicKey":   normalized.TradingPublicKey,
+			"tradingKeyScheme":   normalized.TradingKeyScheme,
+			"scope":              normalized.Scope,
+			"challenge":          normalized.Challenge,
+			"challengeExpiresAt": fmt.Sprintf("%d", normalized.ChallengeExpiresAtMillis),
+			"keyExpiresAt":       fmt.Sprintf("%d", normalized.KeyExpiresAtMillis),
+		},
+	}
+}
+
 func VerifyGrantSignature(grant SessionGrant, signature string) (string, error) {
 	normalized := grant.Normalize()
 	recovered, err := RecoverPersonalSignAddress(normalized.Message(), signature)
+	if err != nil {
+		return "", err
+	}
+	if recovered != normalized.WalletAddress {
+		return "", fmt.Errorf("wallet signature does not match wallet address")
+	}
+	return recovered, nil
+}
+
+func VerifyTradingKeyAuthorizationSignature(auth TradingKeyAuthorization, signature string) (string, error) {
+	normalized := auth.Normalize()
+	recovered, err := RecoverTypedDataAddress(normalized.TypedData(), signature)
 	if err != nil {
 		return "", err
 	}
@@ -227,6 +365,36 @@ func RecoverPersonalSignAddress(message, signature string) (string, error) {
 	return NormalizeHex(crypto.PubkeyToAddress(*pubKey).Hex()), nil
 }
 
+func RecoverTypedDataAddress(typedData apitypes.TypedData, signature string) (string, error) {
+	raw, err := decodeHexBytes(signature)
+	if err != nil {
+		return "", fmt.Errorf("decode signature: %w", err)
+	}
+	if len(raw) != crypto.SignatureLength {
+		return "", fmt.Errorf("invalid signature length")
+	}
+
+	sig := make([]byte, len(raw))
+	copy(sig, raw)
+	switch sig[crypto.RecoveryIDOffset] {
+	case 27, 28:
+		sig[crypto.RecoveryIDOffset] -= 27
+	case 0, 1:
+	default:
+		return "", fmt.Errorf("invalid signature recovery id")
+	}
+
+	hash, _, err := apitypes.TypedDataAndHash(typedData)
+	if err != nil {
+		return "", fmt.Errorf("build typed data hash: %w", err)
+	}
+	pubKey, err := crypto.SigToPub(hash, sig)
+	if err != nil {
+		return "", fmt.Errorf("recover signer: %w", err)
+	}
+	return NormalizeHex(crypto.PubkeyToAddress(*pubKey).Hex()), nil
+}
+
 func decodeHexBytes(value string) ([]byte, error) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -244,4 +412,15 @@ func NormalizeHex(value string) string {
 		return ""
 	}
 	return strings.ToLower(trimmed)
+}
+
+func validateFixedHex(label, value string, size int) error {
+	raw, err := decodeHexBytes(value)
+	if err != nil {
+		return fmt.Errorf("decode %s: %w", label, err)
+	}
+	if len(raw) != size {
+		return fmt.Errorf("invalid %s length", label)
+	}
+	return nil
 }

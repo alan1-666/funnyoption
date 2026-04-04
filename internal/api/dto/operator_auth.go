@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -97,7 +98,7 @@ func (req CreateMarketRequest) OperatorMessage() string {
 		normalized.CloseAt,
 		normalized.ResolveAt,
 		normalized.operatorRequestedAt(),
-	) + "options: " + buildMarketOptionSignatureFragment(options) + "\n"
+	) + buildResolutionSignatureFragment(metadata) + "options: " + buildMarketOptionSignatureFragment(options) + "\n"
 }
 
 func (req ResolveMarketRequest) OperatorMessage(marketID int64) string {
@@ -249,6 +250,108 @@ func stringFromMetadata(metadata map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func buildResolutionSignatureFragment(metadata map[string]any) string {
+	resolution, ok := nestedMap(metadata, "resolution")
+	if !ok {
+		return ""
+	}
+	oracle, _ := nestedMap(resolution, "oracle")
+	instrument, _ := nestedMap(oracle, "instrument")
+	price, _ := nestedMap(oracle, "price")
+	window, _ := nestedMap(oracle, "window")
+	rule, _ := nestedMap(oracle, "rule")
+
+	return "" +
+		fmt.Sprintf("resolution_version: %d\n", intFromAny(resolution["version"])) +
+		fmt.Sprintf("resolution_mode: %s\n", strings.ToUpper(cleanOperatorText(stringFromMap(resolution, "mode")))) +
+		fmt.Sprintf("resolution_market_kind: %s\n", strings.ToUpper(cleanOperatorText(stringFromMap(resolution, "market_kind", "marketKind")))) +
+		fmt.Sprintf("resolution_manual_fallback_allowed: %t\n", boolFromAny(resolution["manual_fallback_allowed"], resolution["manualFallbackAllowed"])) +
+		fmt.Sprintf("oracle_source_kind: %s\n", strings.ToUpper(cleanOperatorText(stringFromMap(oracle, "source_kind", "sourceKind")))) +
+		fmt.Sprintf("oracle_provider_key: %s\n", strings.ToUpper(cleanOperatorText(stringFromMap(oracle, "provider_key", "providerKey")))) +
+		fmt.Sprintf("oracle_instrument_kind: %s\n", strings.ToUpper(cleanOperatorText(stringFromMap(instrument, "kind")))) +
+		fmt.Sprintf("oracle_instrument_base_asset: %s\n", strings.ToUpper(cleanOperatorText(stringFromMap(instrument, "base_asset", "baseAsset")))) +
+		fmt.Sprintf("oracle_instrument_quote_asset: %s\n", strings.ToUpper(cleanOperatorText(stringFromMap(instrument, "quote_asset", "quoteAsset")))) +
+		fmt.Sprintf("oracle_instrument_symbol: %s\n", strings.ToUpper(cleanOperatorText(stringFromMap(instrument, "symbol")))) +
+		fmt.Sprintf("oracle_price_field: %s\n", strings.ToUpper(cleanOperatorText(stringFromMap(price, "field")))) +
+		fmt.Sprintf("oracle_price_scale: %d\n", intFromAny(price["scale"])) +
+		fmt.Sprintf("oracle_price_rounding_mode: %s\n", strings.ToUpper(cleanOperatorText(stringFromMap(price, "rounding_mode", "roundingMode")))) +
+		fmt.Sprintf("oracle_price_max_data_age_sec: %d\n", int64FromAny(price["max_data_age_sec"], price["maxDataAgeSec"])) +
+		fmt.Sprintf("oracle_window_anchor: %s\n", strings.ToUpper(cleanOperatorText(stringFromMap(window, "anchor")))) +
+		fmt.Sprintf("oracle_window_before_sec: %d\n", int64FromAny(window["before_sec"], window["beforeSec"])) +
+		fmt.Sprintf("oracle_window_after_sec: %d\n", int64FromAny(window["after_sec"], window["afterSec"])) +
+		fmt.Sprintf("oracle_rule_type: %s\n", strings.ToUpper(cleanOperatorText(stringFromMap(rule, "type")))) +
+		fmt.Sprintf("oracle_rule_comparator: %s\n", strings.ToUpper(cleanOperatorText(stringFromMap(rule, "comparator")))) +
+		fmt.Sprintf("oracle_rule_threshold_price: %s\n", strings.TrimSpace(stringFromMap(rule, "threshold_price", "thresholdPrice")))
+}
+
+func nestedMap(metadata map[string]any, key string) (map[string]any, bool) {
+	if metadata == nil {
+		return nil, false
+	}
+	value, ok := metadata[key]
+	if !ok {
+		return nil, false
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed, true
+	default:
+		return nil, false
+	}
+}
+
+func stringFromMap(metadata map[string]any, keys ...string) string {
+	if metadata == nil {
+		return ""
+	}
+	return stringFromMetadata(metadata, keys...)
+}
+
+func boolFromAny(values ...any) bool {
+	for _, value := range values {
+		switch typed := value.(type) {
+		case bool:
+			return typed
+		case string:
+			switch strings.ToLower(strings.TrimSpace(typed)) {
+			case "true", "1":
+				return true
+			case "false", "0":
+				return false
+			}
+		}
+	}
+	return false
+}
+
+func intFromAny(value any) int {
+	return int(int64FromAny(value))
+}
+
+func int64FromAny(values ...any) int64 {
+	for _, value := range values {
+		switch typed := value.(type) {
+		case int:
+			return int64(typed)
+		case int32:
+			return int64(typed)
+		case int64:
+			return typed
+		case float64:
+			return int64(typed)
+		case json.Number:
+			if parsed, err := typed.Int64(); err == nil {
+				return parsed
+			}
+		case string:
+			if parsed, err := strconv.ParseInt(strings.TrimSpace(typed), 10, 64); err == nil {
+				return parsed
+			}
+		}
+	}
+	return 0
 }
 
 func buildMarketOptionSignatureFragment(options []MarketOption) string {

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, startTransition, useContext, useEffect, useState } from "react";
+import { createContext, startTransition, useContext, useEffect, useRef, useState } from "react";
 import { getChainMeta } from "@/lib/chain";
 
 import {
@@ -8,9 +8,12 @@ import {
   bumpSessionOrderNonce,
   clearStoredSession,
   connectWallet,
-  loadStoredSession,
+  getWalletConnection,
   revokeRemoteSession,
+  restoreStoredSession,
   type OrderSignaturePayload,
+  type RestoreSessionResult,
+  type RestoreSessionStatus,
   type SessionRecord,
   signOrderWithSession,
   type WalletConnection
@@ -20,9 +23,11 @@ interface TradingSessionContextValue {
   wallet: WalletConnection | null;
   session: SessionRecord | null;
   busy: "connect" | "session" | null;
+  restoring: boolean;
+  restoreStatus: RestoreSessionStatus | "idle";
   statusMessage: string;
   connect: () => Promise<WalletConnection | null>;
-  createSession: (wallet?: WalletConnection | null) => Promise<SessionRecord | null>;
+  createSession: (wallet?: WalletConnection | null, options?: { forceRotate?: boolean }) => Promise<SessionRecord | null>;
   prepareTrading: () => Promise<SessionRecord | null>;
   signOrder: (order: {
     marketId: number;
@@ -58,21 +63,82 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
   const [wallet, setWallet] = useState<WalletConnection | null>(null);
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [busy, setBusy] = useState<"connect" | "session" | null>(null);
+  const [restoring, setRestoring] = useState(true);
+  const [restoreStatus, setRestoreStatus] = useState<RestoreSessionStatus | "idle">("idle");
   const [statusMessage, setStatusMessage] = useState("钱包待命");
+  const mountedRef = useRef(true);
+  const restoreRequestRef = useRef(0);
 
   useEffect(() => {
-    const stored = loadStoredSession();
-    if (!stored) {
-      return;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  function applyRestoreState(restored: RestoreSessionResult, activeWallet?: WalletConnection | null) {
+    startTransition(() => {
+      setRestoreStatus(restored.status);
+      if (restored.session) {
+        setSession(restored.session);
+        setWallet({
+          walletAddress: restored.session.walletAddress,
+          chainId: restored.session.chainId
+        });
+        setStatusMessage(restored.message);
+        return;
+      }
+
+      setSession(null);
+      if (activeWallet) {
+        setWallet(activeWallet);
+      }
+      if (restored.status === "missing") {
+        if (activeWallet?.chainId === TARGET_CHAIN.chainId) {
+          setStatusMessage(`钱包已连接到 ${TARGET_CHAIN.chainName}（${activeWallet.chainId}）`);
+        } else if (activeWallet) {
+          setStatusMessage(`已切换到链 ${activeWallet.chainId}`);
+        } else {
+          setStatusMessage("钱包待命");
+        }
+        return;
+      }
+      setStatusMessage(restored.message);
+    });
+  }
+
+  async function reconcile(activeWallet?: WalletConnection | null) {
+    const requestID = restoreRequestRef.current + 1;
+    restoreRequestRef.current = requestID;
+    startTransition(() => setRestoring(true));
+    try {
+      const restored = await restoreStoredSession(activeWallet ?? null);
+      if (!mountedRef.current || restoreRequestRef.current !== requestID) {
+        return restored;
+      }
+      applyRestoreState(restored, activeWallet);
+      return restored;
+    } catch (error) {
+      if (!mountedRef.current || restoreRequestRef.current !== requestID) {
+        throw error;
+      }
+      startTransition(() => {
+        setRestoreStatus("idle");
+        setSession(null);
+        setStatusMessage(formatError(error));
+      });
+      throw error;
+    } finally {
+      if (mountedRef.current && restoreRequestRef.current === requestID) {
+        startTransition(() => setRestoring(false));
+      }
     }
-    if (stored.chainId !== TARGET_CHAIN.chainId) {
-      clearStoredSession();
-      setStatusMessage(`本地会话来自链 ${stored.chainId}，请切换到 ${TARGET_CHAIN.chainName}（${TARGET_CHAIN.chainId}）。`);
-      return;
-    }
-    setSession(stored);
-    setWallet({ walletAddress: stored.walletAddress, chainId: stored.chainId });
-    setStatusMessage("已恢复本地会话");
+  }
+
+  useEffect(() => {
+    void (async () => {
+      const activeWallet = await getWalletConnection().catch(() => null);
+      await reconcile(activeWallet).catch(() => undefined);
+    })();
   }, []);
 
   useEffect(() => {
@@ -82,31 +148,50 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
 
     const handleAccountsChanged = (accounts: unknown) => {
       const walletAddress = Array.isArray(accounts) && typeof accounts[0] === "string" ? accounts[0].toLowerCase() : "";
-      startTransition(() => {
-        if (!walletAddress) {
+      if (!walletAddress) {
+        startTransition(() => {
           setWallet(null);
           setSession(null);
-          clearStoredSession();
-          setStatusMessage("钱包已断开");
-          return;
-        }
+          setStatusMessage("钱包已断开，重新连接后可恢复交易密钥。");
+        });
+        return;
+      }
 
-        setWallet((current) => ({ walletAddress, chainId: current?.chainId ?? 0 }));
-        if (session && session.walletAddress !== walletAddress) {
-          setSession(null);
-          clearStoredSession();
-          setStatusMessage("钱包已切换，已清空旧会话");
-        }
+      const nextWallet = { walletAddress, chainId: wallet?.chainId ?? 0 };
+      startTransition(() => {
+        setWallet(nextWallet);
       });
+      void (async () => {
+        try {
+          const restored = await reconcile(nextWallet);
+          if (!restored?.session && restored?.status === "missing") {
+            startTransition(() => setStatusMessage("钱包已切换，当前没有可恢复的交易密钥。"));
+          }
+        } catch (error) {
+          startTransition(() => setStatusMessage(formatError(error)));
+        }
+      })();
     };
 
     const handleChainChanged = (chainIdHex: unknown) => {
       if (typeof chainIdHex !== "string") return;
       const chainId = Number.parseInt(chainIdHex, 16);
+      const nextWallet = wallet ? { ...wallet, chainId } : null;
       startTransition(() => {
-        setWallet((current) => (current ? { ...current, chainId } : current));
+        setWallet(nextWallet);
         setStatusMessage(`已切换到链 ${chainId}`);
       });
+      if (!nextWallet) return;
+      void (async () => {
+        try {
+          const restored = await reconcile(nextWallet);
+          if (!restored?.session && restored?.status === "missing") {
+            startTransition(() => setStatusMessage(`已切换到链 ${chainId}`));
+          }
+        } catch (error) {
+          startTransition(() => setStatusMessage(formatError(error)));
+        }
+      })();
     };
 
     window.ethereum.on("accountsChanged", handleAccountsChanged);
@@ -116,11 +201,11 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
       window.ethereum?.removeListener?.("accountsChanged", handleAccountsChanged);
       window.ethereum?.removeListener?.("chainChanged", handleChainChanged);
     };
-  }, [session]);
+  }, [wallet]);
 
   async function handleConnect() {
     if (wallet && wallet.chainId === TARGET_CHAIN.chainId) {
-      setStatusMessage(`钱包已连接到 ${TARGET_CHAIN.chainName}（${wallet.chainId}）`);
+      await reconcile(wallet).catch(() => undefined);
       return wallet;
     }
 
@@ -128,10 +213,10 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
     setStatusMessage("连接钱包中...");
     try {
       const connection = await connectWallet();
-      startTransition(() => {
-        setWallet(connection);
-        setStatusMessage(`钱包已连接到 ${TARGET_CHAIN.chainName}（${connection.chainId}）`);
-      });
+      const restored = await reconcile(connection);
+      if (!restored?.session && restored?.status === "missing") {
+        startTransition(() => setStatusMessage(`钱包已连接到 ${TARGET_CHAIN.chainName}（${connection.chainId}）`));
+      }
       return connection;
     } catch (error) {
       const message = formatError(error);
@@ -142,9 +227,9 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
     }
   }
 
-  async function handleCreateSession(activeWallet?: WalletConnection | null) {
+  async function handleCreateSession(activeWallet?: WalletConnection | null, options?: { forceRotate?: boolean }) {
     setBusy("session");
-    setStatusMessage("正在授权交易会话...");
+    setStatusMessage("正在授权交易密钥...");
     try {
       const readyWallet =
         activeWallet && activeWallet.chainId === TARGET_CHAIN.chainId
@@ -152,11 +237,18 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
           : wallet && wallet.chainId === TARGET_CHAIN.chainId
             ? wallet
             : await handleConnect();
+      if (!options?.forceRotate) {
+        const restored = await reconcile(readyWallet ?? null);
+        if (restored?.session) {
+          return restored.session;
+        }
+      }
       const created = await authorizeSession(readyWallet ?? undefined);
       startTransition(() => {
         setSession(created);
         setWallet({ walletAddress: created.walletAddress, chainId: created.chainId });
-        setStatusMessage("交易已开启");
+        setRestoreStatus("restored");
+        setStatusMessage("交易密钥已开启");
       });
       return created;
     } catch (error) {
@@ -170,13 +262,18 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
 
   async function handlePrepareTrading() {
     if (session) {
-      setStatusMessage("交易已开启");
+      setStatusMessage("交易密钥已就绪");
       return session;
     }
 
     const activeWallet = wallet ?? (await handleConnect());
     if (!activeWallet) {
       return null;
+    }
+
+    const restored = await reconcile(activeWallet).catch(() => null);
+    if (restored?.session) {
+      return restored.session;
     }
 
     return handleCreateSession(activeWallet);
@@ -207,9 +304,12 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
   }
 
   function handleClear() {
-    clearStoredSession();
-    setSession(null);
-    setStatusMessage("本地会话已清空");
+    void clearStoredSession(session);
+    startTransition(() => {
+      setSession(null);
+      setRestoreStatus("missing");
+      setStatusMessage("本地交易密钥已清空");
+    });
   }
 
   async function handleRevokeCurrentSession() {
@@ -218,8 +318,12 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
       return;
     }
     await revokeRemoteSession(session.sessionId);
-    handleClear();
-    setStatusMessage("会话已撤销");
+    void clearStoredSession(session);
+    startTransition(() => {
+      setSession(null);
+      setRestoreStatus("revoked");
+      setStatusMessage("交易密钥已撤销");
+    });
   }
 
   return (
@@ -228,6 +332,8 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
         wallet,
         session,
         busy,
+        restoring,
+        restoreStatus,
         statusMessage,
         connect: handleConnect,
         createSession: handleCreateSession,

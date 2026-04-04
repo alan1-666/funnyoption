@@ -244,7 +244,7 @@ func (l *DepositListener) handleDepositLog(ctx context.Context, logEntry types.L
 	userID, err := l.store.LookupActiveUserByWallet(ctx, walletAddress)
 	if err != nil {
 		if errors.Is(err, ErrWalletSessionNotFound) {
-			l.logger.Warn("skip deposit without active wallet session", "wallet_address", walletAddress, "tx_hash", logEntry.TxHash.Hex())
+			l.logger.Warn("skip deposit without durable wallet binding", "wallet_address", walletAddress, "tx_hash", logEntry.TxHash.Hex())
 			return nil
 		}
 		return err
@@ -296,7 +296,7 @@ func (l *DepositListener) handleWithdrawalLog(ctx context.Context, logEntry type
 	userID, err := l.store.LookupActiveUserByWallet(ctx, walletAddress)
 	if err != nil {
 		if errors.Is(err, ErrWalletSessionNotFound) {
-			l.logger.Warn("skip withdrawal without active wallet session", "wallet_address", walletAddress, "tx_hash", logEntry.TxHash.Hex())
+			l.logger.Warn("skip withdrawal without durable wallet binding", "wallet_address", walletAddress, "tx_hash", logEntry.TxHash.Hex())
 			return nil
 		}
 		return err

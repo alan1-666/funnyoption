@@ -49,13 +49,17 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
 | TASK-API-005 | completed | worker | TASK-STAGING-001 | make first-liquidity duplicate handling atomic/idempotent and charge collateral in the same accounting units as settlement payouts |
 | TASK-OFFCHAIN-011 | completed | worker | TASK-STAGING-001 | make `/portfolio` render balances, positions, orders, and payouts for the connected session user instead of default user `1001` |
 | TASK-OFFCHAIN-012 | completed | worker | TASK-OFFCHAIN-010 | realign `cmd/local-lifecycle` and the local lifecycle docs with the one-shot first-liquidity contract so the local wrapper proof no longer submits a duplicate maker sell |
-| TASK-OFFCHAIN-013 | blocked | worker | TASK-OFFCHAIN-014 | optimize wallet-signed session login / restore UX so valid sessions reconnect cleanly with fewer unnecessary wallet prompts while preserving the finally chosen trading-key trust model |
-| TASK-OFFCHAIN-014 | queued | worker-design | TASK-STAGING-001 | define the Stark-style wallet-linked trading-key architecture so users sign once with MetaMask, derive or register one off-chain trading key, and sign subsequent orders without repeated wallet prompts |
+| TASK-OFFCHAIN-013 | completed | worker | TASK-OFFCHAIN-015 | optimize wallet-signed session login / restore UX after the new V2 trading-key registration path exists; do not implement against the retired session-key baseline |
+| TASK-OFFCHAIN-014 | completed | worker-design | TASK-STAGING-001 | define the Stark-style wallet-linked trading-key architecture so users sign once with MetaMask, derive or register one off-chain trading key, and sign subsequent orders without repeated wallet prompts |
+| TASK-OFFCHAIN-015 | completed | worker | TASK-OFFCHAIN-014 | implement the first V2 trading-key runtime slice: challenge issuance, `EIP-712` wallet authorization of a browser-local trading key, compatibility storage in `wallet_sessions`, and truthful local restore semantics |
+| TASK-OFFCHAIN-016 | completed | worker | TASK-OFFCHAIN-015 | make active trading-key scope durably truthful to `wallet + chain + vault` by persisting vault scope server-side and stopping cross-vault rotation / lookup collapse |
 | TASK-CICD-001 | completed | worker-platform | TASK-API-004 | add GitHub push-to-deploy CI/CD for the current server deployment without committing plaintext secrets |
 | TASK-CICD-002 | completed | worker-platform | TASK-CICD-001 | optimize staging CI/CD so only services affected by a push are validated, rebuilt, and redeployed, while docs-only pushes skip service deployment |
 | TASK-CICD-003 | completed | worker-platform | TASK-CICD-002 | make selective deploy self-bootstrap-safe when the server checkout still has an older `scripts/deploy-staging.sh` that does not recognize new workflow-passed flags |
 | TASK-CICD-004 | completed | worker-platform | TASK-CICD-003 | simplify staging CI/CD so GitHub Actions becomes a thin trigger that calls one fixed server-side deploy entrypoint, while the server entrypoint fetches the exact target SHA and delegates selective rebuild/restart planning to the repo deploy script |
-| TASK-CHAIN-005 | queued | worker-design | TASK-STAGING-001 | define the oracle-settled crypto market contract and first implementation cut so crypto markets can auto-resolve from an external price source with auditable evidence and a safe manual override |
+| TASK-CHAIN-005 | completed | worker-design | TASK-STAGING-001 | define the oracle-settled crypto market contract and first implementation cut so crypto markets can auto-resolve from an external price source with auditable evidence and a safe manual override |
+| TASK-CHAIN-006 | completed | worker | TASK-CHAIN-005 | implement the first oracle-settled crypto market runtime slice with one-provider metadata validation, a dedicated oracle worker, manual resolve conflict guards, and truthful resolution-record ownership for manual fallback |
+| TASK-CHAIN-007 | completed | worker | TASK-CHAIN-006 | add an explicit retry-safe dispatch contract for oracle observations so `OBSERVED` rows whose publish step failed can be retried without duplicate settlement/account side effects |
 
 ## Risks
 
@@ -68,6 +72,10 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
 - GitHub CI/CD requires server SSH credentials and deployment commands to be injected through GitHub Secrets, never plaintext repo files
 - staging chain deposits can stall after a deploy restart if the chain service replays from a static start block that is already pruned by the configured public RPC
 - oracle-market work can accidentally fork the Solidity toolchain unless the repo stays explicit that contracts remain Foundry-based
+- the V2 auth design temporarily reuses `wallet_sessions` and `user_profiles.wallet_address`, so cross-chain or cross-vault wallet binding must stay explicit in the follow-up implementation slice instead of being assumed implicitly
+- removing `POST /api/v1/sessions` before the repo's lifecycle / concurrency proof tooling migrates would still break internal verification flows; the route now remains as an explicit deprecated compat path until those tools move
+- oracle dispatch retry is now guarded by a latest-row checkpoint in `market_resolutions.evidence.dispatch`, but it is still not an append-only dispatch-attempt log or full outbox
+- deprecated `/api/v1/sessions` compatibility rows still intentionally keep blank `vault_address`, so future auth cleanup must migrate proof tooling before retiring that legacy carrier
 
 ## Decision log
 
@@ -75,6 +83,16 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
 - plans, tasks, handshakes, and worklogs live under `docs/harness/`
 - commander plans and routes; workers execute scoped tasks
 - Solidity contract work stays on the repo's existing Foundry layout (`foundry.toml`, `contracts/src`, `contracts/test`, `contracts/script`); do not introduce a second contract framework for the oracle lane
+- `TASK-OFFCHAIN-014` is complete: V2 auth rejects signature-derived deterministic trading keys and adopts wallet-authorized locally generated trading keys plus durable wallet binding semantics
+- `TASK-OFFCHAIN-015` is the first auth implementation slice and should land challenge issuance plus `EIP-712` trading-key registration before older UX-only follow-ups resume
+- `TASK-CHAIN-005` is complete: oracle-settled crypto markets now have an explicit metadata / evidence / resolver contract with a dedicated oracle worker boundary
+- `TASK-CHAIN-006` is the first oracle implementation slice and must include the manual resolve conflict guard plus truthful overwrite of `market_resolutions` ownership fields when an operator fallback wins after oracle error states
+- `TASK-OFFCHAIN-015` is complete: the V2 trading-key runtime restores `POST /api/v1/sessions` as a deprecated proof-tool compat route while the canonical browser flow stays on challenge + `EIP-712` registration
+- `TASK-CHAIN-006` is complete: the oracle worker now skips duplicate resolved-event publish when the same oracle observation is already recorded as `OBSERVED`, so repeated polling no longer re-triggers settlement/account side effects from this worker path
+- `TASK-OFFCHAIN-016` is complete: canonical trading-key rows now durably scope uniqueness, rotation, and readback to `wallet + chain + vault`, including allowing one wallet to reuse the same trading public key across two different vaults on one chain
+- `TASK-CHAIN-007` is complete: oracle `OBSERVED` rows now persist a dispatch
+  checkpoint in `market_resolutions.evidence.dispatch`, and settlement only
+  lets the first resolved event continue into cancel/payout publish
 - `TASK-OFFCHAIN-001` remains the umbrella lane, but worker threads should execute smaller tasks
 - next worker should close the local regression path before broader chain hardening
 - `TASK-OFFCHAIN-002` is the next worker thread and should return a pass/fail matrix plus reproducible local verification notes
@@ -216,7 +234,7 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
 - `TASK-OFFCHAIN-014` is therefore the next auth lane and should stay design-first:
   - define whether the product truly derives a deterministic Stark/private trading key from the wallet signature, or instead wallet-authorizes a locally generated Stark key
   - define the exact signing message/domain, key registration flow, nonce/replay model, browser storage, revocation, and migration path from the current ed25519-style session model
-- `TASK-OFFCHAIN-013` is blocked until `TASK-OFFCHAIN-014` closes the auth contract
+- `TASK-OFFCHAIN-013` is complete: frontend restore now reconciles exact local key truth before any reauthorization prompt, expired / revoked / rotated / missing-local-key states fail honestly, and new browser registration still stays on the canonical trading-key routes
 - `TASK-CHAIN-005` should stay design-first before runtime implementation:
   - define the metadata contract for oracle-settled crypto markets
   - define where oracle fetch / evidence persistence / auto-resolution lives

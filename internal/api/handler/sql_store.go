@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"funnyoption/internal/api/dto"
 
@@ -17,10 +18,14 @@ import (
 var ErrNotFound = errors.New("resource not found")
 var ErrSessionNonceConflict = errors.New("session nonce conflict")
 var ErrInvalidMarketCategory = errors.New("market category is invalid")
+var ErrTradingKeyChallengeExpired = errors.New("trading key challenge expired")
+var ErrTradingKeyChallengeConsumed = errors.New("trading key challenge already used")
 
 type QueryStore interface {
 	CreateMarket(ctx context.Context, req dto.CreateMarketRequest) (dto.MarketResponse, error)
 	CreateSession(ctx context.Context, req dto.CreateSessionRequest) (dto.SessionResponse, error)
+	CreateTradingKeyChallenge(ctx context.Context, req dto.CreateTradingKeyChallengeRequest) (dto.TradingKeyChallengeResponse, error)
+	RegisterTradingKey(ctx context.Context, req dto.RegisterTradingKeyRequest) (dto.SessionResponse, error)
 	CreateClaimRequest(ctx context.Context, req dto.ClaimPayoutRequest) (dto.ChainTransactionResponse, error)
 	GetUserProfile(ctx context.Context, req dto.GetUserProfileRequest) (dto.UserProfileResponse, error)
 	UpsertUserProfile(ctx context.Context, req dto.UpdateUserProfileRequest, walletAddress string) (dto.UserProfileResponse, error)
@@ -30,6 +35,7 @@ type QueryStore interface {
 	RevokeSession(ctx context.Context, sessionID string) (dto.SessionResponse, error)
 	AdvanceSessionNonce(ctx context.Context, sessionID string, nonce uint64) (dto.SessionResponse, error)
 	GetMarket(ctx context.Context, marketID int64) (dto.MarketResponse, error)
+	GetMarketResolution(ctx context.Context, marketID int64) (MarketResolutionState, bool, error)
 	ListMarkets(ctx context.Context, req dto.ListMarketsRequest) ([]dto.MarketResponse, error)
 	ListSessions(ctx context.Context, req dto.ListSessionsRequest) ([]dto.SessionResponse, error)
 	ListDeposits(ctx context.Context, req dto.ListDepositsRequest) ([]dto.DepositResponse, error)
@@ -48,6 +54,23 @@ type QueryStore interface {
 
 type SQLStore struct {
 	db *sql.DB
+}
+
+type MarketResolutionState struct {
+	Status          string
+	ResolvedOutcome string
+	ResolverType    string
+	ResolverRef     string
+}
+
+type tradingKeyChallengeRecord struct {
+	ChallengeID   string
+	WalletAddress string
+	ChainID       int64
+	VaultAddress  string
+	Challenge     string
+	ExpiresAt     int64
+	ConsumedAt    int64
 }
 
 func NewSQLStore(db *sql.DB) *SQLStore {
@@ -127,9 +150,9 @@ func (s *SQLStore) CreateSession(ctx context.Context, req dto.CreateSessionReque
 	row := tx.QueryRowContext(ctx, `
 		INSERT INTO wallet_sessions (
 			session_id, user_id, wallet_address, session_public_key, scope, chain_id,
-			session_nonce, last_order_nonce, status, issued_at, expires_at, revoked_at, created_at, updated_at
+			vault_address, session_nonce, last_order_nonce, status, issued_at, expires_at, revoked_at, created_at, updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, 0, 'ACTIVE', $8, $9, 0,
+		VALUES ($1, $2, $3, $4, $5, $6, '', $7, 0, 'ACTIVE', $8, $9, 0,
 		        EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT)
 		ON CONFLICT (session_id) DO UPDATE
 		SET user_id = EXCLUDED.user_id,
@@ -137,13 +160,14 @@ func (s *SQLStore) CreateSession(ctx context.Context, req dto.CreateSessionReque
 			session_public_key = EXCLUDED.session_public_key,
 			scope = EXCLUDED.scope,
 			chain_id = EXCLUDED.chain_id,
+			vault_address = EXCLUDED.vault_address,
 			session_nonce = EXCLUDED.session_nonce,
 			status = 'ACTIVE',
 			issued_at = EXCLUDED.issued_at,
 			expires_at = EXCLUDED.expires_at,
 			revoked_at = 0,
 			updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
-		RETURNING session_id, user_id, wallet_address, session_public_key, scope, chain_id,
+		RETURNING session_id, user_id, wallet_address, session_public_key, scope, chain_id, vault_address,
 		          session_nonce, last_order_nonce, status, issued_at, expires_at, revoked_at, created_at, updated_at
 	`,
 		req.SessionID,
@@ -155,6 +179,195 @@ func (s *SQLStore) CreateSession(ctx context.Context, req dto.CreateSessionReque
 		strings.TrimSpace(req.Nonce),
 		req.IssuedAtMillis,
 		req.ExpiresAtMillis,
+	)
+	session, err := scanSession(row)
+	if err != nil {
+		return dto.SessionResponse{}, err
+	}
+	if err := ensureUserProfileTx(ctx, tx, session.UserID, session.WalletAddress); err != nil {
+		return dto.SessionResponse{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return dto.SessionResponse{}, err
+	}
+	return session, nil
+}
+
+func (s *SQLStore) CreateTradingKeyChallenge(ctx context.Context, req dto.CreateTradingKeyChallengeRequest) (dto.TradingKeyChallengeResponse, error) {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO trading_key_challenges (
+			challenge_id, wallet_address, chain_id, vault_address, challenge,
+			expires_at, consumed_at, created_at, updated_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, 0,
+		        EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT)
+	`,
+		strings.TrimSpace(req.ChallengeID),
+		normalizeWalletAddress(req.WalletAddress),
+		req.ChainID,
+		normalizeVaultAddress(req.VaultAddress),
+		normalizeChallengeValue(req.Challenge),
+		req.ChallengeExpiresAt,
+	)
+	if err != nil {
+		return dto.TradingKeyChallengeResponse{}, err
+	}
+	return dto.TradingKeyChallengeResponse{
+		ChallengeID:        strings.TrimSpace(req.ChallengeID),
+		Challenge:          formatChallengeValue(req.Challenge),
+		ChallengeExpiresAt: req.ChallengeExpiresAt,
+	}, nil
+}
+
+func (s *SQLStore) RegisterTradingKey(ctx context.Context, req dto.RegisterTradingKeyRequest) (dto.SessionResponse, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return dto.SessionResponse{}, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	nowMillis := time.Now().UnixMilli()
+	normalizedChallenge := normalizeChallengeValue(req.Challenge)
+	normalizedWallet := normalizeWalletAddress(req.WalletAddress)
+	normalizedVault := normalizeVaultAddress(req.VaultAddress)
+	normalizedPublicKey := normalizePublicKey(req.TradingPublicKey)
+
+	existing, err := getSessionTx(ctx, tx, req.SessionID)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return dto.SessionResponse{}, err
+	}
+
+	challenge, err := getTradingKeyChallengeTx(ctx, tx, req.ChallengeID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) && isIdempotentTradingKeyRetry(existing, req, normalizedChallenge) {
+			if err := tx.Commit(); err != nil {
+				return dto.SessionResponse{}, err
+			}
+			return existing, nil
+		}
+		return dto.SessionResponse{}, err
+	}
+	if challenge.WalletAddress != normalizedWallet ||
+		challenge.ChainID != req.ChainID ||
+		challenge.VaultAddress != normalizedVault ||
+		challenge.Challenge != normalizedChallenge {
+		return dto.SessionResponse{}, ErrNotFound
+	}
+	if challenge.ExpiresAt < nowMillis {
+		if isIdempotentTradingKeyRetry(existing, req, normalizedChallenge) {
+			if err := tx.Commit(); err != nil {
+				return dto.SessionResponse{}, err
+			}
+			return existing, nil
+		}
+		return dto.SessionResponse{}, ErrTradingKeyChallengeExpired
+	}
+	if challenge.ConsumedAt > 0 {
+		if isIdempotentTradingKeyRetry(existing, req, normalizedChallenge) {
+			if err := tx.Commit(); err != nil {
+				return dto.SessionResponse{}, err
+			}
+			return existing, nil
+		}
+		return dto.SessionResponse{}, ErrTradingKeyChallengeConsumed
+	}
+
+	result, err := tx.ExecContext(ctx, `
+		UPDATE trading_key_challenges
+		SET consumed_at = $2,
+			updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE challenge_id = $1
+		  AND consumed_at = 0
+	`, strings.TrimSpace(req.ChallengeID), nowMillis)
+	if err != nil {
+		return dto.SessionResponse{}, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return dto.SessionResponse{}, err
+	}
+	if rowsAffected == 0 {
+		if isIdempotentTradingKeyRetry(existing, req, normalizedChallenge) {
+			if err := tx.Commit(); err != nil {
+				return dto.SessionResponse{}, err
+			}
+			return existing, nil
+		}
+		return dto.SessionResponse{}, ErrTradingKeyChallengeConsumed
+	}
+
+	userID, err := resolveOrCreateUserIDTx(ctx, tx, normalizedWallet)
+	if err != nil {
+		return dto.SessionResponse{}, err
+	}
+
+	sameActive, err := getActiveTradingKeyTx(ctx, tx, req.SessionID)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return dto.SessionResponse{}, err
+	}
+
+	if sameActive.SessionID != "" &&
+		sameActive.WalletAddress == normalizedWallet &&
+		sameActive.ChainID == req.ChainID &&
+		sameActive.VaultAddress == normalizedVault &&
+		(sameActive.ExpiresAtMillis == 0 || sameActive.ExpiresAtMillis >= nowMillis) &&
+		strings.EqualFold(sameActive.SessionPublicKey, normalizedPublicKey) {
+		if err := tx.Commit(); err != nil {
+			return dto.SessionResponse{}, err
+		}
+		return sameActive, nil
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE wallet_sessions
+		SET status = 'ROTATED',
+			revoked_at = $3,
+			updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE wallet_address = $1
+		  AND chain_id = $2
+		  AND vault_address = $5
+		  AND status = 'ACTIVE'
+		  AND session_id <> $4
+	`, normalizedWallet, req.ChainID, nowMillis, req.SessionID, normalizedVault); err != nil {
+		return dto.SessionResponse{}, err
+	}
+
+	row := tx.QueryRowContext(ctx, `
+		INSERT INTO wallet_sessions (
+			session_id, user_id, wallet_address, session_public_key, scope, chain_id,
+			vault_address,
+			session_nonce, last_order_nonce, status, issued_at, expires_at, revoked_at, created_at, updated_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, 'ACTIVE', $9, $10, 0,
+		        EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT)
+		ON CONFLICT (session_id) DO UPDATE
+		SET user_id = EXCLUDED.user_id,
+			wallet_address = EXCLUDED.wallet_address,
+			session_public_key = EXCLUDED.session_public_key,
+			scope = EXCLUDED.scope,
+			chain_id = EXCLUDED.chain_id,
+			vault_address = EXCLUDED.vault_address,
+			session_nonce = EXCLUDED.session_nonce,
+			status = 'ACTIVE',
+			issued_at = EXCLUDED.issued_at,
+			expires_at = EXCLUDED.expires_at,
+			revoked_at = 0,
+			updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		RETURNING session_id, user_id, wallet_address, session_public_key, scope, chain_id, vault_address,
+		          session_nonce, last_order_nonce, status, issued_at, expires_at, revoked_at, created_at, updated_at
+	`,
+		req.SessionID,
+		userID,
+		normalizedWallet,
+		normalizedPublicKey,
+		normalizeSessionScope(req.Scope),
+		req.ChainID,
+		normalizedVault,
+		normalizedChallenge,
+		nowMillis,
+		req.KeyExpiresAtMillis,
 	)
 	session, err := scanSession(row)
 	if err != nil {
@@ -280,7 +493,7 @@ func (s *SQLStore) GetOrder(ctx context.Context, orderID string) (dto.OrderRespo
 
 func (s *SQLStore) GetSession(ctx context.Context, sessionID string) (dto.SessionResponse, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT session_id, user_id, wallet_address, session_public_key, scope, chain_id,
+		SELECT session_id, user_id, wallet_address, session_public_key, scope, chain_id, vault_address,
 		       session_nonce, last_order_nonce, status, issued_at, expires_at, revoked_at, created_at, updated_at
 		FROM wallet_sessions
 		WHERE session_id = $1
@@ -295,7 +508,7 @@ func (s *SQLStore) RevokeSession(ctx context.Context, sessionID string) (dto.Ses
 			revoked_at = EXTRACT(EPOCH FROM NOW())::BIGINT * 1000,
 			updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
 		WHERE session_id = $1
-		RETURNING session_id, user_id, wallet_address, session_public_key, scope, chain_id,
+		RETURNING session_id, user_id, wallet_address, session_public_key, scope, chain_id, vault_address,
 		          session_nonce, last_order_nonce, status, issued_at, expires_at, revoked_at, created_at, updated_at
 	`, strings.TrimSpace(sessionID))
 	return scanSession(row)
@@ -309,7 +522,7 @@ func (s *SQLStore) AdvanceSessionNonce(ctx context.Context, sessionID string, no
 		WHERE session_id = $1
 		  AND status = 'ACTIVE'
 		  AND last_order_nonce < $2
-		RETURNING session_id, user_id, wallet_address, session_public_key, scope, chain_id,
+		RETURNING session_id, user_id, wallet_address, session_public_key, scope, chain_id, vault_address,
 		          session_nonce, last_order_nonce, status, issued_at, expires_at, revoked_at, created_at, updated_at
 	`, strings.TrimSpace(sessionID), int64(nonce))
 
@@ -342,6 +555,22 @@ func (s *SQLStore) GetMarket(ctx context.Context, marketID int64) (dto.MarketRes
 		return dto.MarketResponse{}, err
 	}
 	return items[0], nil
+}
+
+func (s *SQLStore) GetMarketResolution(ctx context.Context, marketID int64) (MarketResolutionState, bool, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT status, resolved_outcome, resolver_type, resolver_ref
+		FROM market_resolutions
+		WHERE market_id = $1
+	`, marketID)
+	var state MarketResolutionState
+	if err := row.Scan(&state.Status, &state.ResolvedOutcome, &state.ResolverType, &state.ResolverRef); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return MarketResolutionState{}, false, nil
+		}
+		return MarketResolutionState{}, false, err
+	}
+	return state, true, nil
 }
 
 func (s *SQLStore) GetLatestFreezeByRef(ctx context.Context, refType, refID string) (dto.FreezeResponse, error) {
@@ -414,7 +643,7 @@ func (s *SQLStore) ListSessions(ctx context.Context, req dto.ListSessionsRequest
 		filters []string
 	)
 	query := `
-		SELECT session_id, user_id, wallet_address, session_public_key, scope, chain_id,
+		SELECT session_id, user_id, wallet_address, session_public_key, scope, chain_id, vault_address,
 		       session_nonce, last_order_nonce, status, issued_at, expires_at, revoked_at, created_at, updated_at
 		FROM wallet_sessions
 	`
@@ -426,6 +655,10 @@ func (s *SQLStore) ListSessions(ctx context.Context, req dto.ListSessionsRequest
 	if wallet := normalizeWalletAddress(req.WalletAddress); wallet != "" {
 		args = append(args, wallet)
 		filters = append(filters, fmt.Sprintf("wallet_address = $%d", len(args)))
+	}
+	if vault := normalizeVaultAddress(req.VaultAddress); vault != "" {
+		args = append(args, vault)
+		filters = append(filters, fmt.Sprintf("vault_address = $%d", len(args)))
 	}
 	if status := normalizeOptional(req.Status); status != "" {
 		args = append(args, status)
@@ -1166,6 +1399,7 @@ func scanSession(row scanner) (dto.SessionResponse, error) {
 		&item.SessionPublicKey,
 		&item.Scope,
 		&item.ChainID,
+		&item.VaultAddress,
 		&item.SessionNonce,
 		&item.LastOrderNonce,
 		&item.Status,
@@ -1666,12 +1900,89 @@ func ensureUserProfileTx(ctx context.Context, tx *sql.Tx, userID int64, walletAd
 	return err
 }
 
+func resolveOrCreateUserIDTx(ctx context.Context, tx *sql.Tx, walletAddress string) (int64, error) {
+	walletAddress = normalizeWalletAddress(walletAddress)
+	if walletAddress == "" {
+		return 0, ErrNotFound
+	}
+
+	var userID int64
+	err := tx.QueryRowContext(ctx, `
+		SELECT user_id
+		FROM user_profiles
+		WHERE wallet_address = $1
+		LIMIT 1
+	`, walletAddress).Scan(&userID)
+	if err == nil {
+		return userID, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `LOCK TABLE user_profiles IN EXCLUSIVE MODE`); err != nil {
+		return 0, err
+	}
+
+	err = tx.QueryRowContext(ctx, `
+		SELECT user_id
+		FROM user_profiles
+		WHERE wallet_address = $1
+		LIMIT 1
+	`, walletAddress).Scan(&userID)
+	if err == nil {
+		return userID, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+
+	err = tx.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(user_id), 1000) + 1
+		FROM user_profiles
+	`).Scan(&userID)
+	if err != nil {
+		return 0, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO user_profiles (
+			user_id, wallet_address, display_name, avatar_preset, created_at, updated_at
+		)
+		VALUES ($1, $2, '', $3, EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT)
+	`, userID, walletAddress, dto.DefaultAvatarPreset(userID, walletAddress)); err != nil {
+		return 0, err
+	}
+	return userID, nil
+}
+
 func normalizeOptional(value string) string {
 	return strings.ToUpper(strings.TrimSpace(value))
 }
 
 func normalizeWalletAddress(walletAddress string) string {
 	return strings.ToLower(strings.TrimSpace(walletAddress))
+}
+
+func normalizeVaultAddress(vaultAddress string) string {
+	return strings.ToLower(strings.TrimSpace(vaultAddress))
+}
+
+func normalizeChallengeValue(challenge string) string {
+	normalized := strings.ToLower(strings.TrimSpace(challenge))
+	return strings.TrimPrefix(normalized, "0x")
+}
+
+func formatChallengeValue(challenge string) string {
+	normalized := normalizeChallengeValue(challenge)
+	if normalized == "" {
+		return ""
+	}
+	return "0x" + normalized
+}
+
+func normalizePublicKey(publicKey string) string {
+	return strings.ToLower(strings.TrimSpace(publicKey))
 }
 
 func normalizeAsset(asset string) string {
@@ -1700,6 +2011,75 @@ func normalizeSessionScope(scope string) string {
 		return "TRADE"
 	}
 	return normalized
+}
+
+func getSessionTx(ctx context.Context, tx *sql.Tx, sessionID string) (dto.SessionResponse, error) {
+	row := tx.QueryRowContext(ctx, `
+		SELECT session_id, user_id, wallet_address, session_public_key, scope, chain_id, vault_address,
+		       session_nonce, last_order_nonce, status, issued_at, expires_at, revoked_at, created_at, updated_at
+		FROM wallet_sessions
+		WHERE session_id = $1
+	`, strings.TrimSpace(sessionID))
+	return scanSession(row)
+}
+
+func getActiveTradingKeyTx(ctx context.Context, tx *sql.Tx, sessionID string) (dto.SessionResponse, error) {
+	row := tx.QueryRowContext(ctx, `
+		SELECT session_id, user_id, wallet_address, session_public_key, scope, chain_id, vault_address,
+		       session_nonce, last_order_nonce, status, issued_at, expires_at, revoked_at, created_at, updated_at
+		FROM wallet_sessions
+		WHERE session_id = $1
+		  AND status = 'ACTIVE'
+		LIMIT 1
+	`, strings.TrimSpace(sessionID))
+	return scanSession(row)
+}
+
+func getTradingKeyChallengeTx(ctx context.Context, tx *sql.Tx, challengeID string) (tradingKeyChallengeRecord, error) {
+	var item tradingKeyChallengeRecord
+	err := tx.QueryRowContext(ctx, `
+		SELECT challenge_id, wallet_address, chain_id, vault_address, challenge, expires_at, consumed_at
+		FROM trading_key_challenges
+		WHERE challenge_id = $1
+		LIMIT 1
+	`, strings.TrimSpace(challengeID)).Scan(
+		&item.ChallengeID,
+		&item.WalletAddress,
+		&item.ChainID,
+		&item.VaultAddress,
+		&item.Challenge,
+		&item.ExpiresAt,
+		&item.ConsumedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return tradingKeyChallengeRecord{}, ErrNotFound
+		}
+		return tradingKeyChallengeRecord{}, err
+	}
+	return item, nil
+}
+
+func isIdempotentTradingKeyRetry(existing dto.SessionResponse, req dto.RegisterTradingKeyRequest, normalizedChallenge string) bool {
+	if existing.SessionID == "" || strings.ToUpper(existing.Status) != "ACTIVE" {
+		return false
+	}
+	if existing.SessionID != strings.TrimSpace(req.SessionID) {
+		return false
+	}
+	if existing.WalletAddress != normalizeWalletAddress(req.WalletAddress) {
+		return false
+	}
+	if existing.ChainID != req.ChainID {
+		return false
+	}
+	if existing.VaultAddress != normalizeVaultAddress(req.VaultAddress) {
+		return false
+	}
+	if !strings.EqualFold(existing.SessionPublicKey, normalizePublicKey(req.TradingPublicKey)) {
+		return false
+	}
+	return strings.EqualFold(existing.SessionNonce, normalizedChallenge)
 }
 
 func (s *SQLStore) getChainTransactionByRef(ctx context.Context, bizType, refID string) (dto.ChainTransactionResponse, error) {

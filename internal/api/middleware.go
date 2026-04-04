@@ -145,7 +145,7 @@ func requireTradeWriteBoundary() gin.HandlerFunc {
 				strings.TrimSpace(payload.SessionSignature) == "" ||
 				payload.RequestedAtMillis <= 0 {
 				ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-					"error": "session-backed trade authorization is required",
+					"error": "trading-key-backed trade authorization is required",
 				})
 				return
 			}
@@ -169,7 +169,7 @@ func requireTradeWriteBoundary() gin.HandlerFunc {
 		}
 
 		ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-			"error": "session-backed trade authorization or operator proof is required",
+			"error": "trading-key-backed trade authorization or operator proof is required",
 		})
 	}
 }

@@ -44,9 +44,13 @@
   - weaker nonce / replay protection
   - server-side storage of session private keys
   - deriving a trading key from the wallet signature
-- this task is now blocked behind `TASK-OFFCHAIN-014` because the product auth
-  direction changed from “current session-key UX optimization” to a larger
-  Stark-style trading-key architecture discussion
+- `TASK-OFFCHAIN-015` is now the landed V2 baseline:
+  - fresh browser registration must stay on
+    `POST /api/v1/trading-keys/challenge` +
+    `POST /api/v1/trading-keys`
+  - browser-local private keys remain IndexedDB-only
+  - `/api/v1/sessions` stays deprecated compatibility surface only for existing
+    repo proof tooling, not for new browser callers
 
 ## Outputs back to commander
 
@@ -63,11 +67,25 @@
 - do not widen into admin/operator wallet auth unless a shared helper requires a
   narrow consistency fix
 - do not touch unrelated order-matching or settlement logic
-- blocked pending `TASK-OFFCHAIN-014`:
-  - do not start implementation until the auth contract is re-decided
-  - if Stark-style trading keys are adopted, this task will be resliced against
-    the new baseline instead of the current ed25519-style session model
+- keep the current single-vault-per-environment assumption explicit:
+  - browser restore is namespaced by `wallet + chain + vault`
+  - durable server lookup still collapses to `wallet + chain` because
+    `wallet_sessions` still has no persisted `vault_address`
+  - truthful restore therefore still relies on the current one-vault-per-env
+    deployment contract until a later schema change lands
 
 ## Status
 
-- blocked
+- completed
+
+## Handoff notes
+
+- implementation stayed inside frontend ownership:
+  - restore now checks exact local key truth before any reauthorization
+  - expired / revoked / rotated / missing IndexedDB key all fail honestly
+  - create / prepare flows now re-run restore before prompting a wallet
+    signature, so refresh no longer races into unnecessary resign
+- backend API surface was not expanded:
+  - canonical V2 browser auth remains `/api/v1/trading-keys/challenge` +
+    `/api/v1/trading-keys`
+  - `/api/v1/sessions` remains read / revoke / deprecated proof-tool compat

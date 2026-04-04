@@ -12,6 +12,12 @@ Run one reproducible local lifecycle that covers:
 - market resolution
 - settlement payout and read-surface updates
 
+For the newer acceptance path that also covers canonical trading-key
+registration, truthful restore, and oracle auto settlement, use:
+
+- [/Users/zhangza/code/funnyoption/docs/operations/local-full-flow-acceptance.md](/Users/zhangza/code/funnyoption/docs/operations/local-full-flow-acceptance.md)
+- `/Users/zhangza/code/funnyoption/scripts/local-full-flow.sh`
+
 ## Prerequisites
 
 1. Start the local stack with:

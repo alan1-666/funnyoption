@@ -320,6 +320,38 @@ type CreateSessionRequest struct {
 	WalletSignature  string `json:"wallet_signature" binding:"required"`
 }
 
+type CreateTradingKeyChallengeRequest struct {
+	ChallengeID        string `json:"-"`
+	Challenge          string `json:"-"`
+	ChallengeExpiresAt int64  `json:"-"`
+	WalletAddress      string `json:"wallet_address" binding:"required"`
+	ChainID            int64  `json:"chain_id" binding:"required"`
+	VaultAddress       string `json:"vault_address" binding:"required"`
+}
+
+type TradingKeyChallengeResponse struct {
+	ChallengeID        string `json:"challenge_id"`
+	Challenge          string `json:"challenge"`
+	ChallengeExpiresAt int64  `json:"challenge_expires_at"`
+}
+
+type RegisterTradingKeyRequest struct {
+	SessionID                string `json:"-"`
+	UserID                   int64  `json:"-"`
+	WalletAddress            string `json:"wallet_address" binding:"required"`
+	ChainID                  int64  `json:"chain_id" binding:"required"`
+	VaultAddress             string `json:"vault_address" binding:"required"`
+	ChallengeID              string `json:"challenge_id" binding:"required"`
+	Challenge                string `json:"challenge" binding:"required"`
+	ChallengeExpiresAtMillis int64  `json:"challenge_expires_at" binding:"required"`
+	TradingPublicKey         string `json:"trading_public_key" binding:"required"`
+	TradingKeyScheme         string `json:"trading_key_scheme" binding:"required"`
+	Scope                    string `json:"scope"`
+	KeyExpiresAtMillis       int64  `json:"key_expires_at"`
+	WalletSignatureStandard  string `json:"wallet_signature_standard" binding:"required"`
+	WalletSignature          string `json:"wallet_signature" binding:"required"`
+}
+
 type SessionResponse struct {
 	SessionID        string `json:"session_id"`
 	UserID           int64  `json:"user_id"`
@@ -327,6 +359,7 @@ type SessionResponse struct {
 	SessionPublicKey string `json:"session_public_key"`
 	Scope            string `json:"scope"`
 	ChainID          int64  `json:"chain_id"`
+	VaultAddress     string `json:"vault_address"`
 	SessionNonce     string `json:"session_nonce"`
 	LastOrderNonce   int64  `json:"last_order_nonce"`
 	Status           string `json:"status"`
@@ -340,6 +373,7 @@ type SessionResponse struct {
 type ListSessionsRequest struct {
 	UserID        int64  `form:"user_id"`
 	WalletAddress string `form:"wallet_address"`
+	VaultAddress  string `form:"vault_address"`
 	Status        string `form:"status"`
 	Limit         int    `form:"limit"`
 }

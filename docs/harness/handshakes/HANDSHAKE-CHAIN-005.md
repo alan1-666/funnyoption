@@ -59,6 +59,25 @@
 - recommended follow-up implementation slice
 - residual risks and rejected options
 
+## Handoff notes
+
+- canonical design doc:
+  - `docs/architecture/oracle-settled-crypto-markets.md`
+- chosen resolver boundary:
+  - dedicated oracle worker
+- metadata contract:
+  - `markets.metadata.resolution`
+- evidence contract:
+  - `market_resolutions.evidence`
+- first-cut storage choice:
+  - reuse existing `market_resolutions`; no new SQL table in the first slice
+- first-cut chain choice:
+  - no on-chain helper required; if a future adapter is needed it must stay in
+    `contracts/src`, `contracts/test`, and `contracts/script` under Foundry
+- safety rule:
+  - manual operator resolve stays as fallback, but should be blocked once an
+    oracle market reaches `OBSERVED` or `RESOLVED`
+
 ## Blockers
 
 - keep manual operator resolve as the fallback / override lane
@@ -71,4 +90,4 @@
 
 ## Status
 
-- queued
+- completed

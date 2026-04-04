@@ -9,8 +9,15 @@ import (
 func registerSessionRoutes(api *gin.RouterGroup, orderHandler *handler.OrderHandler, limiter *rateLimiter) {
 	sessions := api.Group("/sessions")
 	sessions.GET("", orderHandler.ListSessions)
+	// Temporary proof-tool compatibility route. V2 browser auth must use the
+	// trading-key challenge + registration flow instead of creating new callers
+	// on the legacy session-grant contract.
 	sessions.POST("", markAuthLane(authLaneWalletSession), limiter.Middleware(rateLimitSessionCreate), orderHandler.CreateSession)
 	sessions.POST("/:session_id/revoke", markAuthLane(authLaneWalletSession), limiter.Middleware(rateLimitSessionWrite), orderHandler.RevokeSession)
+
+	tradingKeys := api.Group("/trading-keys")
+	tradingKeys.POST("/challenge", markAuthLane(authLaneWalletSession), limiter.Middleware(rateLimitSessionCreate), orderHandler.CreateTradingKeyChallenge)
+	tradingKeys.POST("", markAuthLane(authLaneWalletSession), limiter.Middleware(rateLimitSessionWrite), orderHandler.RegisterTradingKey)
 
 	profile := api.Group("")
 	profile.Use(markAuthLane(authLaneWalletSession))

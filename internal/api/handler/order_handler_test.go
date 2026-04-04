@@ -22,6 +22,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 	"github.com/gin-gonic/gin"
 )
 
@@ -161,61 +162,70 @@ type publishCall struct {
 }
 
 type fakeQueryStore struct {
-	createMarketResp    dto.MarketResponse
-	createMarketErr     error
-	createMarketReq     dto.CreateMarketRequest
-	createSessionResp   dto.SessionResponse
-	createSessionErr    error
-	createClaimResp     dto.ChainTransactionResponse
-	createClaimErr      error
-	createClaimReq      dto.ClaimPayoutRequest
-	createClaimCalled   bool
-	getProfileResp      dto.UserProfileResponse
-	getProfileErr       error
-	updateProfileResp   dto.UserProfileResponse
-	updateProfileErr    error
-	updateProfileReq    dto.UpdateUserProfileRequest
-	updateProfileWallet string
-	getSessionResp      dto.SessionResponse
-	getSessionErr       error
-	revokeSessionResp   dto.SessionResponse
-	revokeSessionErr    error
-	advanceSessionResp  dto.SessionResponse
-	advanceSessionErr   error
-	getMarketResp       dto.MarketResponse
-	getMarketErr        error
-	listMarketsResp     []dto.MarketResponse
-	listMarketsErr      error
-	listSessionsResp    []dto.SessionResponse
-	listSessionsErr     error
-	listDepositsResp    []dto.DepositResponse
-	listDepositsErr     error
-	listWithdrawResp    []dto.WithdrawalResponse
-	listWithdrawErr     error
-	listChainTxResp     []dto.ChainTransactionResponse
-	listChainTxErr      error
-	listOrdersResp      []dto.OrderResponse
-	listOrdersErr       error
-	listTradesResp      []dto.TradeResponse
-	listTradesErr       error
-	listBalancesResp    []dto.BalanceResponse
-	listBalancesErr     error
-	listPositionsResp   []dto.PositionResponse
-	listPositionsErr    error
-	listPayoutsResp     []dto.PayoutResponse
-	listPayoutsErr      error
-	listFreezesResp     []dto.FreezeResponse
-	listFreezesErr      error
-	listEntriesResp     []dto.LedgerEntryResponse
-	listEntriesErr      error
-	listPostingsResp    []dto.LedgerPostingResponse
-	listPostingsErr     error
-	liabilityResp       []dto.LiabilityReportLine
-	liabilityErr        error
-	getOrderResp        dto.OrderResponse
-	getOrderErr         error
-	getFreezeResp       dto.FreezeResponse
-	getFreezeErr        error
+	createMarketResp              dto.MarketResponse
+	createMarketErr               error
+	createMarketReq               dto.CreateMarketRequest
+	createSessionResp             dto.SessionResponse
+	createSessionErr              error
+	createTradingKeyChallengeResp dto.TradingKeyChallengeResponse
+	createTradingKeyChallengeErr  error
+	createTradingKeyChallengeReq  dto.CreateTradingKeyChallengeRequest
+	registerTradingKeyResp        dto.SessionResponse
+	registerTradingKeyErr         error
+	registerTradingKeyReq         dto.RegisterTradingKeyRequest
+	createClaimResp               dto.ChainTransactionResponse
+	createClaimErr                error
+	createClaimReq                dto.ClaimPayoutRequest
+	createClaimCalled             bool
+	getProfileResp                dto.UserProfileResponse
+	getProfileErr                 error
+	updateProfileResp             dto.UserProfileResponse
+	updateProfileErr              error
+	updateProfileReq              dto.UpdateUserProfileRequest
+	updateProfileWallet           string
+	getSessionResp                dto.SessionResponse
+	getSessionErr                 error
+	revokeSessionResp             dto.SessionResponse
+	revokeSessionErr              error
+	advanceSessionResp            dto.SessionResponse
+	advanceSessionErr             error
+	getMarketResp                 dto.MarketResponse
+	getMarketErr                  error
+	getMarketResolution           MarketResolutionState
+	hasMarketResolution           bool
+	listMarketsResp               []dto.MarketResponse
+	listMarketsErr                error
+	listSessionsReq               dto.ListSessionsRequest
+	listSessionsResp              []dto.SessionResponse
+	listSessionsErr               error
+	listDepositsResp              []dto.DepositResponse
+	listDepositsErr               error
+	listWithdrawResp              []dto.WithdrawalResponse
+	listWithdrawErr               error
+	listChainTxResp               []dto.ChainTransactionResponse
+	listChainTxErr                error
+	listOrdersResp                []dto.OrderResponse
+	listOrdersErr                 error
+	listTradesResp                []dto.TradeResponse
+	listTradesErr                 error
+	listBalancesResp              []dto.BalanceResponse
+	listBalancesErr               error
+	listPositionsResp             []dto.PositionResponse
+	listPositionsErr              error
+	listPayoutsResp               []dto.PayoutResponse
+	listPayoutsErr                error
+	listFreezesResp               []dto.FreezeResponse
+	listFreezesErr                error
+	listEntriesResp               []dto.LedgerEntryResponse
+	listEntriesErr                error
+	listPostingsResp              []dto.LedgerPostingResponse
+	listPostingsErr               error
+	liabilityResp                 []dto.LiabilityReportLine
+	liabilityErr                  error
+	getOrderResp                  dto.OrderResponse
+	getOrderErr                   error
+	getFreezeResp                 dto.FreezeResponse
+	getFreezeErr                  error
 }
 
 func (f *fakeQueryStore) CreateMarket(ctx context.Context, req dto.CreateMarketRequest) (dto.MarketResponse, error) {
@@ -241,6 +251,40 @@ func (f *fakeQueryStore) CreateSession(ctx context.Context, req dto.CreateSessio
 		}
 	}
 	return f.createSessionResp, f.createSessionErr
+}
+
+func (f *fakeQueryStore) CreateTradingKeyChallenge(ctx context.Context, req dto.CreateTradingKeyChallengeRequest) (dto.TradingKeyChallengeResponse, error) {
+	_ = ctx
+	f.createTradingKeyChallengeReq = req
+	if f.createTradingKeyChallengeResp.ChallengeID == "" {
+		f.createTradingKeyChallengeResp = dto.TradingKeyChallengeResponse{
+			ChallengeID:        req.ChallengeID,
+			Challenge:          req.Challenge,
+			ChallengeExpiresAt: req.ChallengeExpiresAt,
+		}
+	}
+	return f.createTradingKeyChallengeResp, f.createTradingKeyChallengeErr
+}
+
+func (f *fakeQueryStore) RegisterTradingKey(ctx context.Context, req dto.RegisterTradingKeyRequest) (dto.SessionResponse, error) {
+	_ = ctx
+	f.registerTradingKeyReq = req
+	if f.registerTradingKeyResp.SessionID == "" {
+		f.registerTradingKeyResp = dto.SessionResponse{
+			SessionID:        req.SessionID,
+			UserID:           1001,
+			WalletAddress:    req.WalletAddress,
+			SessionPublicKey: req.TradingPublicKey,
+			Scope:            req.Scope,
+			ChainID:          req.ChainID,
+			SessionNonce:     strings.TrimPrefix(req.Challenge, "0x"),
+			LastOrderNonce:   0,
+			Status:           "ACTIVE",
+			IssuedAtMillis:   time.Now().UnixMilli(),
+			ExpiresAtMillis:  req.KeyExpiresAtMillis,
+		}
+	}
+	return f.registerTradingKeyResp, f.registerTradingKeyErr
 }
 
 func (f *fakeQueryStore) CreateClaimRequest(ctx context.Context, req dto.ClaimPayoutRequest) (dto.ChainTransactionResponse, error) {
@@ -294,6 +338,12 @@ func (f *fakeQueryStore) GetMarket(ctx context.Context, marketID int64) (dto.Mar
 	return f.getMarketResp, f.getMarketErr
 }
 
+func (f *fakeQueryStore) GetMarketResolution(ctx context.Context, marketID int64) (MarketResolutionState, bool, error) {
+	_ = ctx
+	_ = marketID
+	return f.getMarketResolution, f.hasMarketResolution, nil
+}
+
 func signOperatorMessage(t *testing.T, key *ecdsa.PrivateKey, message string) string {
 	t.Helper()
 
@@ -318,6 +368,43 @@ func attachSignedCreateMarketOperator(t *testing.T, req *dto.CreateMarketRequest
 	}
 	req.Operator.Signature = signOperatorMessage(t, key, req.OperatorMessage())
 	return wallet
+}
+
+func validOracleResolutionMetadata() json.RawMessage {
+	return json.RawMessage(`{
+		"resolution": {
+			"version": 1,
+			"mode": "ORACLE_PRICE",
+			"market_kind": "CRYPTO_PRICE_THRESHOLD",
+			"manual_fallback_allowed": true,
+			"oracle": {
+				"source_kind": "HTTP_JSON",
+				"provider_key": "BINANCE",
+				"instrument": {
+					"kind": "SPOT",
+					"base_asset": "BTC",
+					"quote_asset": "USDT",
+					"symbol": "BTCUSDT"
+				},
+				"price": {
+					"field": "LAST_PRICE",
+					"scale": 8,
+					"rounding_mode": "ROUND_HALF_UP",
+					"max_data_age_sec": 120
+				},
+				"window": {
+					"anchor": "RESOLVE_AT",
+					"before_sec": 300,
+					"after_sec": 300
+				},
+				"rule": {
+					"type": "PRICE_THRESHOLD",
+					"comparator": "GTE",
+					"threshold_price": "85000"
+				}
+			}
+		}
+	}`)
 }
 
 func attachSignedResolveOperator(t *testing.T, marketID int64, req *dto.ResolveMarketRequest) string {
@@ -427,7 +514,7 @@ func (f *fakeQueryStore) ListMarkets(ctx context.Context, req dto.ListMarketsReq
 
 func (f *fakeQueryStore) ListSessions(ctx context.Context, req dto.ListSessionsRequest) ([]dto.SessionResponse, error) {
 	_ = ctx
-	_ = req
+	f.listSessionsReq = req
 	return f.listSessionsResp, f.listSessionsErr
 }
 
@@ -742,6 +829,163 @@ func TestCreateOrderRejectsSemanticDuplicateBootstrapOrderWithFreshProof(t *test
 	}
 	if account.preFreezeCalled {
 		t.Fatalf("expected semantic duplicate to stop before pre-freeze")
+	}
+}
+
+func TestCreateTradingKeyChallengeReturnsCreated(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := &fakeQueryStore{}
+	handler := NewOrderHandler(Dependencies{
+		Logger:               slog.Default(),
+		QueryStore:           store,
+		ExpectedChainID:      97,
+		ExpectedVaultAddress: "0x00000000000000000000000000000000000000bb",
+	})
+
+	body := map[string]any{
+		"wallet_address": "0x00000000000000000000000000000000000000aa",
+		"chain_id":       97,
+		"vault_address":  "0x00000000000000000000000000000000000000bb",
+	}
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/trading-keys/challenge", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = req
+
+	handler.CreateTradingKeyChallenge(ctx)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "\"challenge_id\":\"tkc_") {
+		t.Fatalf("expected challenge response, got %s", w.Body.String())
+	}
+	if store.createTradingKeyChallengeReq.WalletAddress != "0x00000000000000000000000000000000000000aa" {
+		t.Fatalf("unexpected wallet normalization: %s", store.createTradingKeyChallengeReq.WalletAddress)
+	}
+}
+
+func TestRegisterTradingKeyVerifiesWalletSignature(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	privateKey, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey returned error: %v", err)
+	}
+	publicKey, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("GenerateKey returned error: %v", err)
+	}
+
+	authz := sharedauth.TradingKeyAuthorization{
+		WalletAddress:            crypto.PubkeyToAddress(privateKey.PublicKey).Hex(),
+		TradingPublicKey:         hexutil.Encode(publicKey),
+		TradingKeyScheme:         "ED25519",
+		Scope:                    "TRADE",
+		Challenge:                "0x5fbe9af9d6ab53d4df3bcb43f9e6c5f26a4d9bc2a8f44a0ab2997f7dc2c5c94a",
+		ChallengeExpiresAtMillis: time.Now().Add(5 * time.Minute).UnixMilli(),
+		KeyExpiresAtMillis:       0,
+		ChainID:                  97,
+		VaultAddress:             "0x00000000000000000000000000000000000000bb",
+	}
+	digest, _, err := apitypes.TypedDataAndHash(authz.TypedData())
+	if err != nil {
+		t.Fatalf("TypedDataAndHash returned error: %v", err)
+	}
+	signature, err := crypto.Sign(digest, privateKey)
+	if err != nil {
+		t.Fatalf("Sign returned error: %v", err)
+	}
+
+	store := &fakeQueryStore{}
+	handler := NewOrderHandler(Dependencies{
+		Logger:               slog.Default(),
+		QueryStore:           store,
+		ExpectedChainID:      97,
+		ExpectedVaultAddress: authz.VaultAddress,
+	})
+
+	body := map[string]any{
+		"wallet_address":            authz.WalletAddress,
+		"chain_id":                  authz.ChainID,
+		"vault_address":             authz.VaultAddress,
+		"challenge_id":              "tkc_01HTY5V1S8E9Q3P8W2V5K19J4P",
+		"challenge":                 authz.Challenge,
+		"challenge_expires_at":      authz.ChallengeExpiresAtMillis,
+		"trading_public_key":        authz.TradingPublicKey,
+		"trading_key_scheme":        authz.TradingKeyScheme,
+		"scope":                     authz.Scope,
+		"key_expires_at":            authz.KeyExpiresAtMillis,
+		"wallet_signature_standard": "EIP712_V4",
+		"wallet_signature":          hexutil.Encode(signature),
+	}
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/trading-keys", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = req
+
+	handler.RegisterTradingKey(ctx)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", w.Code, w.Body.String())
+	}
+	if store.registerTradingKeyReq.SessionID != authz.TradingKeyID() {
+		t.Fatalf("expected deterministic trading key id, got %s", store.registerTradingKeyReq.SessionID)
+	}
+	if store.registerTradingKeyReq.WalletAddress != sharedauth.NormalizeHex(authz.WalletAddress) {
+		t.Fatalf("unexpected wallet normalization: %s", store.registerTradingKeyReq.WalletAddress)
+	}
+}
+
+func TestListSessionsPassesVaultFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := &fakeQueryStore{
+		listSessionsResp: []dto.SessionResponse{
+			{
+				SessionID:        "tk_01",
+				UserID:           1001,
+				WalletAddress:    "0x00000000000000000000000000000000000000aa",
+				SessionPublicKey: "0x1111",
+				Scope:            "TRADE",
+				ChainID:          97,
+				VaultAddress:     "0x00000000000000000000000000000000000000bb",
+				Status:           "ACTIVE",
+			},
+		},
+	}
+	handler := NewOrderHandler(Dependencies{
+		Logger:     slog.Default(),
+		QueryStore: store,
+	})
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/sessions?wallet_address=0x00000000000000000000000000000000000000aa&vault_address=0x00000000000000000000000000000000000000bb&status=ACTIVE&limit=10",
+		nil,
+	)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = req
+
+	handler.ListSessions(ctx)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if store.listSessionsReq.WalletAddress != "0x00000000000000000000000000000000000000aa" {
+		t.Fatalf("unexpected wallet filter: %s", store.listSessionsReq.WalletAddress)
+	}
+	if store.listSessionsReq.VaultAddress != "0x00000000000000000000000000000000000000bb" {
+		t.Fatalf("unexpected vault filter: %s", store.listSessionsReq.VaultAddress)
+	}
+	if !strings.Contains(w.Body.String(), "\"vault_address\":\"0x00000000000000000000000000000000000000bb\"") {
+		t.Fatalf("expected vault_address in response body, got %s", w.Body.String())
 	}
 }
 
@@ -1402,6 +1646,41 @@ func TestCreateMarketRejectsNonBinaryOpenOptions(t *testing.T) {
 	}
 }
 
+func TestCreateMarketRejectsInvalidOracleResolutionMetadata(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := &fakeQueryStore{}
+	reqBody := dto.CreateMarketRequest{
+		Title:       "BTC Above 85k",
+		ResolveAt:   1775886400,
+		Metadata:    json.RawMessage(`{"resolution":{"mode":"ORACLE_PRICE","version":1,"market_kind":"CRYPTO_PRICE_THRESHOLD","manual_fallback_allowed":true,"oracle":{"source_kind":"HTTP_JSON","provider_key":"COINBASE"}}}`),
+		CategoryKey: "CRYPTO",
+	}
+	wallet := attachSignedCreateMarketOperator(t, &reqBody)
+	handler := NewOrderHandler(Dependencies{
+		Logger:                slog.Default(),
+		QueryStore:            store,
+		OperatorWallets:       []string{wallet},
+		DefaultOperatorUserID: 42,
+	})
+
+	raw, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/markets", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = req
+
+	handler.CreateMarket(ctx)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", w.Code, w.Body.String())
+	}
+	if store.createMarketReq.Title != "" {
+		t.Fatalf("expected invalid oracle metadata to be rejected before hitting store, got %+v", store.createMarketReq)
+	}
+}
+
 func TestCreateFirstLiquidityIssuesPairedInventory(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1719,6 +1998,12 @@ func TestResolveMarketPublishesEventForAuthorizedOperator(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	publisher := &fakePublisher{}
+	store := &fakeQueryStore{
+		getMarketResp: dto.MarketResponse{
+			MarketID: 88,
+			Status:   "OPEN",
+		},
+	}
 	reqBody := dto.ResolveMarketRequest{
 		Outcome: "YES",
 	}
@@ -1727,6 +2012,7 @@ func TestResolveMarketPublishesEventForAuthorizedOperator(t *testing.T) {
 		Logger:          slog.Default(),
 		KafkaPublisher:  publisher,
 		KafkaTopics:     kafka.NewTopics("funnyoption."),
+		QueryStore:      store,
 		OperatorWallets: []string{wallet},
 	})
 
@@ -1752,6 +2038,58 @@ func TestResolveMarketPublishesEventForAuthorizedOperator(t *testing.T) {
 	}
 	if event.MarketID != 88 || event.ResolvedOutcome != "YES" {
 		t.Fatalf("unexpected market event: %+v", event)
+	}
+}
+
+func TestResolveMarketRejectsOracleMarketAfterObservation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	publisher := &fakePublisher{}
+	store := &fakeQueryStore{
+		getMarketResp: dto.MarketResponse{
+			MarketID:  88,
+			Status:    "OPEN",
+			Metadata:  validOracleResolutionMetadata(),
+			Options:   dto.DefaultBinaryMarketOptions(),
+			ResolveAt: 1775886400,
+			Category: &dto.MarketCategory{
+				CategoryKey: "CRYPTO",
+			},
+		},
+		getMarketResolution: MarketResolutionState{
+			Status:       "OBSERVED",
+			ResolverType: "ORACLE_PRICE",
+			ResolverRef:  "oracle_price:BINANCE:BTCUSDT:1775886400",
+		},
+		hasMarketResolution: true,
+	}
+	reqBody := dto.ResolveMarketRequest{
+		Outcome: "YES",
+	}
+	wallet := attachSignedResolveOperator(t, 88, &reqBody)
+	handler := NewOrderHandler(Dependencies{
+		Logger:          slog.Default(),
+		KafkaPublisher:  publisher,
+		KafkaTopics:     kafka.NewTopics("funnyoption."),
+		QueryStore:      store,
+		OperatorWallets: []string{wallet},
+	})
+
+	raw, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/markets/88/resolve", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Params = gin.Params{{Key: "market_id", Value: "88"}}
+	ctx.Request = req
+
+	handler.ResolveMarket(ctx)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	if len(publisher.calls) != 0 {
+		t.Fatalf("expected no market event publish after OBSERVED, got %+v", publisher.calls)
 	}
 }
 

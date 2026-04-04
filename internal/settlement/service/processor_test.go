@@ -73,9 +73,9 @@ func (s *cancelOrderStore) ApplyDelta(_ context.Context, _, _ int64, _, _ string
 	return nil
 }
 
-func (s *cancelOrderStore) ResolveMarket(_ context.Context, marketID int64, _ string) error {
+func (s *cancelOrderStore) ResolveMarket(_ context.Context, marketID int64, _ string) (bool, error) {
 	s.resolved = append(s.resolved, marketID)
-	return nil
+	return true, nil
 }
 
 func (s *cancelOrderStore) CancelActiveOrders(_ context.Context, _ int64, _ string) ([]cancelledOrder, error) {
@@ -135,5 +135,41 @@ func TestProcessorResolveMarketCancelsActiveOrders(t *testing.T) {
 	}
 	if publisher.orders[0].Status != "CANCELLED" || publisher.orders[0].CancelReason != "MARKET_RESOLVED" {
 		t.Fatalf("unexpected cancellation order event: %+v", publisher.orders[0])
+	}
+}
+
+func TestProcessorResolveMarketSkipsDuplicateResolvedEvent(t *testing.T) {
+	store := newPositionStore()
+	publisher := &fakePublisher{}
+	processor := NewProcessor(store, publisher, sharedkafka.NewTopics("funnyoption."))
+
+	posPayload, _ := json.Marshal(sharedkafka.PositionChangedEvent{
+		EventID:       "pos_2",
+		SourceTradeID: "trade_2",
+		UserID:        1001,
+		MarketID:      99,
+		Outcome:       "YES",
+		PositionAsset: "POSITION:99:YES",
+		DeltaQuantity: 25,
+	})
+	if err := processor.HandlePositionChanged(context.Background(), sharedkafka.Message{Value: posPayload}); err != nil {
+		t.Fatalf("HandlePositionChanged returned error: %v", err)
+	}
+
+	marketPayload, _ := json.Marshal(sharedkafka.MarketEvent{
+		EventID:         "mkt_dup_1",
+		MarketID:        99,
+		Status:          "RESOLVED",
+		ResolvedOutcome: "YES",
+	})
+	if err := processor.HandleMarketEvent(context.Background(), sharedkafka.Message{Value: marketPayload}); err != nil {
+		t.Fatalf("first HandleMarketEvent returned error: %v", err)
+	}
+	if err := processor.HandleMarketEvent(context.Background(), sharedkafka.Message{Value: marketPayload}); err != nil {
+		t.Fatalf("second HandleMarketEvent returned error: %v", err)
+	}
+
+	if len(publisher.settlements) != 1 {
+		t.Fatalf("expected duplicate resolved event to publish 1 settlement, got %d", len(publisher.settlements))
 	}
 }

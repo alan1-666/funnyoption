@@ -48,8 +48,12 @@ func (p *Processor) HandleMarketEvent(ctx context.Context, msg sharedkafka.Messa
 		return nil
 	}
 
-	if err := p.store.ResolveMarket(ctx, event.MarketID, resolvedOutcome); err != nil {
+	freshResolve, err := p.store.ResolveMarket(ctx, event.MarketID, resolvedOutcome)
+	if err != nil {
 		return err
+	}
+	if !freshResolve {
+		return nil
 	}
 	cancelledOrders, err := p.store.CancelActiveOrders(ctx, event.MarketID, "MARKET_RESOLVED")
 	if err != nil {

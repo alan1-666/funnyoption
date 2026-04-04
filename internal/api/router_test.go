@@ -221,7 +221,7 @@ func TestEngineTradeWriteRejectsBareUserIDWithoutAuthEnvelope(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d body=%s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "session-backed trade authorization or operator proof is required") {
+	if !strings.Contains(w.Body.String(), "trading-key-backed trade authorization or operator proof is required") {
 		t.Fatalf("unexpected response body: %s", w.Body.String())
 	}
 }
@@ -379,16 +379,18 @@ func TestEngineRateLimitsSessionCreate(t *testing.T) {
 	}
 
 	engine := newEngine(Meta{Service: "api", Env: "test"}, handler.Dependencies{
-		Logger:     slog.Default(),
-		QueryStore: &testQueryStore{},
+		Logger:               slog.Default(),
+		QueryStore:           &testQueryStore{},
+		ExpectedChainID:      97,
+		ExpectedVaultAddress: "0x00000000000000000000000000000000000000bb",
 	}, routerOptions{
 		rateLimiter: newRateLimiter(policies),
 	})
 
-	body := validSignedSessionBody(t)
+	body := validTradingKeyChallengeBody()
 	raw, _ := json.Marshal(body)
 
-	firstReq := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewReader(raw))
+	firstReq := httptest.NewRequest(http.MethodPost, "/api/v1/trading-keys/challenge", bytes.NewReader(raw))
 	firstReq.Header.Set("Content-Type", "application/json")
 	firstReq.RemoteAddr = "198.51.100.10:1234"
 	firstResp := httptest.NewRecorder()
@@ -397,7 +399,7 @@ func TestEngineRateLimitsSessionCreate(t *testing.T) {
 		t.Fatalf("expected first request 201, got %d body=%s", firstResp.Code, firstResp.Body.String())
 	}
 
-	secondReq := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewReader(raw))
+	secondReq := httptest.NewRequest(http.MethodPost, "/api/v1/trading-keys/challenge", bytes.NewReader(raw))
 	secondReq.Header.Set("Content-Type", "application/json")
 	secondReq.RemoteAddr = "198.51.100.10:9999"
 	secondResp := httptest.NewRecorder()
@@ -407,8 +409,15 @@ func TestEngineRateLimitsSessionCreate(t *testing.T) {
 	}
 }
 
-func validSignedSessionBody(t *testing.T) map[string]any {
-	t.Helper()
+func TestEngineLegacySessionCreateRouteStillWorks(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	engine := newEngine(Meta{Service: "api", Env: "test"}, handler.Dependencies{
+		Logger:     slog.Default(),
+		QueryStore: &testQueryStore{},
+	}, routerOptions{
+		rateLimiter: newRateLimiter(defaultRateLimitPolicies()),
+	})
 
 	privateKey, err := crypto.GenerateKey()
 	if err != nil {
@@ -420,26 +429,46 @@ func validSignedSessionBody(t *testing.T) map[string]any {
 		SessionPublicKey: "0xsessionpub",
 		Scope:            "TRADE",
 		ChainID:          97,
-		Nonce:            "sess_123",
+		Nonce:            "sess_router_compat",
 		IssuedAtMillis:   time.Now().Add(-time.Minute).UnixMilli(),
 		ExpiresAtMillis:  time.Now().Add(time.Hour).UnixMilli(),
 	}
-	digest := accounts.TextHash([]byte(grant.Message()))
-	signature, err := crypto.Sign(digest, privateKey)
+	signature, err := crypto.Sign(accounts.TextHash([]byte(grant.Message())), privateKey)
 	if err != nil {
 		t.Fatalf("Sign returned error: %v", err)
 	}
 
-	return map[string]any{
+	body := map[string]any{
 		"user_id":            1001,
 		"wallet_address":     walletAddress,
-		"session_public_key": "0xsessionpub",
-		"scope":              "TRADE",
-		"chain_id":           97,
-		"nonce":              "sess_123",
+		"session_public_key": grant.SessionPublicKey,
+		"scope":              grant.Scope,
+		"chain_id":           grant.ChainID,
+		"nonce":              grant.Nonce,
 		"issued_at":          grant.IssuedAtMillis,
 		"expires_at":         grant.ExpiresAtMillis,
 		"wallet_signature":   hexutil.Encode(signature),
+	}
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "\"session_id\":\"sess_") {
+		t.Fatalf("expected session response body, got %s", w.Body.String())
+	}
+}
+
+func validTradingKeyChallengeBody() map[string]any {
+	return map[string]any{
+		"wallet_address": "0x00000000000000000000000000000000000000aa",
+		"chain_id":       97,
+		"vault_address":  "0x00000000000000000000000000000000000000bb",
 	}
 }
 
@@ -539,12 +568,14 @@ func (p *testPublisher) Close() error {
 }
 
 type testQueryStore struct {
-	listMarketsResp   []dto.MarketResponse
-	getSessionResp    dto.SessionResponse
-	getMarketResp     dto.MarketResponse
-	createSessionResp dto.SessionResponse
-	getOrderResp      dto.OrderResponse
-	getFreezeResp     dto.FreezeResponse
+	listMarketsResp               []dto.MarketResponse
+	getSessionResp                dto.SessionResponse
+	getMarketResp                 dto.MarketResponse
+	createSessionResp             dto.SessionResponse
+	createTradingKeyChallengeResp dto.TradingKeyChallengeResponse
+	registerTradingKeyResp        dto.SessionResponse
+	getOrderResp                  dto.OrderResponse
+	getFreezeResp                 dto.FreezeResponse
 }
 
 func (s *testQueryStore) CreateMarket(ctx context.Context, req dto.CreateMarketRequest) (dto.MarketResponse, error) {
@@ -569,6 +600,38 @@ func (s *testQueryStore) CreateSession(ctx context.Context, req dto.CreateSessio
 		Status:           "ACTIVE",
 		IssuedAtMillis:   req.IssuedAtMillis,
 		ExpiresAtMillis:  req.ExpiresAtMillis,
+	}, nil
+}
+
+func (s *testQueryStore) CreateTradingKeyChallenge(ctx context.Context, req dto.CreateTradingKeyChallengeRequest) (dto.TradingKeyChallengeResponse, error) {
+	_ = ctx
+	if s.createTradingKeyChallengeResp.ChallengeID != "" {
+		return s.createTradingKeyChallengeResp, nil
+	}
+	return dto.TradingKeyChallengeResponse{
+		ChallengeID:        req.ChallengeID,
+		Challenge:          req.Challenge,
+		ChallengeExpiresAt: req.ChallengeExpiresAt,
+	}, nil
+}
+
+func (s *testQueryStore) RegisterTradingKey(ctx context.Context, req dto.RegisterTradingKeyRequest) (dto.SessionResponse, error) {
+	_ = ctx
+	if s.registerTradingKeyResp.SessionID != "" {
+		return s.registerTradingKeyResp, nil
+	}
+	return dto.SessionResponse{
+		SessionID:        req.SessionID,
+		UserID:           1001,
+		WalletAddress:    req.WalletAddress,
+		SessionPublicKey: req.TradingPublicKey,
+		Scope:            req.Scope,
+		ChainID:          req.ChainID,
+		SessionNonce:     strings.TrimPrefix(req.Challenge, "0x"),
+		LastOrderNonce:   0,
+		Status:           "ACTIVE",
+		IssuedAtMillis:   time.Now().UnixMilli(),
+		ExpiresAtMillis:  req.KeyExpiresAtMillis,
 	}, nil
 }
 
@@ -637,6 +700,12 @@ func (s *testQueryStore) GetMarket(ctx context.Context, marketID int64) (dto.Mar
 	_ = ctx
 	_ = marketID
 	return s.getMarketResp, nil
+}
+
+func (s *testQueryStore) GetMarketResolution(ctx context.Context, marketID int64) (handler.MarketResolutionState, bool, error) {
+	_ = ctx
+	_ = marketID
+	return handler.MarketResolutionState{}, false, nil
 }
 
 func (s *testQueryStore) ListMarkets(ctx context.Context, req dto.ListMarketsRequest) ([]dto.MarketResponse, error) {

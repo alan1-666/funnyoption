@@ -46,6 +46,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 		QueryStore:            handler.NewSQLStore(dbConn),
 		OperatorWallets:       cfg.OperatorWallets,
 		DefaultOperatorUserID: cfg.DefaultOperatorUserID,
+		ExpectedChainID:       cfg.ChainID,
+		ExpectedVaultAddress:  cfg.VaultAddress,
 	})
 
 	server := &http.Server{

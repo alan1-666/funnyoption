@@ -20,6 +20,12 @@
 
 `/Users/zhangza/code/funnyoption/migrations/010_chain_deposits_tx_hash_width_repair.sql` reconciles reused local `chain_deposits.tx_hash` width drift back to the repo truth.
 
+`/Users/zhangza/code/funnyoption/migrations/011_trading_key_challenges.sql` adds one-time V2 trading-key challenge storage.
+
+`/Users/zhangza/code/funnyoption/migrations/012_wallet_sessions_vault_scope.sql` adds durable `vault_address` scope to the `wallet_sessions` compatibility carrier.
+
+`/Users/zhangza/code/funnyoption/migrations/013_wallet_sessions_vault_key_uniqueness.sql` replaces the legacy wallet/public-key uniqueness rule with durable `wallet + chain + vault + public key` uniqueness.
+
 ## Trading domain
 
 - `markets`: market master data and lifecycle state
@@ -67,6 +73,76 @@
 ## Wallet and session domain
 
 - `wallet_sessions`: wallet-signed browser session authorization records
+- `trading_key_challenges`: one-time wallet auth challenges for V2 trading-key registration
+
+## Auth V2 compatibility contract
+
+Until a dedicated rename migration lands, the existing `wallet_sessions` table
+is the persistence slot for V2 trading-key authorization.
+
+Current-field to V2-semantic mapping:
+
+- `session_id` -> `trading_key_id`
+- `session_public_key` -> `trading_public_key`
+- `scope` -> trading scope such as `TRADE`
+- `chain_id` -> target EVM chain id from the EIP-712 domain
+- `vault_address` -> durable target vault scope for canonical trading-key rows
+- `session_nonce` -> consumed wallet auth challenge
+- `last_order_nonce` -> last accepted order nonce for that trading key
+- `status` -> `ACTIVE | REVOKED | ROTATED`
+- `issued_at` -> wallet authorization acceptance time
+- `expires_at` -> trading key expiry; `0` means durable until revoke / rotate
+- `revoked_at` -> revoke or rotate time
+
+V2 rules:
+
+- one active trading key per `wallet_address + chain_id + vault_address`
+- canonical trading-key row uniqueness is
+  `wallet_address + chain_id + vault_address + session_public_key`
+- public auth flows must stop treating client-provided `user_id` as the source
+  of truth
+- deposit and withdrawal attribution should use the durable wallet-to-user
+  binding, not the presence of a currently active browser-local key
+- the current durable wallet binding can be sourced from
+  `user_profiles.wallet_address`
+
+Current runtime truth:
+
+- canonical trading-key rows in `wallet_sessions` now durably persist
+  `vault_address`
+- active-key rotation and active-key listing are now scoped by
+  `wallet_address + chain_id + vault_address`
+- canonical trading-key rows can now reuse the same `session_public_key`
+  across two vaults on the same `wallet_address + chain_id` because durable
+  uniqueness now includes `vault_address`
+- browser restore can read back and disambiguate remote active keys by vault
+  instead of depending on a single-vault-per-environment assumption
+- deprecated `/api/v1/sessions` compatibility rows still carry blank
+  `vault_address`, so they stay in their own legacy blank-vault scope because
+  the old session-grant contract never signed a vault value
+
+Temporary route compatibility:
+
+- `POST /api/v1/sessions` remains as a deprecated compatibility route for repo
+  proof tooling such as local lifecycle and staging concurrency scripts
+- `POST /api/v1/trading-keys/challenge` plus `POST /api/v1/trading-keys`
+  remains the canonical V2 browser registration flow
+
+Follow-up schema work that may be implemented later, but is not required in
+this narrow runtime slice:
+
+- rename `wallet_sessions` to a trading-key-specific name
+- add `key_scheme`
+- add `wallet_sig_standard`
+- add `replaced_by_session_id`
+- add `auth_version`
+
+The first runtime slice now stores one-time auth challenges in
+`trading_key_challenges` with:
+
+- uniqueness
+- expiry
+- single-use consumption
 
 ## Current design principles
 

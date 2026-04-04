@@ -60,6 +60,7 @@ export async function POST(request: Request) {
         sourceSlug: draft.sourceSlug,
         sourceName: draft.sourceName,
         sourceKind: draft.sourceKind,
+        resolution: draft.resolution,
         yesOdds: 0.5,
         noOdds: 0.5
       },

@@ -13,16 +13,24 @@ const links = [
 ];
 
 export function SiteHeader() {
-  const { wallet, session, busy, statusMessage, connect, createSession, revokeCurrentSession } = useTradingSession();
+  const { wallet, session, busy, restoring, restoreStatus, statusMessage, connect, createSession, revokeCurrentSession } = useTradingSession();
   const chain = getChainMeta();
   const sessionTag = session ? `${session.sessionId.slice(0, 12)}…` : null;
+  const needsReauthorization =
+    !session &&
+    wallet &&
+    ["expired", "revoked", "rotated", "missing_private_key", "remote_missing", "remote_mismatch", "vault_mismatch"].includes(restoreStatus);
   const actionLabel =
-    busy === "connect"
+    restoring
+      ? "恢复中..."
+      : busy === "connect"
       ? "连接中..."
       : busy === "session"
         ? "授权中..."
         : session
           ? "已开启交易"
+          : needsReauthorization
+            ? "重新授权交易"
           : wallet
             ? "开启交易"
             : "连接钱包";
@@ -33,7 +41,7 @@ export function SiteHeader() {
       : statusMessage;
 
   async function handleAction() {
-    if (session) {
+    if (session || restoring) {
       return;
     }
     if (!wallet) {
@@ -66,10 +74,10 @@ export function SiteHeader() {
         {wallet ? <span className={styles.identity}>{shortenAddress(wallet.walletAddress)}</span> : null}
         {session ? (
           <button className={styles.ghost} onClick={revokeCurrentSession}>
-            撤销会话
+            撤销交易密钥
           </button>
         ) : null}
-        <button className={styles.button} onClick={handleAction}>
+        <button className={styles.button} onClick={handleAction} disabled={restoring || busy !== null || !!session}>
           {actionLabel}
         </button>
       </div>

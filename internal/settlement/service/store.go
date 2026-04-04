@@ -2,12 +2,13 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
 type PositionStore interface {
 	ApplyDelta(ctx context.Context, marketID, userID int64, outcome, positionAsset string, delta int64) error
-	ResolveMarket(ctx context.Context, marketID int64, outcome string) error
+	ResolveMarket(ctx context.Context, marketID int64, outcome string) (bool, error)
 	CancelActiveOrders(ctx context.Context, marketID int64, reason string) ([]cancelledOrder, error)
 	WinningPositions(ctx context.Context, marketID int64, outcome string) ([]winningPosition, error)
 	MarkSettled(ctx context.Context, eventID string, marketID, userID int64, outcome string, quantity int64, payoutAsset string, payoutAmount int64) error
@@ -43,11 +44,17 @@ func (s *positionStore) ApplyDelta(_ context.Context, marketID, userID int64, ou
 	return nil
 }
 
-func (s *positionStore) ResolveMarket(_ context.Context, marketID int64, outcome string) error {
+func (s *positionStore) ResolveMarket(_ context.Context, marketID int64, outcome string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if existing, ok := s.resolved[marketID]; ok {
+		if existing == outcome {
+			return false, nil
+		}
+		return false, fmt.Errorf("market %d already resolved with outcome %s", marketID, existing)
+	}
 	s.resolved[marketID] = outcome
-	return nil
+	return true, nil
 }
 
 type winningPosition struct {

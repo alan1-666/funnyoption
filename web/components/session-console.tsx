@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useTradingSession } from "@/components/trading-session-provider";
 import { formatTimestamp, shortenAddress } from "@/lib/format";
@@ -14,52 +14,62 @@ interface SessionConsoleProps {
 }
 
 export function SessionConsole({ initialSessions }: SessionConsoleProps) {
-  const { wallet, session, busy, createSession, prepareTrading, revokeCurrentSession } = useTradingSession();
+  const { wallet, session, busy, restoring, restoreStatus, statusMessage, createSession, prepareTrading, revokeCurrentSession } = useTradingSession();
   const [sessions, setSessions] = useState(initialSessions);
-  const [status, setStatus] = useState("交易会话已就绪");
+  const [statusOverride, setStatusOverride] = useState<string | null>(null);
 
   const currentSessionId = session?.sessionId;
+  const status = statusOverride ?? statusMessage;
+  const needsReauthorization =
+    !session &&
+    wallet &&
+    ["expired", "revoked", "rotated", "missing_private_key", "remote_missing", "remote_mismatch", "vault_mismatch"].includes(restoreStatus);
   const sortedSessions = useMemo(
     () => [...sessions].sort((left, right) => Number(right.updated_at || 0) - Number(left.updated_at || 0)),
     [sessions]
   );
 
+  useEffect(() => {
+    setStatusOverride(null);
+  }, [statusMessage, restoreStatus, session?.sessionId, wallet?.walletAddress, wallet?.chainId]);
+
   async function refresh() {
     try {
       const items = await listSessions({ walletAddress: wallet?.walletAddress });
       setSessions(items);
-      setStatus("会话列表已刷新");
+      setStatusOverride("交易密钥列表已刷新");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "刷新会话失败");
+      setStatusOverride(error instanceof Error ? error.message : "刷新交易密钥失败");
     }
   }
 
   async function handleCreate() {
     try {
-      const created = session ? await createSession(wallet) : await prepareTrading();
+      const created = session ? await createSession(wallet, { forceRotate: true }) : await prepareTrading();
       if (session) {
-        setStatus("交易会话已轮换");
+        setStatusOverride("交易密钥已轮换");
       } else {
-        setStatus("交易会话已开启");
+        setStatusOverride("交易密钥已开启");
       }
       const items = await listSessions({ walletAddress: created?.walletAddress ?? wallet?.walletAddress });
       setSessions(items);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "创建会话失败");
+      setStatusOverride(error instanceof Error ? error.message : "创建交易密钥失败");
     }
   }
 
   async function handleRevoke(sessionId: string) {
     try {
-      await revokeRemoteSession(sessionId);
       if (sessionId === currentSessionId) {
         await revokeCurrentSession();
+      } else {
+        await revokeRemoteSession(sessionId);
       }
       const items = await listSessions({ walletAddress: wallet?.walletAddress });
       setSessions(items);
-      setStatus(`已撤销会话 ${sessionId}`);
+      setStatusOverride(`已撤销交易密钥 ${sessionId}`);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "撤销会话失败");
+      setStatusOverride(error instanceof Error ? error.message : "撤销交易密钥失败");
     }
   }
 
@@ -67,13 +77,13 @@ export function SessionConsole({ initialSessions }: SessionConsoleProps) {
     <section className={`panel ${styles.console}`}>
       <div className={styles.header}>
         <div>
-          <span className="eyebrow">交易会话</span>
-          <p className={styles.copy}>完成一次交易授权后，可以持续复用该会话，直到你手动轮换或撤销。</p>
+          <span className="eyebrow">交易密钥</span>
+          <p className={styles.copy}>完成一次钱包授权后，可以持续复用浏览器本地交易密钥，直到你手动轮换或撤销。</p>
         </div>
         <div className={styles.actions}>
           <button className={styles.ghost} onClick={refresh}>刷新</button>
-          <button className={styles.button} onClick={handleCreate}>
-            {busy === "session" ? "授权中..." : session ? "轮换会话" : wallet ? "开启交易" : "开始交易"}
+          <button className={styles.button} onClick={handleCreate} disabled={restoring || busy !== null}>
+            {restoring ? "恢复中..." : busy === "session" ? "授权中..." : session ? "轮换密钥" : needsReauthorization ? "重新授权" : wallet ? "开启交易" : "开始交易"}
           </button>
         </div>
       </div>
@@ -86,11 +96,11 @@ export function SessionConsole({ initialSessions }: SessionConsoleProps) {
           return (
             <article key={item.session_id} className={styles.item}>
               <div>
-                <h3 className={styles.title}>{isCurrent ? "当前会话" : zhGenericStatus(item.status)}</h3>
+                <h3 className={styles.title}>{isCurrent ? "当前密钥" : zhGenericStatus(item.status)}</h3>
                 <div className={styles.meta}>
                   <span>{item.session_id}</span>
                   <span>{shortenAddress(item.wallet_address)}</span>
-                  <span>过期时间 {formatTimestamp(Math.floor(item.expires_at / 1000))}</span>
+                  <span>{item.expires_at > 0 ? `过期时间 ${formatTimestamp(Math.floor(item.expires_at / 1000))}` : "长期有效，直到轮换或撤销"}</span>
                 </div>
               </div>
               <div className={styles.side}>

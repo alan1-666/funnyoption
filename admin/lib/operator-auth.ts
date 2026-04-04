@@ -15,6 +15,7 @@ export interface CreateMarketDraft {
   closeAt: number;
   resolveAt: number;
   options: MarketOptionDraft[];
+  resolution?: OracleResolutionDraft;
 }
 
 export interface MarketOptionDraft {
@@ -42,6 +43,39 @@ export interface SignedOperatorAction {
   walletAddress: string;
   requestedAt: number;
   signature: string;
+}
+
+export interface OracleResolutionDraft {
+  version?: number;
+  mode?: string;
+  market_kind?: string;
+  manual_fallback_allowed?: boolean;
+  oracle?: {
+    source_kind?: string;
+    provider_key?: string;
+    instrument?: {
+      kind?: string;
+      base_asset?: string;
+      quote_asset?: string;
+      symbol?: string;
+    };
+    price?: {
+      field?: string;
+      scale?: number;
+      rounding_mode?: string;
+      max_data_age_sec?: number;
+    };
+    window?: {
+      anchor?: string;
+      before_sec?: number;
+      after_sec?: number;
+    };
+    rule?: {
+      type?: string;
+      comparator?: string;
+      threshold_price?: string;
+    };
+  };
 }
 
 function cleanText(value: string) {
@@ -74,7 +108,8 @@ export function normalizeCreateMarketDraft(input: CreateMarketDraft): CreateMark
     openAt: Math.max(0, Math.floor(input.openAt || 0)),
     closeAt: Math.max(0, Math.floor(input.closeAt || 0)),
     resolveAt: Math.max(0, Math.floor(input.resolveAt || 0)),
-    options: normalizeMarketOptions(input.options)
+    options: normalizeMarketOptions(input.options),
+    resolution: normalizeResolutionDraft(input.resolution)
   };
 }
 
@@ -120,7 +155,7 @@ open_at: ${market.openAt}
 close_at: ${market.closeAt}
 resolve_at: ${market.resolveAt}
 requested_at: ${Math.floor(input.requestedAt)}
-options: ${buildMarketOptionSignatureFragment(market.options)}
+${buildResolutionSignatureFragment(market.resolution)}options: ${buildMarketOptionSignatureFragment(market.options)}
 `;
 }
 
@@ -159,6 +194,86 @@ function buildMarketOptionSignatureFragment(options: MarketOptionDraft[]) {
   return options
     .map((option) => `${option.key}:${option.label}:${option.shortLabel ?? option.label}:${option.sortOrder}:${option.isActive ? "1" : "0"}`)
     .join("|");
+}
+
+function normalizeResolutionDraft(input?: OracleResolutionDraft): OracleResolutionDraft | undefined {
+  if (!input) {
+    return undefined;
+  }
+  return {
+    version: Math.max(0, Math.floor(input.version ?? 0)),
+    mode: cleanText(input.mode ?? "").toUpperCase(),
+    market_kind: cleanText(input.market_kind ?? "").toUpperCase(),
+    manual_fallback_allowed: input.manual_fallback_allowed === true,
+    oracle: input.oracle
+      ? {
+          source_kind: cleanText(input.oracle.source_kind ?? "").toUpperCase(),
+          provider_key: cleanText(input.oracle.provider_key ?? "").toUpperCase(),
+          instrument: input.oracle.instrument
+            ? {
+                kind: cleanText(input.oracle.instrument.kind ?? "").toUpperCase(),
+                base_asset: cleanText(input.oracle.instrument.base_asset ?? "").toUpperCase(),
+                quote_asset: cleanText(input.oracle.instrument.quote_asset ?? "").toUpperCase(),
+                symbol: cleanText(input.oracle.instrument.symbol ?? "").toUpperCase()
+              }
+            : undefined,
+          price: input.oracle.price
+            ? {
+                field: cleanText(input.oracle.price.field ?? "").toUpperCase(),
+                scale: Math.max(0, Math.floor(input.oracle.price.scale ?? 0)),
+                rounding_mode: cleanText(input.oracle.price.rounding_mode ?? "").toUpperCase(),
+                max_data_age_sec: Math.max(0, Math.floor(input.oracle.price.max_data_age_sec ?? 0))
+              }
+            : undefined,
+          window: input.oracle.window
+            ? {
+                anchor: cleanText(input.oracle.window.anchor ?? "").toUpperCase(),
+                before_sec: Math.max(0, Math.floor(input.oracle.window.before_sec ?? 0)),
+                after_sec: Math.max(0, Math.floor(input.oracle.window.after_sec ?? 0))
+              }
+            : undefined,
+          rule: input.oracle.rule
+            ? {
+                type: cleanText(input.oracle.rule.type ?? "").toUpperCase(),
+                comparator: cleanText(input.oracle.rule.comparator ?? "").toUpperCase(),
+                threshold_price: (input.oracle.rule.threshold_price ?? "").trim()
+              }
+            : undefined
+        }
+      : undefined
+  };
+}
+
+function buildResolutionSignatureFragment(resolution?: OracleResolutionDraft) {
+  if (!resolution) {
+    return "";
+  }
+  const oracle = resolution.oracle ?? {};
+  const instrument = oracle.instrument ?? {};
+  const price = oracle.price ?? {};
+  const window = oracle.window ?? {};
+  const rule = oracle.rule ?? {};
+  return `resolution_version: ${Math.floor(resolution.version ?? 0)}
+resolution_mode: ${cleanText(resolution.mode ?? "").toUpperCase()}
+resolution_market_kind: ${cleanText(resolution.market_kind ?? "").toUpperCase()}
+resolution_manual_fallback_allowed: ${resolution.manual_fallback_allowed === true}
+oracle_source_kind: ${cleanText(oracle.source_kind ?? "").toUpperCase()}
+oracle_provider_key: ${cleanText(oracle.provider_key ?? "").toUpperCase()}
+oracle_instrument_kind: ${cleanText(instrument.kind ?? "").toUpperCase()}
+oracle_instrument_base_asset: ${cleanText(instrument.base_asset ?? "").toUpperCase()}
+oracle_instrument_quote_asset: ${cleanText(instrument.quote_asset ?? "").toUpperCase()}
+oracle_instrument_symbol: ${cleanText(instrument.symbol ?? "").toUpperCase()}
+oracle_price_field: ${cleanText(price.field ?? "").toUpperCase()}
+oracle_price_scale: ${Math.floor(price.scale ?? 0)}
+oracle_price_rounding_mode: ${cleanText(price.rounding_mode ?? "").toUpperCase()}
+oracle_price_max_data_age_sec: ${Math.floor(price.max_data_age_sec ?? 0)}
+oracle_window_anchor: ${cleanText(window.anchor ?? "").toUpperCase()}
+oracle_window_before_sec: ${Math.floor(window.before_sec ?? 0)}
+oracle_window_after_sec: ${Math.floor(window.after_sec ?? 0)}
+oracle_rule_type: ${cleanText(rule.type ?? "").toUpperCase()}
+oracle_rule_comparator: ${cleanText(rule.comparator ?? "").toUpperCase()}
+oracle_rule_threshold_price: ${(rule.threshold_price ?? "").trim()}
+`;
 }
 
 export function buildBootstrapMarketMessage(input: {

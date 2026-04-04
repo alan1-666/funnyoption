@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,10 +16,12 @@ import (
 
 	accountclient "funnyoption/internal/account/client"
 	"funnyoption/internal/api/dto"
+	oracleservice "funnyoption/internal/oracle/service"
 	"funnyoption/internal/shared/assets"
 	sharedauth "funnyoption/internal/shared/auth"
 	sharedkafka "funnyoption/internal/shared/kafka"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/gin-gonic/gin"
 )
 
@@ -29,6 +33,8 @@ type Dependencies struct {
 	QueryStore            QueryStore
 	OperatorWallets       []string
 	DefaultOperatorUserID int64
+	ExpectedChainID       int64
+	ExpectedVaultAddress  string
 }
 
 type OrderHandler struct {
@@ -39,6 +45,8 @@ type OrderHandler struct {
 	store               QueryStore
 	operatorWallets     map[string]struct{}
 	operatorUserID      int64
+	expectedChainID     int64
+	expectedVaultAddr   string
 	bootstrapReplayGate *bootstrapReplayGate
 }
 
@@ -47,6 +55,10 @@ type collectionResponse[T any] struct {
 }
 
 func NewOrderHandler(deps Dependencies) *OrderHandler {
+	expectedChainID := deps.ExpectedChainID
+	if expectedChainID <= 0 {
+		expectedChainID = 97
+	}
 	return &OrderHandler{
 		logger:              deps.Logger,
 		publisher:           deps.KafkaPublisher,
@@ -55,6 +67,8 @@ func NewOrderHandler(deps Dependencies) *OrderHandler {
 		store:               deps.QueryStore,
 		operatorWallets:     normalizeOperatorWalletSet(deps.OperatorWallets),
 		operatorUserID:      deps.DefaultOperatorUserID,
+		expectedChainID:     expectedChainID,
+		expectedVaultAddr:   sharedauth.NormalizeHex(deps.ExpectedVaultAddress),
 		bootstrapReplayGate: newBootstrapReplayGate(),
 	}
 }
@@ -68,6 +82,16 @@ func normalizeCollectionItems[T any](items []T) []T {
 
 func writeCollectionResponse[T any](ctx *gin.Context, statusCode int, items []T) {
 	ctx.JSON(statusCode, collectionResponse[T]{Items: normalizeCollectionItems(items)})
+}
+
+func (h *OrderHandler) validateTradingKeyDomain(chainID int64, vaultAddress string) error {
+	if chainID != h.expectedChainID {
+		return fmt.Errorf("chain_id does not match target chain")
+	}
+	if sharedauth.NormalizeHex(vaultAddress) != h.expectedVaultAddr {
+		return fmt.Errorf("vault_address does not match target vault")
+	}
+	return nil
 }
 
 func (h *OrderHandler) CreateMarket(ctx *gin.Context) {
@@ -107,6 +131,15 @@ func (h *OrderHandler) CreateMarket(ctx *gin.Context) {
 	if normalizeMarketStatus(req.Status) == "OPEN" && !dto.IsBinaryTradingOptions(req.Options) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "only YES/NO binary options can enter OPEN status in the current engine"})
 		return
+	}
+	categoryKey := dto.NormalizeMarketCategoryKey(req.CategoryKey, req.Metadata)
+	contract, _, err := oracleservice.ParseContract(categoryKey, marketOptionKeys(req.Options), req.ResolveAt, req.Metadata)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if contract != nil {
+		req.Metadata = oracleservice.CanonicalizeMetadata(req.Metadata, &contract.Metadata)
 	}
 	if req.MarketID <= 0 {
 		req.MarketID = time.Now().UnixMilli()
@@ -603,6 +636,130 @@ func (h *OrderHandler) GetLiabilityReport(ctx *gin.Context) {
 	writeCollectionResponse(ctx, http.StatusOK, items)
 }
 
+func (h *OrderHandler) CreateTradingKeyChallenge(ctx *gin.Context) {
+	var req dto.CreateTradingKeyChallengeRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.store == nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
+		return
+	}
+	if h.expectedChainID <= 0 || h.expectedVaultAddr == "" {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "trading key auth is not configured"})
+		return
+	}
+
+	req.WalletAddress = sharedauth.NormalizeHex(req.WalletAddress)
+	req.VaultAddress = sharedauth.NormalizeHex(req.VaultAddress)
+	if !common.IsHexAddress(req.WalletAddress) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "wallet_address is invalid"})
+		return
+	}
+	if err := h.validateTradingKeyDomain(req.ChainID, req.VaultAddress); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	challengeBytes := make([]byte, 32)
+	if _, err := rand.Read(challengeBytes); err != nil {
+		h.logger.Error("generate trading key challenge failed", "err", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "generate trading key challenge failed"})
+		return
+	}
+
+	req.ChallengeID = sharedkafka.NewID("tkc")
+	req.Challenge = "0x" + hex.EncodeToString(challengeBytes)
+	req.ChallengeExpiresAt = time.Now().Add(5 * time.Minute).UnixMilli()
+
+	item, err := h.store.CreateTradingKeyChallenge(ctx, req)
+	if err != nil {
+		h.logger.Error("create trading key challenge failed", "wallet_address", req.WalletAddress, "err", err)
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "create trading key challenge failed"})
+		return
+	}
+
+	ctx.JSON(http.StatusCreated, item)
+}
+
+func (h *OrderHandler) RegisterTradingKey(ctx *gin.Context) {
+	var req dto.RegisterTradingKeyRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.store == nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
+		return
+	}
+	if h.expectedChainID <= 0 || h.expectedVaultAddr == "" {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "trading key auth is not configured"})
+		return
+	}
+	if strings.ToUpper(strings.TrimSpace(req.WalletSignatureStandard)) != sharedauth.DefaultWalletSignatureStandard {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "wallet_signature_standard must be EIP712_V4"})
+		return
+	}
+
+	authz := sharedauth.TradingKeyAuthorization{
+		WalletAddress:            req.WalletAddress,
+		TradingPublicKey:         req.TradingPublicKey,
+		TradingKeyScheme:         req.TradingKeyScheme,
+		Scope:                    req.Scope,
+		Challenge:                req.Challenge,
+		ChallengeExpiresAtMillis: req.ChallengeExpiresAtMillis,
+		KeyExpiresAtMillis:       req.KeyExpiresAtMillis,
+		ChainID:                  req.ChainID,
+		VaultAddress:             req.VaultAddress,
+	}
+	if err := authz.Validate(time.Now()); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	normalized := authz.Normalize()
+	if err := h.validateTradingKeyDomain(normalized.ChainID, normalized.VaultAddress); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	recoveredWallet, err := sharedauth.VerifyTradingKeyAuthorizationSignature(authz, req.WalletSignature)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	req.SessionID = authz.TradingKeyID()
+	req.WalletAddress = normalized.WalletAddress
+	req.VaultAddress = normalized.VaultAddress
+	req.TradingPublicKey = normalized.TradingPublicKey
+	req.TradingKeyScheme = normalized.TradingKeyScheme
+	req.Scope = normalized.Scope
+	req.Challenge = normalized.Challenge
+	req.WalletSignatureStandard = sharedauth.DefaultWalletSignatureStandard
+
+	session, err := h.store.RegisterTradingKey(ctx, req)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrTradingKeyChallengeConsumed):
+			ctx.JSON(http.StatusConflict, gin.H{"error": "trading key challenge already used"})
+			return
+		case errors.Is(err, ErrTradingKeyChallengeExpired):
+			ctx.JSON(http.StatusGone, gin.H{"error": "trading key challenge expired"})
+			return
+		case errors.Is(err, ErrNotFound):
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "trading key challenge is invalid"})
+			return
+		default:
+			h.logger.Error("register trading key failed", "wallet_address", normalized.WalletAddress, "trading_key_id", req.SessionID, "err", err)
+			ctx.JSON(http.StatusBadGateway, gin.H{"error": "register trading key failed"})
+			return
+		}
+	}
+
+	h.logger.Info("trading key registered", "session_id", session.SessionID, "user_id", session.UserID, "wallet_address", recoveredWallet)
+	ctx.JSON(http.StatusCreated, session)
+}
+
 func (h *OrderHandler) CreateSession(ctx *gin.Context) {
 	var req dto.CreateSessionRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -906,7 +1063,7 @@ func (h *OrderHandler) CreateOrder(ctx *gin.Context) {
 
 	if strings.TrimSpace(req.SessionID) != "" {
 		if requestedAt <= 0 {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": "requested_at is required for session orders"})
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "requested_at is required for trading-key orders"})
 			return
 		}
 		if h.store == nil {
@@ -917,23 +1074,23 @@ func (h *OrderHandler) CreateOrder(ctx *gin.Context) {
 		session, err := h.store.GetSession(ctx, req.SessionID)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
-				ctx.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+				ctx.JSON(http.StatusNotFound, gin.H{"error": "trading key not found"})
 				return
 			}
 			h.logger.Error("get session failed", "session_id", req.SessionID, "err", err)
-			ctx.JSON(http.StatusBadGateway, gin.H{"error": "get session failed"})
+			ctx.JSON(http.StatusBadGateway, gin.H{"error": "get trading key failed"})
 			return
 		}
 		if session.Status != "ACTIVE" {
-			ctx.JSON(http.StatusConflict, gin.H{"error": "session is not active"})
+			ctx.JSON(http.StatusConflict, gin.H{"error": "trading key is not active"})
 			return
 		}
 		if session.ExpiresAtMillis > 0 && now.UnixMilli() > session.ExpiresAtMillis {
-			ctx.JSON(http.StatusConflict, gin.H{"error": "session expired"})
+			ctx.JSON(http.StatusConflict, gin.H{"error": "trading key expired"})
 			return
 		}
 		if req.UserID > 0 && req.UserID != session.UserID {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": "user_id does not match session"})
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "user_id does not match trading key"})
 			return
 		}
 
@@ -962,15 +1119,15 @@ func (h *OrderHandler) CreateOrder(ctx *gin.Context) {
 		}
 		if _, err := h.store.AdvanceSessionNonce(ctx, session.SessionID, req.OrderNonce); err != nil {
 			if errors.Is(err, ErrSessionNonceConflict) {
-				ctx.JSON(http.StatusConflict, gin.H{"error": "session nonce conflict"})
+				ctx.JSON(http.StatusConflict, gin.H{"error": "trading key nonce conflict"})
 				return
 			}
 			if errors.Is(err, ErrNotFound) {
-				ctx.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+				ctx.JSON(http.StatusNotFound, gin.H{"error": "trading key not found"})
 				return
 			}
 			h.logger.Error("advance session nonce failed", "session_id", session.SessionID, "order_nonce", req.OrderNonce, "err", err)
-			ctx.JSON(http.StatusBadGateway, gin.H{"error": "advance session nonce failed"})
+			ctx.JSON(http.StatusBadGateway, gin.H{"error": "advance trading key nonce failed"})
 			return
 		}
 		userID = session.UserID
@@ -1014,12 +1171,12 @@ func (h *OrderHandler) CreateOrder(ctx *gin.Context) {
 		}
 		requestedAt = operator.RequestedAt
 	} else {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "session-backed trade authorization or operator proof is required"})
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "trading-key-backed trade authorization or operator proof is required"})
 		return
 	}
 
 	if userID <= 0 {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "user_id or session_id is required"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "user_id or trading key id is required"})
 		return
 	}
 	if h.store == nil {
@@ -1257,6 +1414,39 @@ func (h *OrderHandler) ResolveMarket(ctx *gin.Context) {
 	if _, ok := h.requirePrivilegedOperator(ctx, req.Operator, req.OperatorMessage(marketID)); !ok {
 		return
 	}
+	if h.store == nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
+		return
+	}
+	market, err := h.store.GetMarket(ctx, marketID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "market not found"})
+			return
+		}
+		h.logger.Error("load market before resolve failed", "market_id", marketID, "err", err)
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "load market failed"})
+		return
+	}
+	if normalizeMarketStatus(market.Status) == "RESOLVED" {
+		ctx.JSON(http.StatusConflict, gin.H{"error": "market is already resolved"})
+		return
+	}
+	if oracleservice.HasOracleResolutionMode(market.Metadata) {
+		state, exists, err := h.store.GetMarketResolution(ctx, marketID)
+		if err != nil {
+			h.logger.Error("load market resolution before resolve failed", "market_id", marketID, "err", err)
+			ctx.JSON(http.StatusBadGateway, gin.H{"error": "load market resolution failed"})
+			return
+		}
+		if exists {
+			switch normalizeUpper(state.Status) {
+			case "OBSERVED", "RESOLVED":
+				ctx.JSON(http.StatusConflict, gin.H{"error": "oracle market resolution is already observed or resolved"})
+				return
+			}
+		}
+	}
 
 	event := sharedkafka.MarketEvent{
 		EventID:          sharedkafka.NewID("evt_market"),
@@ -1280,4 +1470,16 @@ func (h *OrderHandler) ResolveMarket(ctx *gin.Context) {
 		"status":           event.Status,
 		"topic":            h.topics.MarketEvent,
 	})
+}
+
+func marketOptionKeys(options []dto.MarketOption) []string {
+	keys := make([]string, 0, len(options))
+	for _, option := range options {
+		keys = append(keys, option.Key)
+	}
+	return keys
+}
+
+func normalizeUpper(value string) string {
+	return strings.ToUpper(strings.TrimSpace(value))
 }

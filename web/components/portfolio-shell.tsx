@@ -151,7 +151,7 @@ export function PortfolioShell({
           .filter(Boolean)
           .join(" ")
     : wallet
-      ? "钱包已连接，请先授权交易会话后查看当前账户资产。"
+      ? "钱包已连接，请先授权交易密钥后查看当前账户资产。"
       : "未连接钱包时不会读取任何用户账户集合，请先连接钱包。";
   const qrImageSrc = profileWallet
     ? `https://api.qrserver.com/v1/create-qr-code/?size=480x480&data=${encodeURIComponent(profileWallet)}`
@@ -258,7 +258,7 @@ export function PortfolioShell({
 
   async function handleClaim(eventId: string) {
     if (!sessionUserId || !activePayoutWallet) {
-      setClaimStatus((current) => ({ ...current, [eventId]: "请先连接钱包并授权交易会话。" }));
+      setClaimStatus((current) => ({ ...current, [eventId]: "请先连接钱包并授权交易密钥。" }));
       return;
     }
 
@@ -448,7 +448,7 @@ export function PortfolioShell({
           {activeTab === "positions" ? (
             !sessionUserId ? (
               <div className={styles.empty}>
-                {wallet ? "钱包已连接，请先授权交易会话后查看持仓。" : "请先连接钱包并授权交易会话后查看持仓。"}
+                {wallet ? "钱包已连接，请先授权交易密钥后查看持仓。" : "请先连接钱包并授权交易密钥后查看持仓。"}
               </div>
             ) : portfolioSyncing ? (
               <div className={styles.empty}>正在同步当前账户持仓...</div>
@@ -487,7 +487,7 @@ export function PortfolioShell({
           {activeTab === "orders" ? (
             !sessionUserId ? (
               <div className={styles.empty}>
-                {wallet ? "钱包已连接，请先授权交易会话后查看挂单。" : "请先连接钱包并授权交易会话后查看挂单。"}
+                {wallet ? "钱包已连接，请先授权交易密钥后查看挂单。" : "请先连接钱包并授权交易密钥后查看挂单。"}
               </div>
             ) : portfolioSyncing ? (
               <div className={styles.empty}>正在同步当前账户订单...</div>
@@ -526,7 +526,7 @@ export function PortfolioShell({
           {activeTab === "history" ? (
             !sessionUserId ? (
               <div className={styles.empty}>
-                {wallet ? "钱包已连接，请先授权交易会话后查看历史结算。" : "请先连接钱包并授权交易会话后查看历史结算。"}
+                {wallet ? "钱包已连接，请先授权交易密钥后查看历史结算。" : "请先连接钱包并授权交易密钥后查看历史结算。"}
               </div>
             ) : portfolioSyncing ? (
               <div className={styles.empty}>正在同步当前账户结算记录...</div>

@@ -1,0 +1,68 @@
+# WORKLOG-API-005
+
+### 2026-04-04 17:24 Asia/Shanghai
+
+- read:
+  - `WORKLOG-API-004.md`
+  - `WORKLOG-STAGING-001.md`
+  - `admin/app/api/operator/markets/[marketId]/first-liquidity/route.ts`
+  - `internal/api/handler/order_handler.go`
+- changed:
+  - created `TASK-API-005` and this handshake/worklog set for first-liquidity correctness follow-up
+- validated:
+  - current admin route still forwards `/first-liquidity` before `/api/v1/orders`, so a duplicate order rejection can happen after inventory issuance
+  - current API handler still debits `req.Quantity` and returns `collateral_debit=req.Quantity`, which mismatches `100`-unit payout settlement
+- blockers:
+  - none at commander scope; this is ready for one implementation worker
+- next:
+  - launch one API/admin worker on `TASK-API-005`
+
+### 2026-04-04 17:33 Asia/Shanghai
+
+- read:
+  - `docs/harness/tasks/TASK-API-005.md`
+  - `docs/harness/handshakes/HANDSHAKE-API-005.md`
+  - `docs/harness/worklogs/WORKLOG-API-005.md`
+  - `docs/harness/worklogs/WORKLOG-API-004.md`
+  - `docs/harness/worklogs/WORKLOG-STAGING-001.md`
+  - `docs/architecture/order-flow.md`
+  - `docs/architecture/direct-deposit-session-key.md`
+  - `internal/api/handler/order_handler.go`
+  - `internal/api/handler/bootstrap_replay.go`
+  - `internal/api/handler/order_handler_test.go`
+  - `internal/api/dto/order.go`
+  - `internal/api/dto/operator_auth.go`
+  - `internal/shared/assets/assets.go`
+  - `admin/app/api/operator/markets/[marketId]/first-liquidity/route.ts`
+  - `admin/lib/operator-server.ts`
+- changed:
+  - made `CreateFirstLiquidity` hold the bootstrap semantic replay lock, reject same-terms duplicates before any balance/position mutation, debit maker collateral with `100 * quantity` accounting units via `assets.WinningPayoutAmount`, credit paired YES/NO inventory, pre-freeze the bootstrap sell order, publish `order.command`, and roll back issued inventory/collateral plus release the order freeze on publish failure
+  - added shared DTO helpers so first-liquidity issuance and operator bootstrap order writes derive the same semantic key and deterministic `ord_bootstrap_*` id
+  - extended the first-liquidity API response with `order_id` and `order_status`
+  - changed the admin first-liquidity route to call only the atomic core `/api/v1/admin/markets/:market_id/first-liquidity` endpoint and forward its response instead of issuing a second `/api/v1/orders` request
+  - preserved full backend error payloads in `forwardJSON`, so admin duplicate responses keep fields such as `order_id`
+  - updated `HANDSHAKE-API-005.md` to record the one-shot backend bootstrap path and mark this worker in progress
+  - added first-liquidity regression tests for 100x collateral debit, queued bootstrap order publish, and duplicate rejection with zero mutation side effects
+- validated:
+  - `gofmt -w internal/api/dto/operator_auth.go internal/api/dto/order.go internal/api/handler/order_handler.go internal/api/handler/order_handler_test.go`
+  - `go test ./internal/api/...`
+  - `go test ./internal/api/... -run 'Test(CreateFirstLiquidityIssuesPairedInventory|CreateFirstLiquidityRejectsSemanticDuplicateBeforeInventoryMutation|CreateFirstLiquidityRollsBackWhenPublishFails|CreateFirstLiquidityRejectsMissingOperatorProof|CreateOrderRejectsSemanticDuplicateBootstrapOrderWithFreshProof|CreateOrderRejectsBareUserIDWithoutAuthEnvelope|EngineTradeWriteRejectsBareUserIDWithoutAuthEnvelope|EngineTradeWriteRejectsSemanticDuplicateOperatorBootstrapOrderWithFreshProof)$'`
+  - `cd /Users/zhangza/code/funnyoption/admin && npm run build`
+  - `git diff --check`
+  - `./scripts/dev-status.sh` => `no pid directory yet: /Users/zhangza/code/funnyoption/.run/dev`
+- before/after evidence:
+  - first bootstrap `quantity=40`:
+    - before: no maker balance/position mutations recorded in the test fake
+    - after: one `FIRST_LIQUIDITY_COLLATERAL` debit `USDT=4000`, one `POSITION:88:YES` credit `40`, one `POSITION:88:NO` credit `40`, one `PreFreeze` request on `POSITION:88:YES` for `40` shares with `RefID=ord_bootstrap_*`, and one `order.command` publish with the same semantic `order_id`
+    - response after: `202` with `status=ISSUED`, `collateral_debit=4000`, `order_id=ord_bootstrap_*`, `order_status=QUEUED`
+  - duplicate same-terms bootstrap:
+    - before: replay fixture preloads `getOrderResp.OrderID=ord_bootstrap_*`
+    - after: `409` response body contains `operator bootstrap order already accepted` and the same `order_id`; maker-side test fake still has `debits=[]`, `credits=[]`, `preFreezeCalled=false`, and `publisher.calls=[]`
+- compatibility impact:
+  - direct callers of `POST /api/v1/admin/markets/:market_id/first-liquidity` now receive the paired inventory issuance and bootstrap order queue result in one response and should not submit a second duplicate `/api/v1/orders` bootstrap request for the same terms
+  - existing operator proof verification remains required on both admin and core API paths, and bare `user_id` order writes are still rejected by the existing route tests
+- blockers:
+  - no code blocker found
+  - full local lifecycle replay was not executed in this turn because the local dev stack is currently down; before/after balance and position evidence above comes from the new handler regression tests
+- next:
+  - hand back to commander with changed files, validation commands, before/after evidence, and the one-shot bootstrap compatibility note

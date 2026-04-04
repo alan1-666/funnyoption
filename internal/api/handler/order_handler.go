@@ -233,7 +233,8 @@ func (h *OrderHandler) CreateFirstLiquidity(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "operator bootstrap proof requires price to be positive"})
 		return
 	}
-	if _, ok := h.requirePrivilegedOperator(ctx, req.Operator, req.OperatorMessage(marketID)); !ok {
+	operator, ok := h.requirePrivilegedOperator(ctx, req.Operator, req.OperatorMessage(marketID))
+	if !ok {
 		return
 	}
 	if req.UserID <= 0 || req.Quantity <= 0 {
@@ -246,6 +247,28 @@ func (h *OrderHandler) CreateFirstLiquidity(ctx *gin.Context) {
 	}
 	if h.account == nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "account client is not configured"})
+		return
+	}
+	if h.publisher == nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "kafka publisher is not configured"})
+		return
+	}
+
+	unlockBootstrap := h.bootstrapReplayGate.Lock(req.BootstrapSemanticKey(marketID))
+	defer unlockBootstrap()
+
+	orderID := req.BootstrapOrderID(marketID)
+	replayed, err := h.bootstrapOrderAlreadyAccepted(ctx, orderID)
+	if err != nil {
+		h.logger.Error("check bootstrap order uniqueness failed", "order_id", orderID, "err", err)
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "check bootstrap order uniqueness failed"})
+		return
+	}
+	if replayed {
+		ctx.JSON(http.StatusConflict, gin.H{
+			"error":    "operator bootstrap order already accepted",
+			"order_id": orderID,
+		})
 		return
 	}
 
@@ -265,10 +288,16 @@ func (h *OrderHandler) CreateFirstLiquidity(ctx *gin.Context) {
 	}
 
 	firstLiquidityID := sharedkafka.NewID("liq")
+	commandID := sharedkafka.NewID("cmd")
 	collateralAsset := assets.NormalizeAsset(market.CollateralAsset)
 	collateralRef := firstLiquidityCollateralRef(firstLiquidityID)
+	collateralDebit, err := assets.WinningPayoutAmount(req.Quantity)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
-	debitResult, err := h.account.DebitBalance(ctx, req.UserID, collateralAsset, req.Quantity, "FIRST_LIQUIDITY_COLLATERAL", collateralRef)
+	debitResult, err := h.account.DebitBalance(ctx, req.UserID, collateralAsset, collateralDebit, "FIRST_LIQUIDITY_COLLATERAL", collateralRef)
 	if err != nil {
 		status := http.StatusBadGateway
 		if looksLikeInsufficientBalance(err) {
@@ -301,12 +330,12 @@ func (h *OrderHandler) CreateFirstLiquidity(ctx *gin.Context) {
 		positionRef := firstLiquidityPositionRef(firstLiquidityID, inventory.Outcome)
 		creditResult, err := h.account.CreditBalance(ctx, req.UserID, inventory.PositionAsset, inventory.Quantity, "FIRST_LIQUIDITY_POSITION", positionRef)
 		if err != nil {
-			h.rollbackFirstLiquidity(ctx, firstLiquidityID, req.UserID, collateralAsset, req.Quantity, issued)
+			h.rollbackFirstLiquidity(ctx, firstLiquidityID, req.UserID, collateralAsset, collateralDebit, issued)
 			ctx.JSON(http.StatusBadGateway, gin.H{"error": "credit first-liquidity inventory failed"})
 			return
 		}
 		if !creditResult.Applied {
-			h.rollbackFirstLiquidity(ctx, firstLiquidityID, req.UserID, collateralAsset, req.Quantity, issued)
+			h.rollbackFirstLiquidity(ctx, firstLiquidityID, req.UserID, collateralAsset, collateralDebit, issued)
 			ctx.JSON(http.StatusConflict, gin.H{"error": "first-liquidity inventory credit was not applied"})
 			return
 		}
@@ -324,12 +353,57 @@ func (h *OrderHandler) CreateFirstLiquidity(ctx *gin.Context) {
 			OccurredAtMillis: nowMillis,
 		}
 		if err := h.publisher.PublishJSON(ctx, h.topics.PositionChange, fmt.Sprintf("%d:%s", marketID, inventory.Outcome), event); err != nil {
-			h.rollbackFirstLiquidity(ctx, firstLiquidityID, req.UserID, collateralAsset, req.Quantity, issued)
+			h.rollbackFirstLiquidity(ctx, firstLiquidityID, req.UserID, collateralAsset, collateralDebit, issued)
 			h.logger.Error("publish first-liquidity position event failed", "market_id", marketID, "user_id", req.UserID, "outcome", inventory.Outcome, "err", err)
 			ctx.JSON(http.StatusBadGateway, gin.H{"error": "publish first-liquidity position event failed"})
 			return
 		}
 		inventory.EventPublished = true
+	}
+
+	freezeRecord, err := h.account.PreFreeze(ctx, accountclient.FreezeRequest{
+		UserID:  req.UserID,
+		Asset:   assets.PositionAsset(marketID, req.Outcome),
+		RefType: "ORDER",
+		RefID:   orderID,
+		Amount:  req.Quantity,
+	})
+	if err != nil {
+		h.rollbackFirstLiquidity(ctx, firstLiquidityID, req.UserID, collateralAsset, collateralDebit, issued)
+		status := http.StatusBadGateway
+		if looksLikeInsufficientBalance(err) {
+			status = http.StatusConflict
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	command := sharedkafka.OrderCommand{
+		CommandID:         commandID,
+		TraceID:           firstLiquidityID,
+		OrderID:           orderID,
+		FreezeID:          freezeRecord.FreezeID,
+		FreezeAsset:       freezeRecord.Asset,
+		FreezeAmount:      freezeRecord.Amount,
+		CollateralAsset:   collateralAsset,
+		UserID:            req.UserID,
+		MarketID:          marketID,
+		Outcome:           req.Outcome,
+		Side:              "SELL",
+		Type:              "LIMIT",
+		TimeInForce:       "GTC",
+		Price:             req.Price,
+		Quantity:          req.Quantity,
+		RequestedAtMillis: operator.RequestedAt,
+	}
+	if err := h.publisher.PublishJSON(ctx, h.topics.OrderCommand, fmt.Sprintf("%d:%s", marketID, req.Outcome), command); err != nil {
+		if releaseErr := h.account.ReleaseFreeze(ctx, freezeRecord.FreezeID); releaseErr != nil {
+			h.logger.Error("release first-liquidity bootstrap freeze after publish failure failed", "freeze_id", freezeRecord.FreezeID, "err", releaseErr)
+		}
+		h.rollbackFirstLiquidity(ctx, firstLiquidityID, req.UserID, collateralAsset, collateralDebit, issued)
+		h.logger.Error("publish first-liquidity bootstrap order failed", "command_id", commandID, "order_id", orderID, "market_id", marketID, "err", err)
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "publish first-liquidity bootstrap order failed"})
+		return
 	}
 
 	responseInventory := make([]dto.FirstLiquidityInventoryResponse, 0, len(issued))
@@ -346,9 +420,11 @@ func (h *OrderHandler) CreateFirstLiquidity(ctx *gin.Context) {
 		MarketID:         marketID,
 		UserID:           req.UserID,
 		CollateralAsset:  collateralAsset,
-		CollateralDebit:  req.Quantity,
+		CollateralDebit:  collateralDebit,
 		Inventory:        responseInventory,
 		Status:           "ISSUED",
+		OrderID:          orderID,
+		OrderStatus:      "QUEUED",
 	})
 }
 

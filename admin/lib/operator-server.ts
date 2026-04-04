@@ -106,8 +106,9 @@ export async function forwardJSON(path: string, init: { method: "POST"; body: un
       ok: false as const,
       status: response.status,
       error: String(payload?.error ?? `HTTP ${response.status}`),
+      payload: payload ?? {},
       response: NextResponse.json(
-        { error: payload?.error ?? `HTTP ${response.status}` },
+        payload ?? { error: `HTTP ${response.status}` },
         { status: response.status }
       )
     };

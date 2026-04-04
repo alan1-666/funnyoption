@@ -56,47 +56,23 @@ export async function POST(request: Request, { params }: { params: Promise<{ mar
     }
   });
   if (!firstLiquidity.ok) {
-    return firstLiquidity.response;
-  }
-
-  const order = await forwardJSON("/api/v1/orders", {
-    method: "POST",
-    body: {
-      user_id: draft.userId,
-      requested_at: payload.operator.requestedAt,
-      market_id: draft.marketId,
-      outcome: draft.outcome.toLowerCase(),
-      side: "sell",
-      type: "limit",
-      time_in_force: "gtc",
-      price: draft.price,
-      quantity: draft.quantity,
-      operator: toCoreOperatorProof(payload.operator)
-    }
-  });
-  if (!order.ok) {
     const firstLiquidityPayload = firstLiquidity.payload as Record<string, unknown>;
     return NextResponse.json(
       {
-        error: `issued first-liquidity ${String(firstLiquidityPayload.first_liquidity_id ?? "")} but failed to queue the first sell order: ${order.error}`,
-        first_liquidity_id: firstLiquidityPayload.first_liquidity_id,
+        ...firstLiquidityPayload,
         operator_wallet_address: auth.walletAddress
       },
-      { status: order.status }
+      { status: firstLiquidity.status }
     );
   }
 
   const firstLiquidityPayload = firstLiquidity.payload as Record<string, unknown>;
-  const orderPayload = order.payload as Record<string, unknown>;
 
   return NextResponse.json(
     {
-      first_liquidity_id: firstLiquidityPayload.first_liquidity_id,
+      ...firstLiquidityPayload,
       market_id: firstLiquidityPayload.market_id ?? draft.marketId,
       user_id: firstLiquidityPayload.user_id ?? draft.userId,
-      status: firstLiquidityPayload.status ?? "QUEUED",
-      order_id: orderPayload.order_id,
-      order_status: orderPayload.status,
       operator_wallet_address: auth.walletAddress
     },
     { status: firstLiquidity.status }

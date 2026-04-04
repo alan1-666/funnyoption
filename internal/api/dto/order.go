@@ -82,6 +82,8 @@ type CreateFirstLiquidityResponse struct {
 	CollateralDebit  int64                             `json:"collateral_debit"`
 	Inventory        []FirstLiquidityInventoryResponse `json:"inventory"`
 	Status           string                            `json:"status"`
+	OrderID          string                            `json:"order_id,omitempty"`
+	OrderStatus      string                            `json:"order_status,omitempty"`
 }
 
 type MarketResponse struct {

@@ -1,0 +1,81 @@
+# WORKLOG-OFFCHAIN-011
+
+### 2026-04-04 17:24 Asia/Shanghai
+
+- read:
+  - `WORKLOG-STAGING-001.md`
+  - `web/app/portfolio/page.tsx`
+  - `web/lib/api.ts`
+- changed:
+  - created `TASK-OFFCHAIN-011` and this handshake/worklog set for connected-user portfolio readback
+- validated:
+  - `/portfolio` SSR currently calls collection fetchers without an explicit user id
+  - `web/lib/api.ts` defaults `getOrders`, `getBalances`, `getProfile`, `getPositions`, `getDeposits`, `getWithdrawals`, `getPayouts`, and `getSessions` to user `1001`
+- blockers:
+  - none at commander scope; this is ready for one web worker
+- next:
+  - launch one web/off-chain worker on `TASK-OFFCHAIN-011`
+
+### 2026-04-04 17:37 Asia/Shanghai
+
+- read:
+  - `AGENTS.md`
+  - `PLAN.md`
+  - `docs/harness/README.md`
+  - `docs/harness/roles/WORKER.md`
+  - `docs/harness/PROJECT_MAP.md`
+  - `docs/harness/THREAD_PROTOCOL.md`
+  - `docs/harness/tasks/TASK-OFFCHAIN-011.md`
+  - `docs/harness/handshakes/HANDSHAKE-OFFCHAIN-011.md`
+  - `docs/harness/worklogs/WORKLOG-OFFCHAIN-011.md`
+  - `docs/harness/worklogs/WORKLOG-STAGING-001.md`
+  - `web/app/portfolio/page.tsx`
+  - `web/components/portfolio-shell.tsx`
+  - `web/lib/api.ts`
+  - `web/components/trading-session-provider.tsx`
+  - `web/lib/session-client.ts`
+  - `web/lib/types.ts`
+  - `web/lib/chain.ts`
+  - `/Users/zhangza/.agents/skills/vercel-react-best-practices/SKILL.md`
+  - `/Users/zhangza/.agents/skills/vercel-react-best-practices/rules/async-parallel.md`
+  - `/Users/zhangza/.codex/skills/playwright/SKILL.md`
+  - `/Users/zhangza/.codex/skills/playwright/references/cli.md`
+- changed:
+  - `web/app/portfolio/page.tsx`
+  - `web/components/portfolio-shell.tsx`
+  - `web/lib/api.ts`
+  - `docs/harness/handshakes/HANDSHAKE-OFFCHAIN-011.md`
+  - `docs/harness/worklogs/WORKLOG-OFFCHAIN-011.md`
+- implementation:
+  - removed the SSR no-arg private collection/profile reads from `/portfolio`; server render now fetches only public markets metadata and passes an explicit no-session portfolio state
+  - removed hard-coded `= 1001` defaults from `getOrders`, `getBalances`, `getProfile`, `getPositions`, `getDeposits`, `getWithdrawals`, `getPayouts`, and `getSessions`
+  - added read-state-preserving user-scoped helpers in `web/lib/api.ts` and no-user guards that do not issue fallback private requests
+  - moved `PortfolioShell` balances / positions / orders / payouts / profile refresh onto `session.userId` with a parallel client fetch, and reset stale collections/profile when the session disappears or changes
+  - made disconnected and wallet-connected-but-not-authorized states explicit in the summary card and tab panels
+  - kept private read `unavailable` / `error` states visible in the summary copy and active tab fallback UI
+  - removed the `user_id=1001` fallback from payout claim submission; claims now require a session user and wallet
+- validation:
+  - `git diff --check`
+  - `npm run build` in `web/`
+  - Playwright smoke against `http://127.0.0.1:3100/portfolio` with a local mock API on `http://127.0.0.1:18080`
+- before evidence:
+  - from `WORKLOG-STAGING-001.md`: staging `/portfolio` snapshot rendered wallet `0xc421d5ff322e4213a913ec257d6b4458af4255c6`, balance `0`, and old positions/orders for a generated taker session because SSR fetched default `user_id=1001`
+  - local no-session snapshot after the patch now explicitly shows `我的余额 — 未连接`, metrics `—`, and `请先连接钱包并授权交易会话后查看持仓。`
+- after evidence:
+  - injected a browser-local session record with `userId=4242`, wallet `0x4242000000000000000000000000000000004242`, and chain id `31337`, then reloaded `/portfolio`
+  - Playwright snapshot showed `5.42 USDT`, wallet `0x4242…4242`, `当前展示 user #4242 的账户数据。`, one position, one open order, one payout, and position row `Portfolio Smoke 4242` / `7 份` / `已结算 1`
+  - mock API request log contained only:
+    - `GET /api/v1/profile?user_id=4242`
+    - `GET /api/v1/balances?user_id=4242&limit=10`
+    - `GET /api/v1/positions?user_id=4242&limit=20`
+    - `GET /api/v1/orders?user_id=4242&limit=20`
+    - `GET /api/v1/payouts?user_id=4242&limit=20`
+  - mock API request log had no `user_id=1001` collection/profile reads after the connected-session reload
+- SSR fallback strategy:
+  - current browser sessions live in `localStorage`, so the server render cannot know `session.userId`
+  - SSR therefore renders public markets metadata plus an explicit disconnected / not-authorized portfolio state, with no private collection/profile requests
+  - after hydration, `TradingSessionProvider` restores the session and `PortfolioShell` fetches balances / positions / orders / payouts / profile for that `session.userId`
+- blockers:
+  - no blocker in the declared portfolio ownership scope
+- next:
+  - commander can route staging retest for `/portfolio` and keep `TASK-API-005` / `TASK-CHAIN-004` separate

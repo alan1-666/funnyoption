@@ -43,6 +43,10 @@ async function fetchObject<T>(path: string): Promise<T | null> {
   return result.item;
 }
 
+function hasScopedUserId(userId?: number) {
+  return Number.isInteger(userId) && Number(userId) > 0;
+}
+
 function normalizeMarket(market: Market): Market {
   return {
     ...market,
@@ -233,7 +237,11 @@ export async function getTrades(marketId?: number) {
   return (await getTradesRead(marketId)).items;
 }
 
-export async function getOrders(userId = 1001, marketId?: number) {
+export async function getOrdersRead(userId?: number, marketId?: number): Promise<ApiCollectionResult<Order>> {
+  if (!hasScopedUserId(userId)) {
+    return normalizeCollectionState<Order>([]);
+  }
+
   const query = new URLSearchParams({
     user_id: String(userId),
     limit: "20"
@@ -241,27 +249,48 @@ export async function getOrders(userId = 1001, marketId?: number) {
   if (marketId) {
     query.set("market_id", String(marketId));
   }
-  return fetchItems<Order>(`/api/v1/orders?${query.toString()}`);
+  return fetchCollection<Order>(`/api/v1/orders?${query.toString()}`);
 }
 
-export async function getBalances(userId = 1001) {
-  return fetchItems<Balance>(`/api/v1/balances?user_id=${userId}&limit=10`);
+export async function getOrders(userId?: number, marketId?: number) {
+  return (await getOrdersRead(userId, marketId)).items;
 }
 
-export async function getProfileRead(userId?: number, walletAddress?: string) {
+export async function getBalancesRead(userId?: number): Promise<ApiCollectionResult<Balance>> {
+  if (!hasScopedUserId(userId)) {
+    return normalizeCollectionState<Balance>([]);
+  }
+
+  return fetchCollection<Balance>(`/api/v1/balances?user_id=${userId}&limit=10`);
+}
+
+export async function getBalances(userId?: number) {
+  return (await getBalancesRead(userId)).items;
+}
+
+export async function getProfileRead(
+  userId?: number,
+  walletAddress?: string
+): Promise<ApiItemResult<UserProfile>> {
   const query = new URLSearchParams();
-  if (userId && userId > 0) {
+  if (hasScopedUserId(userId)) {
     query.set("user_id", String(userId));
   }
   if (walletAddress) {
     query.set("wallet_address", walletAddress);
   }
+  if (query.size === 0) {
+    return {
+      state: "not-found",
+      item: null
+    };
+  }
   const suffix = query.size > 0 ? `?${query.toString()}` : "";
   return fetchItem<UserProfile>(`/api/v1/profile${suffix}`);
 }
 
-export async function getProfile(userId = 1001) {
-  return (await getProfileRead(userId)).item;
+export async function getProfile(userId?: number, walletAddress?: string) {
+  return (await getProfileRead(userId, walletAddress)).item;
 }
 
 export async function updateProfile(input: {
@@ -289,24 +318,64 @@ export async function updateProfile(input: {
   return (await response.json()) as UserProfile;
 }
 
-export async function getPositions(userId = 1001) {
-  return fetchItems<Position>(`/api/v1/positions?user_id=${userId}&limit=20`);
+export async function getPositionsRead(userId?: number): Promise<ApiCollectionResult<Position>> {
+  if (!hasScopedUserId(userId)) {
+    return normalizeCollectionState<Position>([]);
+  }
+
+  return fetchCollection<Position>(`/api/v1/positions?user_id=${userId}&limit=20`);
 }
 
-export async function getDeposits(userId = 1001) {
-  return fetchItems<Deposit>(`/api/v1/deposits?user_id=${userId}&limit=20`);
+export async function getPositions(userId?: number) {
+  return (await getPositionsRead(userId)).items;
 }
 
-export async function getWithdrawals(userId = 1001) {
-  return fetchItems<Withdrawal>(`/api/v1/withdrawals?user_id=${userId}&limit=20`);
+export async function getDepositsRead(userId?: number): Promise<ApiCollectionResult<Deposit>> {
+  if (!hasScopedUserId(userId)) {
+    return normalizeCollectionState<Deposit>([]);
+  }
+
+  return fetchCollection<Deposit>(`/api/v1/deposits?user_id=${userId}&limit=20`);
 }
 
-export async function getPayouts(userId = 1001) {
-  return fetchItems<Payout>(`/api/v1/payouts?user_id=${userId}&limit=20`);
+export async function getDeposits(userId?: number) {
+  return (await getDepositsRead(userId)).items;
 }
 
-export async function getSessions(userId = 1001) {
-  return fetchItems<SessionGrant>(`/api/v1/sessions?user_id=${userId}&limit=20`);
+export async function getWithdrawalsRead(userId?: number): Promise<ApiCollectionResult<Withdrawal>> {
+  if (!hasScopedUserId(userId)) {
+    return normalizeCollectionState<Withdrawal>([]);
+  }
+
+  return fetchCollection<Withdrawal>(`/api/v1/withdrawals?user_id=${userId}&limit=20`);
+}
+
+export async function getWithdrawals(userId?: number) {
+  return (await getWithdrawalsRead(userId)).items;
+}
+
+export async function getPayoutsRead(userId?: number): Promise<ApiCollectionResult<Payout>> {
+  if (!hasScopedUserId(userId)) {
+    return normalizeCollectionState<Payout>([]);
+  }
+
+  return fetchCollection<Payout>(`/api/v1/payouts?user_id=${userId}&limit=20`);
+}
+
+export async function getPayouts(userId?: number) {
+  return (await getPayoutsRead(userId)).items;
+}
+
+export async function getSessionsRead(userId?: number): Promise<ApiCollectionResult<SessionGrant>> {
+  if (!hasScopedUserId(userId)) {
+    return normalizeCollectionState<SessionGrant>([]);
+  }
+
+  return fetchCollection<SessionGrant>(`/api/v1/sessions?user_id=${userId}&limit=20`);
+}
+
+export async function getSessions(userId?: number) {
+  return (await getSessionsRead(userId)).items;
 }
 
 export async function getChainTasks() {

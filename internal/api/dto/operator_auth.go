@@ -127,30 +127,46 @@ func (req CreateFirstLiquidityRequest) OperatorMessage(marketID int64) string {
 	return buildBootstrapOperatorMessage(req.operatorWalletAddress(), marketID, req.UserID, req.Quantity, req.Outcome, req.Price, req.operatorRequestedAt())
 }
 
+func (req CreateFirstLiquidityRequest) BootstrapSemanticKey(marketID int64) string {
+	return buildBootstrapSemanticKey(marketID, req.UserID, req.Quantity, req.Outcome, req.Price)
+}
+
+func (req CreateFirstLiquidityRequest) BootstrapOrderID(marketID int64) string {
+	return buildBootstrapOrderID(req.BootstrapSemanticKey(marketID))
+}
+
 func (req CreateOrderRequest) BootstrapOperatorMessage() string {
 	return buildBootstrapOperatorMessage(req.operatorWalletAddress(), req.MarketID, req.UserID, req.Quantity, req.Outcome, req.Price, req.operatorRequestedAt())
 }
 
 func (req CreateOrderRequest) BootstrapSemanticKey() string {
-	outcome, ok := NormalizeBinaryOutcome(req.Outcome)
-	if !ok {
-		outcome = strings.ToUpper(cleanOperatorText(req.Outcome))
-	}
-
-	return fmt.Sprintf(
-		"bootstrap-order:%d:%d:%d:%s:%d",
-		req.MarketID,
-		req.UserID,
-		req.Quantity,
-		outcome,
-		req.Price,
-	)
+	return buildBootstrapSemanticKey(req.MarketID, req.UserID, req.Quantity, req.Outcome, req.Price)
 }
 
 func (req CreateOrderRequest) BootstrapOrderID() string {
 	// `requested_at` stays inside the signed proof for freshness, but a fresh
 	// timestamp alone must not create a second bootstrap action with identical terms.
-	sum := sha256.Sum256([]byte(req.BootstrapSemanticKey()))
+	return buildBootstrapOrderID(req.BootstrapSemanticKey())
+}
+
+func buildBootstrapSemanticKey(marketID, userID, quantity int64, outcome string, price int64) string {
+	normalizedOutcome, ok := NormalizeBinaryOutcome(outcome)
+	if !ok {
+		normalizedOutcome = strings.ToUpper(cleanOperatorText(outcome))
+	}
+
+	return fmt.Sprintf(
+		"bootstrap-order:%d:%d:%d:%s:%d",
+		marketID,
+		userID,
+		quantity,
+		normalizedOutcome,
+		price,
+	)
+}
+
+func buildBootstrapOrderID(semanticKey string) string {
+	sum := sha256.Sum256([]byte(semanticKey))
 	return "ord_bootstrap_" + hex.EncodeToString(sum[:16])
 }
 

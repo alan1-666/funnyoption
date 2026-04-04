@@ -28,6 +28,7 @@ import (
 type fakeAccountClient struct {
 	freezeResp      accountclient.FreezeRecord
 	freezeErr       error
+	freezeReq       accountclient.FreezeRequest
 	preFreezeCalled bool
 	releasedID      string
 	releaseCalled   bool
@@ -50,7 +51,7 @@ type balanceMutationCall struct {
 
 func (f *fakeAccountClient) PreFreeze(ctx context.Context, req accountclient.FreezeRequest) (accountclient.FreezeRecord, error) {
 	_ = ctx
-	_ = req
+	f.freezeReq = req
 	f.preFreezeCalled = true
 	return f.freezeResp, f.freezeErr
 }
@@ -1405,6 +1406,14 @@ func TestCreateFirstLiquidityIssuesPairedInventory(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	account := &fakeAccountClient{
+		freezeResp: accountclient.FreezeRecord{
+			FreezeID: "frz_bootstrap_88",
+			UserID:   1002,
+			Asset:    "POSITION:88:YES",
+			RefType:  "ORDER",
+			RefID:    "ord_bootstrap",
+			Amount:   40,
+		},
 		debitResults: []accountclient.DebitResult{
 			{Applied: true, Asset: "USDT", UserID: 1002},
 		},
@@ -1465,7 +1474,7 @@ func TestCreateFirstLiquidityIssuesPairedInventory(t *testing.T) {
 	if len(account.debits) != 1 {
 		t.Fatalf("expected 1 debit call, got %+v", account.debits)
 	}
-	if got := account.debits[0]; got.Asset != "USDT" || got.Amount != 40 || got.RefType != "FIRST_LIQUIDITY_COLLATERAL" {
+	if got := account.debits[0]; got.Asset != "USDT" || got.Amount != 4000 || got.RefType != "FIRST_LIQUIDITY_COLLATERAL" {
 		t.Fatalf("unexpected collateral debit: %+v", got)
 	}
 	if len(account.credits) != 2 {
@@ -1477,8 +1486,17 @@ func TestCreateFirstLiquidityIssuesPairedInventory(t *testing.T) {
 	if got := account.credits[1]; got.Asset != "POSITION:88:NO" || got.Amount != 40 || got.RefType != "FIRST_LIQUIDITY_POSITION" {
 		t.Fatalf("unexpected NO inventory credit: %+v", got)
 	}
-	if len(publisher.calls) != 2 {
-		t.Fatalf("expected 2 position events, got %+v", publisher.calls)
+	if !account.preFreezeCalled {
+		t.Fatalf("expected bootstrap order pre-freeze to be created")
+	}
+	if got := account.freezeReq; got.UserID != 1002 || got.Asset != "POSITION:88:YES" || got.RefType != "ORDER" || got.Amount != 40 {
+		t.Fatalf("unexpected bootstrap order freeze request: %+v", got)
+	}
+	if got := account.freezeReq.RefID; got == "" || !strings.HasPrefix(got, "ord_bootstrap_") {
+		t.Fatalf("expected semantic bootstrap order ref id, got %+v", account.freezeReq)
+	}
+	if len(publisher.calls) != 3 {
+		t.Fatalf("expected 2 position events plus 1 order command, got %+v", publisher.calls)
 	}
 	firstEvent, ok := publisher.calls[0].Payload.(kafka.PositionChangedEvent)
 	if !ok {
@@ -1494,8 +1512,76 @@ func TestCreateFirstLiquidityIssuesPairedInventory(t *testing.T) {
 	if secondEvent.Outcome != "NO" || secondEvent.DeltaQuantity != 40 {
 		t.Fatalf("unexpected second position event: %+v", secondEvent)
 	}
+	command, ok := publisher.calls[2].Payload.(kafka.OrderCommand)
+	if !ok {
+		t.Fatalf("expected third publish to be order command, got %#v", publisher.calls[2].Payload)
+	}
+	if command.OrderID != reqBody.BootstrapOrderID(88) || command.FreezeID != "frz_bootstrap_88" || command.FreezeAmount != 40 || command.Outcome != "YES" || command.Side != "SELL" {
+		t.Fatalf("unexpected first-liquidity bootstrap command: %+v", command)
+	}
 	if !strings.Contains(w.Body.String(), "\"status\":\"ISSUED\"") {
 		t.Fatalf("unexpected response body: %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "\"collateral_debit\":4000") {
+		t.Fatalf("expected response to expose 100x collateral debit, got %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "\"order_id\":\""+reqBody.BootstrapOrderID(88)+"\"") || !strings.Contains(w.Body.String(), "\"order_status\":\"QUEUED\"") {
+		t.Fatalf("expected response to expose queued bootstrap order, got %s", w.Body.String())
+	}
+}
+
+func TestCreateFirstLiquidityRejectsSemanticDuplicateBeforeInventoryMutation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	reqBody := dto.CreateFirstLiquidityRequest{
+		UserID:   1002,
+		Quantity: 40,
+		Outcome:  "YES",
+		Price:    55,
+	}
+	wallet := attachSignedFirstLiquidityOperator(t, 88, &reqBody)
+	orderID := reqBody.BootstrapOrderID(88)
+
+	account := &fakeAccountClient{}
+	publisher := &fakePublisher{}
+	handler := NewOrderHandler(Dependencies{
+		Logger:         slog.Default(),
+		KafkaPublisher: publisher,
+		KafkaTopics:    kafka.NewTopics("funnyoption."),
+		AccountClient:  account,
+		QueryStore: &fakeQueryStore{
+			getOrderResp: dto.OrderResponse{
+				OrderID:  orderID,
+				UserID:   1002,
+				MarketID: 88,
+				Outcome:  "YES",
+				Side:     "SELL",
+			},
+		},
+		OperatorWallets: []string{wallet},
+	})
+
+	raw, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/markets/88/first-liquidity", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Params = gin.Params{{Key: "market_id", Value: "88"}}
+	ctx.Request = req
+
+	handler.CreateFirstLiquidity(ctx)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "operator bootstrap order already accepted") || !strings.Contains(w.Body.String(), orderID) {
+		t.Fatalf("unexpected duplicate response body: %s", w.Body.String())
+	}
+	if len(account.debits) != 0 || len(account.credits) != 0 || account.preFreezeCalled {
+		t.Fatalf("expected duplicate first-liquidity request to stop before balance mutations, got debits=%+v credits=%+v preFreezeCalled=%v", account.debits, account.credits, account.preFreezeCalled)
+	}
+	if len(publisher.calls) != 0 {
+		t.Fatalf("expected duplicate first-liquidity request to publish nothing, got %+v", publisher.calls)
 	}
 }
 
@@ -1554,13 +1640,16 @@ func TestCreateFirstLiquidityRollsBackWhenPublishFails(t *testing.T) {
 	if len(account.debits) != 2 {
 		t.Fatalf("expected collateral debit plus rollback debit, got %+v", account.debits)
 	}
+	if got := account.debits[0]; got.RefType != "FIRST_LIQUIDITY_COLLATERAL" || got.Asset != "USDT" || got.Amount != 4000 {
+		t.Fatalf("unexpected collateral debit before rollback: %+v", got)
+	}
 	if got := account.debits[1]; got.RefType != "FIRST_LIQUIDITY_POSITION_ROLLBACK" || got.Asset != "POSITION:99:YES" {
 		t.Fatalf("unexpected rollback debit: %+v", got)
 	}
 	if len(account.credits) != 2 {
 		t.Fatalf("expected initial inventory credit plus collateral rollback credit, got %+v", account.credits)
 	}
-	if got := account.credits[1]; got.RefType != "FIRST_LIQUIDITY_COLLATERAL_ROLLBACK" || got.Asset != "USDT" {
+	if got := account.credits[1]; got.RefType != "FIRST_LIQUIDITY_COLLATERAL_ROLLBACK" || got.Asset != "USDT" || got.Amount != 4000 {
 		t.Fatalf("unexpected collateral rollback credit: %+v", got)
 	}
 	if len(publisher.calls) != 1 {

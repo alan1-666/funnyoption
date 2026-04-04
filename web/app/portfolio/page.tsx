@@ -1,26 +1,21 @@
 import { PortfolioShell } from "@/components/portfolio-shell";
-import { getBalances, getMarkets, getOrders, getPayouts, getPositions, getProfile } from "@/lib/api";
+import { getMarketsRead } from "@/lib/api";
 import styles from "@/app/portfolio/page.module.css";
 
 export default async function PortfolioPage() {
-  const [balances, positions, orders, payouts, markets, profile] = await Promise.all([
-    getBalances(),
-    getPositions(),
-    getOrders(),
-    getPayouts(),
-    getMarkets(),
-    getProfile()
-  ]);
+  const marketsResult = await getMarketsRead();
 
   return (
     <main className={styles.shell}>
       <PortfolioShell
-        balances={balances}
-        positions={positions}
-        orders={orders}
-        payouts={payouts}
-        markets={markets}
-        profile={profile}
+        balances={[]}
+        positions={[]}
+        orders={[]}
+        payouts={[]}
+        markets={marketsResult.items}
+        marketsUnavailable={marketsResult.state === "unavailable"}
+        marketsError={marketsResult.error?.message}
+        profile={null}
       />
     </main>
   );

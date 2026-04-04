@@ -7,11 +7,26 @@ import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { ShellTopBar } from "@/components/shell-top-bar";
 import { useTradingSession } from "@/components/trading-session-provider";
 import { UserAvatar } from "@/components/user-avatar";
-import { getProfile } from "@/lib/api";
+import {
+  getBalancesRead,
+  getOrdersRead,
+  getPayoutsRead,
+  getPositionsRead,
+  getProfileRead
+} from "@/lib/api";
 import { formatAssetAmount, formatTimestamp, formatToken } from "@/lib/format";
 import { presentMarketTitle } from "@/lib/market-display";
 import { zhGenericStatus, zhOutcome, zhSide } from "@/lib/locale";
-import type { Balance, Market, Order, Payout, Position, UserProfile } from "@/lib/types";
+import type {
+  ApiCollectionResult,
+  ApiItemResult,
+  Balance,
+  Market,
+  Order,
+  Payout,
+  Position,
+  UserProfile
+} from "@/lib/types";
 import styles from "@/components/portfolio-shell.module.css";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8080";
@@ -19,9 +34,10 @@ const COLLATERAL_SYMBOL = (process.env.NEXT_PUBLIC_COLLATERAL_SYMBOL ?? "USDT").
 
 type PortfolioTab = "positions" | "orders" | "history";
 
+const TERMINAL_ORDER_STATUSES = new Set(["FILLED", "CANCELLED", "FAILED", "COMPLETED", "REVOKED"]);
+
 function isOpenOrder(order: Order) {
-  const terminalStatuses = new Set(["FILLED", "CANCELLED", "FAILED", "COMPLETED", "REVOKED"]);
-  if (terminalStatuses.has(String(order.status).toUpperCase())) {
+  if (TERMINAL_ORDER_STATUSES.has(String(order.status).toUpperCase())) {
     return false;
   }
   return order.remaining_quantity > 0 || String(order.status).toUpperCase() === "QUEUED";
@@ -32,12 +48,35 @@ function buildMarketTitleMap(markets: Market[]) {
   return new Map(entries);
 }
 
+function toCollectionResult<T>(items: T[]): ApiCollectionResult<T> {
+  return {
+    state: items.length > 0 ? "ok" : "empty",
+    items
+  };
+}
+
+function toProfileResult(profile: UserProfile | null): ApiItemResult<UserProfile> {
+  if (!profile) {
+    return {
+      state: "not-found",
+      item: null
+    };
+  }
+
+  return {
+    state: "ok",
+    item: profile
+  };
+}
+
 export function PortfolioShell({
   balances,
   positions,
   orders,
   payouts,
   markets,
+  marketsUnavailable,
+  marketsError,
   profile
 }: {
   balances: Balance[];
@@ -45,6 +84,8 @@ export function PortfolioShell({
   orders: Order[];
   payouts: Payout[];
   markets: Market[];
+  marketsUnavailable?: boolean;
+  marketsError?: string;
   profile: UserProfile | null;
 }) {
   const { wallet, session, busy, connect, createSession } = useTradingSession();
@@ -52,22 +93,70 @@ export function PortfolioShell({
   const [query, setQuery] = useState("");
   const [pendingClaim, setPendingClaim] = useState<Record<string, boolean>>({});
   const [claimStatus, setClaimStatus] = useState<Record<string, string>>({});
-  const [profileState, setProfileState] = useState<UserProfile | null>(profile);
+  const [balancesResult, setBalancesResult] = useState<ApiCollectionResult<Balance>>(() => toCollectionResult(balances));
+  const [positionsResult, setPositionsResult] = useState<ApiCollectionResult<Position>>(() => toCollectionResult(positions));
+  const [ordersResult, setOrdersResult] = useState<ApiCollectionResult<Order>>(() => toCollectionResult(orders));
+  const [payoutsResult, setPayoutsResult] = useState<ApiCollectionResult<Payout>>(() => toCollectionResult(payouts));
+  const [profileResult, setProfileResult] = useState<ApiItemResult<UserProfile>>(() => toProfileResult(profile));
+  const [portfolioSyncing, setPortfolioSyncing] = useState(false);
   const [copiedWallet, setCopiedWallet] = useState(false);
   const [showWalletQr, setShowWalletQr] = useState(false);
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
 
+  const sessionUserId = session?.userId && session.userId > 0 ? session.userId : null;
   const titleMap = useMemo(() => buildMarketTitleMap(markets), [markets]);
-  const usdt = balances.find((item) => item.asset.toUpperCase() === COLLATERAL_SYMBOL);
-  const openOrders = orders.filter(isOpenOrder);
+  const accountBalances = balancesResult.items;
+  const accountPositions = positionsResult.items;
+  const accountOrders = ordersResult.items;
+  const accountPayouts = payoutsResult.items;
+  const usdt = accountBalances.find((item) => item.asset.toUpperCase() === COLLATERAL_SYMBOL);
+  const openOrders = accountOrders.filter(isOpenOrder);
   const currentWallet = wallet?.walletAddress ?? session?.walletAddress ?? "";
-  const profileWallet = currentWallet || profileState?.wallet_address || "";
+  const currentProfile = profileResult.item;
+  const profileWallet = currentWallet || currentProfile?.wallet_address || "";
   const activePayoutWallet = currentWallet || "";
-  const currentProfile = profileState;
+  const balanceDisplay =
+    sessionUserId && balancesResult.state !== "unavailable" && !portfolioSyncing
+      ? `${formatAssetAmount(usdt?.available ?? 0, COLLATERAL_SYMBOL)} ${COLLATERAL_SYMBOL}`
+      : sessionUserId
+        ? "余额同步中"
+        : wallet
+          ? "待授权"
+          : "未连接";
+  const cashValueDisplay =
+    sessionUserId && balancesResult.state !== "unavailable" && !portfolioSyncing
+      ? formatAssetAmount(usdt?.available ?? 0, COLLATERAL_SYMBOL)
+      : "—";
+  const cashAssetLabel =
+    sessionUserId && balancesResult.state !== "unavailable" && !portfolioSyncing
+      ? COLLATERAL_SYMBOL
+      : portfolioSyncing
+        ? "同步中"
+        : wallet
+          ? "待授权"
+          : "未连接";
+  const overviewStatusCopy = sessionUserId
+    ? portfolioSyncing
+      ? `正在同步 user #${sessionUserId} 的余额、持仓、订单和结算记录...`
+      : [
+          `当前展示 user #${sessionUserId} 的账户数据。`,
+          balancesResult.state === "unavailable"
+            ? balancesResult.error?.message ?? "余额接口暂不可用，请稍后刷新。"
+            : "",
+          profileResult.state === "unavailable"
+            ? profileResult.error?.message ?? "账户资料暂不可用，请稍后刷新。"
+            : "",
+          marketsUnavailable ? marketsError ?? "市场元数据暂不可用，列表标题将降级为市场编号。" : ""
+        ]
+          .filter(Boolean)
+          .join(" ")
+    : wallet
+      ? "钱包已连接，请先授权交易会话后查看当前账户资产。"
+      : "未连接钱包时不会读取任何用户账户集合，请先连接钱包。";
   const qrImageSrc = profileWallet
     ? `https://api.qrserver.com/v1/create-qr-code/?size=480x480&data=${encodeURIComponent(profileWallet)}`
     : "";
-  const filteredPositions = positions.filter((position) => {
+  const filteredPositions = accountPositions.filter((position) => {
     if (!deferredQuery) return true;
     const title = (titleMap.get(position.market_id) ?? "").toLowerCase();
     return title.includes(deferredQuery) || zhOutcome(position.outcome).includes(deferredQuery);
@@ -77,35 +166,59 @@ export function PortfolioShell({
     const title = (titleMap.get(order.market_id) ?? "").toLowerCase();
     return title.includes(deferredQuery) || zhOutcome(order.outcome).includes(deferredQuery) || zhSide(order.side).includes(deferredQuery);
   });
-  const filteredPayouts = payouts.filter((payout) => {
+  const filteredPayouts = accountPayouts.filter((payout) => {
     if (!deferredQuery) return true;
     const title = (titleMap.get(payout.market_id) ?? "").toLowerCase();
     return title.includes(deferredQuery) || zhOutcome(payout.winning_outcome).includes(deferredQuery);
   });
 
   useEffect(() => {
-    setProfileState(profile);
-  }, [profile]);
-
-  useEffect(() => {
-    if (!session?.userId) {
+    if (!sessionUserId) {
+      setPortfolioSyncing(false);
+      setBalancesResult(toCollectionResult([]));
+      setPositionsResult(toCollectionResult([]));
+      setOrdersResult(toCollectionResult([]));
+      setPayoutsResult(toCollectionResult([]));
+      setProfileResult(toProfileResult(null));
+      setPendingClaim({});
+      setClaimStatus({});
       return;
     }
 
     let cancelled = false;
-    getProfile(session.userId)
-      .then((nextProfile) => {
-        if (cancelled || !nextProfile) return;
-        setProfileState(nextProfile);
-      })
-      .catch(() => {
+    setPortfolioSyncing(true);
+    setBalancesResult(toCollectionResult([]));
+    setPositionsResult(toCollectionResult([]));
+    setOrdersResult(toCollectionResult([]));
+    setPayoutsResult(toCollectionResult([]));
+    setProfileResult(toProfileResult(null));
+    setPendingClaim({});
+    setClaimStatus({});
+
+    void Promise.all([
+      getBalancesRead(sessionUserId),
+      getPositionsRead(sessionUserId),
+      getOrdersRead(sessionUserId),
+      getPayoutsRead(sessionUserId),
+      getProfileRead(sessionUserId)
+    ])
+      .then(([nextBalances, nextPositions, nextOrders, nextPayouts, nextProfile]) => {
         if (cancelled) return;
+        setBalancesResult(nextBalances);
+        setPositionsResult(nextPositions);
+        setOrdersResult(nextOrders);
+        setPayoutsResult(nextPayouts);
+        setProfileResult(nextProfile);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setPortfolioSyncing(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [session?.userId]);
+  }, [sessionUserId]);
 
   useEffect(() => {
     if (!copiedWallet) {
@@ -144,8 +257,8 @@ export function PortfolioShell({
   }
 
   async function handleClaim(eventId: string) {
-    if (!activePayoutWallet) {
-      setClaimStatus((current) => ({ ...current, [eventId]: "请先连接钱包。" }));
+    if (!sessionUserId || !activePayoutWallet) {
+      setClaimStatus((current) => ({ ...current, [eventId]: "请先连接钱包并授权交易会话。" }));
       return;
     }
 
@@ -153,12 +266,11 @@ export function PortfolioShell({
     setClaimStatus((current) => ({ ...current, [eventId]: "正在提交领取请求…" }));
 
     try {
-      const payout = payouts.find((item) => item.event_id === eventId);
       const response = await fetch(`${API_BASE_URL}/api/v1/payouts/${eventId}/claim`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: session?.userId ?? payout?.user_id ?? 1001,
+          user_id: sessionUserId,
           wallet_address: activePayoutWallet,
           recipient_address: activePayoutWallet
         })
@@ -196,7 +308,7 @@ export function PortfolioShell({
       <ShellTopBar
         query={query}
         onQueryChange={setQuery}
-        balanceDisplay={`${formatAssetAmount(usdt?.available ?? 0, COLLATERAL_SYMBOL)} ${COLLATERAL_SYMBOL}`}
+        balanceDisplay={balanceDisplay}
         profile={currentProfile}
       />
 
@@ -229,8 +341,8 @@ export function PortfolioShell({
 
           <div className={styles.cashBody}>
             <div className={styles.cashTopline}>我的余额</div>
-            <div className={styles.cashValue}>{formatAssetAmount(usdt?.available ?? 0, COLLATERAL_SYMBOL)}</div>
-            <div className={styles.cashAsset}>{COLLATERAL_SYMBOL}</div>
+            <div className={styles.cashValue}>{cashValueDisplay}</div>
+            <div className={styles.cashAsset}>{cashAssetLabel}</div>
 
             <div className={styles.walletRail}>
               <button
@@ -289,17 +401,24 @@ export function PortfolioShell({
           <div className={styles.metricRow}>
             <div className={styles.metricBlock}>
               <span className={styles.metricLabel}>持仓</span>
-              <strong className={styles.metricValue}>{positions.length}</strong>
+              <strong className={styles.metricValue}>
+                {sessionUserId && !portfolioSyncing ? accountPositions.length : "—"}
+              </strong>
             </div>
             <div className={styles.metricBlock}>
               <span className={styles.metricLabel}>开的订单</span>
-              <strong className={styles.metricValue}>{openOrders.length}</strong>
+              <strong className={styles.metricValue}>
+                {sessionUserId && !portfolioSyncing ? openOrders.length : "—"}
+              </strong>
             </div>
             <div className={styles.metricBlock}>
               <span className={styles.metricLabel}>历史结算</span>
-              <strong className={styles.metricValue}>{payouts.length}</strong>
+              <strong className={styles.metricValue}>
+                {sessionUserId && !portfolioSyncing ? accountPayouts.length : "—"}
+              </strong>
             </div>
           </div>
+          <p className={styles.sideFoot}>{overviewStatusCopy}</p>
         </aside>
       </div>
 
@@ -327,7 +446,17 @@ export function PortfolioShell({
 
         <div className={styles.content}>
           {activeTab === "positions" ? (
-            filteredPositions.length > 0 ? (
+            !sessionUserId ? (
+              <div className={styles.empty}>
+                {wallet ? "钱包已连接，请先授权交易会话后查看持仓。" : "请先连接钱包并授权交易会话后查看持仓。"}
+              </div>
+            ) : portfolioSyncing ? (
+              <div className={styles.empty}>正在同步当前账户持仓...</div>
+            ) : positionsResult.state === "unavailable" ? (
+              <div className={styles.empty}>
+                {positionsResult.error?.message ?? "持仓数据暂不可用，请稍后刷新。"}
+              </div>
+            ) : filteredPositions.length > 0 ? (
               <div className={styles.list}>
                 {filteredPositions.map((position) => (
                   <Link
@@ -356,7 +485,17 @@ export function PortfolioShell({
           ) : null}
 
           {activeTab === "orders" ? (
-            filteredOpenOrders.length > 0 ? (
+            !sessionUserId ? (
+              <div className={styles.empty}>
+                {wallet ? "钱包已连接，请先授权交易会话后查看挂单。" : "请先连接钱包并授权交易会话后查看挂单。"}
+              </div>
+            ) : portfolioSyncing ? (
+              <div className={styles.empty}>正在同步当前账户订单...</div>
+            ) : ordersResult.state === "unavailable" ? (
+              <div className={styles.empty}>
+                {ordersResult.error?.message ?? "订单数据暂不可用，请稍后刷新。"}
+              </div>
+            ) : filteredOpenOrders.length > 0 ? (
               <div className={styles.list}>
                 {filteredOpenOrders.map((order) => (
                   <Link
@@ -385,7 +524,17 @@ export function PortfolioShell({
           ) : null}
 
           {activeTab === "history" ? (
-            filteredPayouts.length > 0 ? (
+            !sessionUserId ? (
+              <div className={styles.empty}>
+                {wallet ? "钱包已连接，请先授权交易会话后查看历史结算。" : "请先连接钱包并授权交易会话后查看历史结算。"}
+              </div>
+            ) : portfolioSyncing ? (
+              <div className={styles.empty}>正在同步当前账户结算记录...</div>
+            ) : payoutsResult.state === "unavailable" ? (
+              <div className={styles.empty}>
+                {payoutsResult.error?.message ?? "历史结算数据暂不可用，请稍后刷新。"}
+              </div>
+            ) : filteredPayouts.length > 0 ? (
               <div className={styles.list}>
                 {filteredPayouts.map((payout) => {
                   const completed = String(payout.status).toUpperCase() === "COMPLETED";

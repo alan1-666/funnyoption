@@ -577,3 +577,31 @@
 - next:
   - launch one worker on `TASK-OFFCHAIN-013`
   - launch one design worker on `TASK-CHAIN-005`
+
+### 2026-04-04 21:14 CST
+
+- read:
+  - user-stated Stark-style first-login / deposit flow
+  - `docs/architecture/direct-deposit-session-key.md`
+  - `TASK-OFFCHAIN-013.md`
+  - `HANDSHAKE-OFFCHAIN-013.md`
+- changed:
+  - created `TASK-OFFCHAIN-014` plus handshake/worklog as a design-first auth lane
+  - moved `TASK-OFFCHAIN-013` to blocked because it assumed the current
+    session-key trust model would remain unchanged
+  - updated `PLAN.md` and the active master plan so the new auth direction is
+    explicit in repo memory before any worker starts coding
+- validated:
+  - the user-requested flow is materially different from the current repo
+    baseline:
+    - current repo: wallet-authorized browser-generated session key
+    - requested direction: one MetaMask signature, then one browser-local
+      Stark-style trading key for later order signing
+  - direct-vault deposit flow still aligns with the current chain architecture,
+    so only the auth/trading-key contract needs a new design lane first
+- blockers:
+  - do not start the old `TASK-OFFCHAIN-013` implementation lane until
+    `TASK-OFFCHAIN-014` closes the auth contract
+- next:
+  - launch one design worker on `TASK-OFFCHAIN-014`
+  - keep `TASK-CHAIN-005` running in parallel as the oracle-settlement design lane

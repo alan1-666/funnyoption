@@ -21,3 +21,22 @@
   - none yet
 - next:
   - launch one worker on `TASK-OFFCHAIN-013`
+
+### 2026-04-04 21:14 CST
+
+- read:
+  - `docs/architecture/direct-deposit-session-key.md`
+  - user-stated target auth flow for Stark-style one-signature login
+- changed:
+  - commander moved this task from queued to blocked
+- validated:
+  - the requested auth direction is no longer a narrow UX improvement:
+    - current baseline = wallet-authorized browser-generated session key
+    - requested target = MetaMask one-time signature plus browser-local
+      Stark-style trading key for later order signing
+  - that architecture shift needs its own design lane before this implementation
+    task can safely start
+- blockers:
+  - `TASK-OFFCHAIN-014` must first close the new trading-key auth contract
+- next:
+  - resume only after the auth architecture is explicit

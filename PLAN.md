@@ -14,6 +14,7 @@ Detailed execution lives in `docs/harness/plans/active/`.
 - Portfolio connected-user read task: [`docs/harness/tasks/TASK-OFFCHAIN-011.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-OFFCHAIN-011.md)
 - Local lifecycle wrapper alignment task: [`docs/harness/tasks/TASK-OFFCHAIN-012.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-OFFCHAIN-012.md)
 - Wallet session UX optimization task: [`docs/harness/tasks/TASK-OFFCHAIN-013.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-OFFCHAIN-013.md)
+- Stark-style trading key auth design task: [`docs/harness/tasks/TASK-OFFCHAIN-014.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-OFFCHAIN-014.md)
 - GitHub CI/CD optimization task: [`docs/harness/tasks/TASK-CICD-003.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CICD-003.md)
 - Thin-trigger CI/CD simplification task: [`docs/harness/tasks/TASK-CICD-004.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CICD-004.md)
 - Oracle-settled crypto market design task: [`docs/harness/tasks/TASK-CHAIN-005.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-005.md)
@@ -62,6 +63,7 @@ Detailed execution lives in `docs/harness/plans/active/`.
 - Admin/operator backend: dedicated admin service is converged and core privileged market mutations are now protected at the shared API boundary
 - API service hardening: modular routing, middleware layering, rate limiting, bare-`user_id` fallback removal, same-proof bootstrap replay protection, and bootstrap semantic uniqueness are now in place
 - Next worker focus:
-  - `TASK-OFFCHAIN-013` can start immediately as the next implementation lane for wallet-signed session login / restore UX
+  - `TASK-OFFCHAIN-014` is now the auth-first design lane because the requested Stark-style UX changes the current session-key architecture itself
   - `TASK-CHAIN-005` should run in parallel as a design-first lane for oracle-settled crypto markets, so the auto-resolution implementation follows one explicit metadata / evidence / resolver contract instead of widening ad hoc
+  - `TASK-OFFCHAIN-013` is paused behind `TASK-OFFCHAIN-014`; only resume it after the trading-key model is explicitly re-decided
 - Chain hardening: listener-driven local deposit proof is in place, and legacy local `chain_deposits` schema drift now has a documented repair path plus repair migration

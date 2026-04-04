@@ -44,6 +44,9 @@
   - weaker nonce / replay protection
   - server-side storage of session private keys
   - deriving a trading key from the wallet signature
+- this task is now blocked behind `TASK-OFFCHAIN-014` because the product auth
+  direction changed from “current session-key UX optimization” to a larger
+  Stark-style trading-key architecture discussion
 
 ## Outputs back to commander
 
@@ -60,7 +63,11 @@
 - do not widen into admin/operator wallet auth unless a shared helper requires a
   narrow consistency fix
 - do not touch unrelated order-matching or settlement logic
+- blocked pending `TASK-OFFCHAIN-014`:
+  - do not start implementation until the auth contract is re-decided
+  - if Stark-style trading keys are adopted, this task will be resliced against
+    the new baseline instead of the current ed25519-style session model
 
 ## Status
 
-- queued
+- blocked

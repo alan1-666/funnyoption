@@ -1,0 +1,64 @@
+# HANDSHAKE-CHAIN-005
+
+## Task
+
+- [TASK-CHAIN-005.md](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-005.md)
+
+## Thread owner
+
+- chain/design worker
+
+## Reads before coding
+
+- `AGENTS.md`
+- `PLAN.md`
+- `roles/WORKER.md`
+- `PROJECT_MAP.md`
+- `THREAD_PROTOCOL.md`
+- `docs/architecture/direct-deposit-session-key.md`
+- `docs/architecture/order-flow.md`
+- `docs/architecture/market-taxonomy-and-options.md`
+- `docs/sql/schema.md`
+- `admin/components/market-studio.tsx`
+- `admin/app/api/operator/markets/route.ts`
+- `internal/api/handler/sql_store.go`
+- `internal/settlement/service/processor.go`
+- this handshake
+- `WORKLOG-CHAIN-005.md`
+
+## Files in scope
+
+- `docs/architecture/**`
+- `docs/sql/**`
+- `docs/harness/handshakes/HANDSHAKE-CHAIN-005.md`
+- `docs/harness/worklogs/WORKLOG-CHAIN-005.md`
+- optional narrow DTO / schema placeholders only if they directly support the
+  design handoff
+
+## Inputs from other threads
+
+- current crypto markets are still operator-resolved manually
+- user now wants crypto-class markets that can auto-settle from an external
+  price source
+- commander wants this lane to stay design-first so the implementation does not
+  widen across admin, API, settlement, and chain services without one explicit
+  contract
+
+## Outputs back to commander
+
+- changed files
+- final metadata / evidence / resolver contract
+- recommended follow-up implementation slice
+- residual risks and rejected options
+
+## Blockers
+
+- keep manual operator resolve as the fallback / override lane
+- do not widen into a full runtime oracle fetcher in this task unless the
+  design is already explicit and the change stays narrow
+- do not break current market creation / settlement semantics for non-oracle
+  markets
+
+## Status
+
+- queued

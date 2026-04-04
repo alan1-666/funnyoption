@@ -166,3 +166,27 @@
   - local macOS proof still needed a temporary `flock` shim because the host environment here does not ship a system `flock`; the production Linux host still requires a real `flock` binary
 - next:
   - hand back the symbolic-ref fix, updated resolution rule, and fresh proofs so commander can close `TASK-CICD-004`
+
+### 2026-04-04 21:10 CST
+
+- read:
+  - GitHub Actions failure output for missing `/usr/local/bin/funnyoption-staging-deploy`
+  - current server checkout state at `/opt/funnyoption-staging`
+- changed:
+  - no repo-code change; completed the one-time host install / rollout step that
+    the docs already required
+- validated:
+  - staging host `76.13.220.236` was still on `HEAD=125f9cd`, so
+    `deploy/staging/server-deploy-entrypoint.sh` was not yet present there
+  - installed flow executed manually:
+    - `git fetch --prune origin`
+    - `git checkout --detach d7a79c177beec77e0a43f95ca69adc3242905ff4`
+    - `install -m 0755 deploy/staging/server-deploy-entrypoint.sh /usr/local/bin/funnyoption-staging-deploy`
+    - `install -o root -g root -m 0664 /dev/null /var/lock/funnyoption-staging-deploy.lock`
+    - `/usr/local/bin/funnyoption-staging-deploy --repo /opt/funnyoption-staging --ref d7a79c177beec77e0a43f95ca69adc3242905ff4`
+  - host deploy completed successfully and printed `no staging service changes detected; skipping compose deploy`
+- blockers:
+  - none remaining for future pushes; the missing piece was the first host-side
+    install of the fixed entrypoint
+- next:
+  - future GitHub Actions runs can call the installed host entrypoint directly

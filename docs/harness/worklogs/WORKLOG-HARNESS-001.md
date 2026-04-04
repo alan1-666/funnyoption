@@ -548,3 +548,32 @@
   - no blocker remains for `TASK-CICD-004`
 - next:
   - no mandatory worker launch; remaining follow-ups are optional operational polish only
+
+### 2026-04-04 21:10 CST
+
+- read:
+  - GitHub Actions failure output for missing `/usr/local/bin/funnyoption-staging-deploy`
+  - `web/lib/session-client.ts`
+  - `web/components/trading-session-provider.tsx`
+  - `docs/architecture/direct-deposit-session-key.md`
+  - `admin/components/market-studio.tsx`
+  - `internal/settlement/service/processor.go`
+- changed:
+  - completed the one-time host install step for the fixed staging deploy entrypoint on `76.13.220.236`
+  - created `TASK-OFFCHAIN-013` plus handshake/worklog for wallet-signed session login / restore UX optimization
+  - created `TASK-CHAIN-005` plus handshake/worklog for design-first oracle-settled crypto markets
+  - updated `PLAN.md` and the active master plan with the next two product lanes
+- validated:
+  - server rollout fix:
+    - `/opt/funnyoption-staging` was manually advanced to `d7a79c177beec77e0a43f95ca69adc3242905ff4`
+    - `/usr/local/bin/funnyoption-staging-deploy` is now installed
+    - the host entrypoint completed successfully for the pushed commit
+  - next product lanes are now explicit in repo memory:
+    - wallet session UX can start immediately as an implementation task
+    - oracle auto-settlement remains design-first before runtime implementation
+- blockers:
+  - no blocker remains for the staging deploy lane
+  - no new blocker yet for the two new product lanes
+- next:
+  - launch one worker on `TASK-OFFCHAIN-013`
+  - launch one design worker on `TASK-CHAIN-005`

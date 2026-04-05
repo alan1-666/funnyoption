@@ -8,6 +8,11 @@
     rgba(13, 13, 14, 0.96);
 }
 
+.panelEmbedded {
+  display: grid;
+  gap: 18px;
+}
+
 .header {
   display: flex;
   justify-content: space-between;

@@ -18,6 +18,7 @@ Detailed execution lives in `docs/harness/plans/active/`.
 - Trading-key registration first-slice implementation task: [`docs/harness/tasks/TASK-OFFCHAIN-015.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-OFFCHAIN-015.md)
 - Vault-scoped trading-key durability follow-up task: [`docs/harness/tasks/TASK-OFFCHAIN-016.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-OFFCHAIN-016.md)
 - Market detail order visibility and lifecycle closeout task: [`docs/harness/tasks/TASK-OFFCHAIN-018.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-OFFCHAIN-018.md)
+- Worm-inspired market detail redesign task: [`docs/harness/tasks/TASK-OFFCHAIN-019.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-OFFCHAIN-019.md)
 - GitHub CI/CD optimization task: [`docs/harness/tasks/TASK-CICD-003.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CICD-003.md)
 - Thin-trigger CI/CD simplification task: [`docs/harness/tasks/TASK-CICD-004.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CICD-004.md)
 - API module-boundary cleanup task: [`docs/harness/tasks/TASK-API-006.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-API-006.md)

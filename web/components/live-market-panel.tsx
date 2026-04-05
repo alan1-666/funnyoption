@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { MarketOrderActivity } from "@/components/market-order-activity";
 import { createWsUrl } from "@/lib/ws";
 import { formatAssetAmount, formatClockTimestamp, formatTimestamp, formatToken } from "@/lib/format";
 import { presentMarketDescription } from "@/lib/market-display";
@@ -73,7 +74,7 @@ interface SideState {
   candles: QuoteCandle[];
 }
 
-type DetailTab = "results" | "activity" | "rules";
+type DetailTab = "results" | "orders" | "activity" | "rules";
 type RangeKey = "1H" | "6H" | "1D" | "ALL";
 
 const RANGE_OPTIONS: Array<{ key: RangeKey; label: string }> = [
@@ -258,7 +259,7 @@ function buildChartModel(yesCandles: QuoteCandle[], noCandles: QuoteCandle[]) {
 }
 
 export function LiveMarketPanel({ market, trades }: { market: Market; trades: Trade[] }) {
-  const [activeTab, setActiveTab] = useState<DetailTab>("results");
+  const [activeTab, setActiveTab] = useState<DetailTab>("orders");
   const [activeRange, setActiveRange] = useState<RangeKey>("1D");
   const [sides, setSides] = useState<Record<"YES" | "NO", SideState>>(() => ({
     YES: {
@@ -357,8 +358,8 @@ export function LiveMarketPanel({ market, trades }: { market: Market; trades: Tr
     <section className={`panel ${styles.panel}`}>
       <div className={styles.header}>
         <div className={styles.headerIntro}>
-          <span className="eyebrow">市场走势</span>
-          <p className={styles.copy}>用一张大图表直接看 yes / no 的走势，下方再切结果、活动和规则，不再拆成很多说明块。</p>
+          <span className="eyebrow">市场详情</span>
+          <p className={styles.copy}>把走势、你的订单、活动和规则收在一块连续阅读，不再像以前那样拆成很多松散的小卡片。</p>
         </div>
         <span className="pill">{status}</span>
       </div>
@@ -368,11 +369,11 @@ export function LiveMarketPanel({ market, trades }: { market: Market; trades: Tr
           <div className={styles.legend}>
             <button className={`${styles.legendChip} ${styles.legendChipYes}`}>
               <span>{zhOutcome("YES")}</span>
-              <strong>{yesPrice}%</strong>
+              <strong>{yesPrice}¢</strong>
             </button>
             <button className={styles.legendChip}>
               <span>{zhOutcome("NO")}</span>
-              <strong>{noPrice}%</strong>
+              <strong>{noPrice}¢</strong>
             </button>
           </div>
           <div className={styles.marketMeta}>
@@ -433,7 +434,10 @@ export function LiveMarketPanel({ market, trades }: { market: Market; trades: Tr
       <section className={styles.detailPanel}>
         <div className={styles.tabBar}>
           <button className={activeTab === "results" ? styles.tabActive : styles.tabButton} onClick={() => setActiveTab("results")}>
-            结果
+            盘口
+          </button>
+          <button className={activeTab === "orders" ? styles.tabActive : styles.tabButton} onClick={() => setActiveTab("orders")}>
+            我的订单
           </button>
           <button className={activeTab === "activity" ? styles.tabActive : styles.tabButton} onClick={() => setActiveTab("activity")}>
             活动
@@ -468,6 +472,8 @@ export function LiveMarketPanel({ market, trades }: { market: Market; trades: Tr
             )}
           </div>
         ) : null}
+
+        {activeTab === "orders" ? <MarketOrderActivity marketId={market.market_id} embedded /> : null}
 
         {activeTab === "activity" ? (
           <div className={styles.activityList}>

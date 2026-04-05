@@ -1,142 +1,115 @@
-.chrome {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 18px;
-}
-
-.brandLink {
-  display: inline-flex;
-  align-items: center;
-  min-height: 42px;
-  padding: 0 16px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
-  color: rgba(255, 255, 255, 0.92);
-  font-size: 0.95rem;
-  font-weight: 600;
-  letter-spacing: -0.03em;
-}
-
-.chromeLinks {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.chromeLink {
-  display: inline-flex;
-  align-items: center;
-  min-height: 42px;
-  padding: 0 15px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.02);
-  color: rgba(255, 255, 255, 0.68);
-  transition: color 0.22s ease, border-color 0.22s ease;
-}
-
-.chromeLink:hover {
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.16);
-}
-
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 386px;
-  gap: 24px;
+  grid-template-columns: minmax(0, 1fr) 368px;
+  gap: 26px;
   align-items: start;
 }
 
 .main,
 .sidebar {
   display: grid;
-  gap: 20px;
+  gap: 22px;
 }
 
 .sidebar {
   position: sticky;
-  top: 22px;
+  top: 20px;
 }
 
 .hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.86fr);
-  gap: 22px;
-  padding: 22px;
-  border-radius: 32px;
+  position: relative;
+  overflow: hidden;
+  padding: 28px;
+  border-radius: 34px;
   background:
-    radial-gradient(circle at 86% 18%, rgba(107, 220, 255, 0.1), transparent 24%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.01)),
-    rgba(12, 12, 13, 0.96);
+    radial-gradient(circle at 10% 10%, rgba(87, 116, 255, 0.16), transparent 30%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.022), rgba(255, 255, 255, 0.01)),
+    rgba(8, 8, 10, 0.98);
 }
 
-.heroCopy {
+.heroBackdrop {
+  position: absolute;
+  inset: 0;
+}
+
+.heroContent {
+  position: relative;
+  z-index: 1;
   display: grid;
-  gap: 14px;
+  gap: 22px;
+}
+
+.heroGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(340px, 0.92fr);
+  gap: 24px;
+  align-items: end;
+}
+
+.heroStory {
+  display: grid;
+  gap: 20px;
   min-width: 0;
 }
 
 .heroPills {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
 }
 
 .heroHeading {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .title {
   margin: 0;
-  max-width: 16ch;
-  font-size: clamp(2.2rem, 4.2vw, 3.7rem);
-  line-height: 0.98;
+  max-width: 14ch;
+  font-size: clamp(2.5rem, 4.6vw, 4.3rem);
+  line-height: 0.94;
   letter-spacing: -0.06em;
   font-weight: 600;
 }
 
 .copy {
   margin: 0;
-  max-width: 58ch;
-  color: rgba(255, 255, 255, 0.62);
-  font-size: 1rem;
-  line-height: 1.7;
+  max-width: 62ch;
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 1.02rem;
+  line-height: 1.72;
 }
 
-.sideMetrics > div,
-.block {
+.metricStrip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metricCard {
+  display: grid;
+  gap: 8px;
+  padding: 18px 18px 16px;
+  border-radius: 22px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.024);
+  background: rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(16px);
 }
 
-.label,
-.mediaLabel {
+.metricLabel,
+.contextLabel,
+.timelineLabel {
   color: rgba(255, 255, 255, 0.5);
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.heroMediaMeta strong,
-.sideMetrics strong {
+.metricCard strong,
+.timelineList strong {
   color: #ffffff;
   font-size: 1rem;
   line-height: 1.2;
-}
-
-.heroMedia {
-  position: relative;
-  overflow: hidden;
-  min-height: 100%;
-  border-radius: 30px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background:
-    radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.08), transparent 24%),
-    linear-gradient(160deg, rgba(16, 16, 18, 0.98), rgba(10, 10, 11, 0.98));
 }
 
 .heroImage,
@@ -149,6 +122,7 @@
 .heroImage {
   display: block;
   object-fit: cover;
+  opacity: 0.88;
 }
 
 .heroFallback {
@@ -173,28 +147,119 @@
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(180deg, rgba(8, 8, 9, 0.05), rgba(8, 8, 9, 0.52) 64%, rgba(8, 8, 9, 0.94)),
-    linear-gradient(90deg, rgba(8, 8, 9, 0.46), transparent 38%);
+    linear-gradient(180deg, rgba(8, 8, 9, 0.18), rgba(8, 8, 9, 0.68) 54%, rgba(8, 8, 9, 0.96)),
+    linear-gradient(90deg, rgba(8, 8, 9, 0.86), rgba(8, 8, 9, 0.28) 44%, rgba(8, 8, 9, 0.72));
 }
 
-.heroMediaMeta {
-  position: absolute;
-  left: 18px;
-  right: 18px;
-  bottom: 18px;
+.contextCard {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  padding: 22px;
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(18px);
+}
+
+.contextHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.contextTitle {
+  margin: 8px 0 0;
+  max-width: 22ch;
+  font-size: 1.2rem;
+  line-height: 1.2;
+  letter-spacing: -0.04em;
+}
+
+.contextStatus {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.outcomeArena {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.outcomeCard {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.026), rgba(255, 255, 255, 0.01)),
+    rgba(255, 255, 255, 0.03);
+}
+
+.outcomeRole {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.outcomeCard strong {
+  color: #ffffff;
+  font-size: 1.2rem;
+  line-height: 1.1;
+}
+
+.outcomePrice {
+  color: #ffffff;
+  font-size: 2.5rem;
+  line-height: 0.95;
+  letter-spacing: -0.06em;
+  font-weight: 700;
+}
+
+.outcomeDivider {
+  display: grid;
+  justify-items: center;
+  align-content: center;
   gap: 12px;
 }
 
-.heroMediaMeta > div {
-  display: grid;
-  gap: 6px;
-  padding: 12px 14px;
-  border-radius: 18px;
-  background: rgba(0, 0, 0, 0.34);
+.outcomeDividerBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(14px);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.timelineList {
+  display: grid;
+  gap: 10px;
+  min-width: 154px;
+}
+
+.timelineList > div {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
 }
 
 .liveWrap {
@@ -206,6 +271,8 @@
   gap: 14px;
   padding: 24px;
   border-radius: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.024);
 }
 
 .blockHeader {
@@ -228,35 +295,6 @@
   line-height: 1.7;
 }
 
-.sidePanel {
-  display: grid;
-  gap: 16px;
-  padding: 20px;
-  border-radius: 30px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.01)),
-    rgba(13, 13, 14, 0.96);
-}
-
-.sidePanelHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-}
-
-.sideMetrics {
-  display: grid;
-  gap: 10px;
-}
-
-.sideMetrics > div {
-  display: grid;
-  gap: 7px;
-  padding: 14px 15px;
-  border-radius: 20px;
-}
-
 @media (max-width: 1360px) {
   .layout {
     grid-template-columns: 1fr;
@@ -268,39 +306,36 @@
 }
 
 @media (max-width: 1100px) {
-  .hero {
+  .heroGrid,
+  .outcomeArena,
+  .metricStrip {
     grid-template-columns: 1fr;
   }
 
-  .heroMedia {
-    min-height: 280px;
+  .outcomeDivider {
+    justify-items: stretch;
+  }
+
+  .timelineList {
+    min-width: 0;
   }
 }
 
 @media (max-width: 780px) {
-  .chrome {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .chromeLinks {
-    flex-wrap: wrap;
-  }
-
   .hero,
-  .block,
-  .sidePanel {
+  .block {
     padding: 18px;
     border-radius: 24px;
-  }
-
-  .statsGrid,
-  .heroMediaMeta {
-    grid-template-columns: 1fr;
   }
 
   .title {
     max-width: none;
     font-size: clamp(1.9rem, 8vw, 2.8rem);
+  }
+
+  .contextCard,
+  .metricCard,
+  .outcomeCard {
+    border-radius: 22px;
   }
 }

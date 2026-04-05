@@ -1,79 +1,41 @@
 .ticket {
   display: grid;
   gap: 14px;
-  padding: 16px;
+  padding: 18px;
   border-radius: 32px;
   background:
+    radial-gradient(circle at top, rgba(92, 115, 255, 0.14), transparent 36%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.012)),
-    rgba(14, 14, 15, 0.97);
+    rgba(10, 10, 12, 0.98);
 }
 
-.marketHead {
-  display: grid;
-  grid-template-columns: 54px minmax(0, 1fr);
-  gap: 14px;
-  align-items: center;
-}
-
-.marketThumb,
-.marketThumbFallback {
-  width: 54px;
-  height: 54px;
-  border-radius: 16px;
-}
-
-.marketThumb {
-  display: block;
-  object-fit: cover;
-}
-
-.marketThumbFallback {
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.68);
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-
-.marketMeta {
-  display: grid;
-  gap: 6px;
-}
-
-.marketTopline {
+.railHeader {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
 }
 
-.marketDate {
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 0.84rem;
+.railTitle {
+  margin: 10px 0 0;
+  max-width: 20ch;
+  color: #ffffff;
+  font-size: 1.08rem;
+  line-height: 1.28;
+  letter-spacing: -0.04em;
 }
 
 .marketState {
   display: inline-flex;
   align-items: center;
-  min-height: 26px;
-  padding: 0 10px;
+  min-height: 30px;
+  padding: 0 12px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 0.76rem;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.78rem;
   letter-spacing: 0.04em;
-}
-
-.marketTitle {
-  color: #ffffff;
-  font-size: 1.04rem;
-  line-height: 1.28;
-  letter-spacing: -0.04em;
-  font-weight: 600;
 }
 
 .outcomeSwitch {
@@ -107,8 +69,14 @@
   color: #ffffff;
 }
 
+.selectionBanner {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.selectionBanner > div,
 .controlCard,
-.summaryCard,
 .advancedCard {
   display: grid;
   gap: 12px;
@@ -118,6 +86,18 @@
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.022), rgba(255, 255, 255, 0.01)),
     rgba(255, 255, 255, 0.018);
+}
+
+.selectionBanner span {
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+}
+
+.selectionBanner strong {
+  color: #ffffff;
+  font-size: 1rem;
+  line-height: 1.2;
 }
 
 .cardHeader {
@@ -268,24 +248,6 @@
   line-height: 1.3;
 }
 
-.summaryCard {
-  gap: 10px;
-}
-
-.summaryRow {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  color: rgba(255, 255, 255, 0.58);
-  font-size: 0.95rem;
-}
-
-.summaryRow strong {
-  color: #ffffff;
-  font-size: 0.98rem;
-  text-align: right;
-}
-
 .advancedCard {
   grid-template-columns: 1fr auto;
   align-items: center;
@@ -336,11 +298,11 @@
 @media (max-width: 640px) {
   .ticket,
   .controlCard,
-  .summaryCard,
   .advancedCard {
     border-radius: 24px;
   }
 
+  .selectionBanner,
   .inputRow,
   .inlineSummary,
   .presetRow {

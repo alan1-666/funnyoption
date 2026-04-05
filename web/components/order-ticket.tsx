@@ -3,8 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { useTradingSession } from "@/components/trading-session-provider";
-import { formatAssetAmount, formatHeadlineTimestamp, formatTimestamp, formatToken } from "@/lib/format";
-import { presentMarketTitle } from "@/lib/market-display";
+import { formatAssetAmount, formatToken } from "@/lib/format";
 import { zhMarketStatus, zhOutcome } from "@/lib/locale";
 import type { Market } from "@/lib/types";
 import styles from "@/components/order-ticket.module.css";
@@ -20,12 +19,6 @@ function readOutcomePrice(market: Market, outcome: "YES" | "NO") {
   return Math.round(Number(metadata.noOdds ?? (market.runtime.last_price_no ? market.runtime.last_price_no / 100 : 0.5)) * 100);
 }
 
-function readCoverImage(market: Market) {
-  const metadata = market.metadata ?? {};
-  const raw = metadata.coverImage ?? metadata.coverImageUrl ?? metadata.cover_image_url;
-  return typeof raw === "string" ? raw : "";
-}
-
 export function OrderTicket({ market }: { market: Market }) {
   const { wallet, session, connect, createSession, signOrder, commitOrderNonce, statusMessage } = useTradingSession();
   const [side, setSide] = useState<"BUY_YES" | "BUY_NO">("BUY_YES");
@@ -36,8 +29,6 @@ export function OrderTicket({ market }: { market: Market }) {
   const outcome = side === "BUY_YES" ? "YES" : "NO";
   const yesPrice = readOutcomePrice(market, "YES");
   const noPrice = readOutcomePrice(market, "NO");
-  const coverImage = readCoverImage(market);
-  const displayTitle = presentMarketTitle(market);
   const freeze = useMemo(() => Math.max(price, 0) * Math.max(quantity, 0), [price, quantity]);
   const normalizedMarketStatus = String(market.status).toUpperCase();
   const marketTradable = normalizedMarketStatus === "OPEN";
@@ -53,6 +44,7 @@ export function OrderTicket({ market }: { market: Market }) {
         ? statusMessage || "钱包已连接，等待交易授权。"
         : "连接钱包后即可开始下单。");
   const accessState = session ? "已开启" : wallet ? "等待授权" : "未连接";
+  const selectedPercent = outcome === "YES" ? yesPrice : noPrice;
 
   async function handleSubmit() {
     try {
@@ -148,19 +140,12 @@ export function OrderTicket({ market }: { market: Market }) {
 
   return (
     <div className={`panel ${styles.ticket}`}>
-      <div className={styles.marketHead}>
-        {coverImage ? (
-          <img className={styles.marketThumb} src={coverImage} alt={displayTitle} loading="lazy" />
-        ) : (
-          <div className={styles.marketThumbFallback}>{market.collateral_asset}</div>
-        )}
-        <div className={styles.marketMeta}>
-          <div className={styles.marketTopline}>
-            <span className={styles.marketDate}>{formatHeadlineTimestamp(market.close_at)}</span>
-            <span className={styles.marketState}>{zhMarketStatus(market.status)}</span>
-          </div>
-          <strong className={styles.marketTitle}>{displayTitle}</strong>
+      <div className={styles.railHeader}>
+        <div>
+          <span className="eyebrow">交易面板</span>
+          <h2 className={styles.railTitle}>把下单动作收紧到右侧一条 rail，信息不再和主内容互相抢。</h2>
         </div>
+        <span className={styles.marketState}>{zhMarketStatus(market.status)}</span>
       </div>
 
       <div className={styles.outcomeSwitch}>
@@ -184,6 +169,17 @@ export function OrderTicket({ market }: { market: Market }) {
           <span>{zhOutcome("NO")}</span>
           <strong>{noPrice}¢</strong>
         </button>
+      </div>
+
+      <div className={styles.selectionBanner}>
+        <div>
+          <span>当前方向</span>
+          <strong>{side === "BUY_YES" ? "买入 是" : "买入 否"}</strong>
+        </div>
+        <div>
+          <span>参考价格</span>
+          <strong>{selectedPercent}¢</strong>
+        </div>
       </div>
 
       <section className={styles.controlCard}>
@@ -256,25 +252,6 @@ export function OrderTicket({ market }: { market: Market }) {
             <span>交易权限</span>
             <strong>{accessState}</strong>
           </div>
-        </div>
-      </section>
-
-      <section className={styles.summaryCard}>
-        <div className={styles.summaryRow}>
-          <span>当前方向</span>
-          <strong>{side === "BUY_YES" ? "买入 是" : "买入 否"}</strong>
-        </div>
-        <div className={styles.summaryRow}>
-          <span>成交价格</span>
-          <strong>{price}¢</strong>
-        </div>
-        <div className={styles.summaryRow}>
-          <span>成交份额</span>
-          <strong>{formatToken(quantity, 0)} 份</strong>
-        </div>
-        <div className={styles.summaryRow}>
-          <span>截止时间</span>
-          <strong>{formatTimestamp(market.close_at)}</strong>
         </div>
       </section>
 

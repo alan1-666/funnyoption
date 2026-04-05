@@ -71,7 +71,7 @@ interface SubmittedOrderEventDetail {
   marketId?: number;
 }
 
-export function MarketOrderActivity({ marketId }: { marketId: number }) {
+export function MarketOrderActivity({ marketId, embedded = false }: { marketId: number; embedded?: boolean }) {
   const { wallet, session } = useTradingSession();
   const sessionUserId = session?.userId && session.userId > 0 ? session.userId : null;
   const [ordersResult, setOrdersResult] = useState<ApiCollectionResult<Order>>(() => emptyOrdersResult());
@@ -129,7 +129,7 @@ export function MarketOrderActivity({ marketId }: { marketId: number }) {
 
   if (!wallet) {
     return (
-      <section className={`panel ${styles.panel}`}>
+      <section className={embedded ? styles.panelEmbedded : `panel ${styles.panel}`}>
         <div className={styles.header}>
           <div>
             <span className="eyebrow">我的订单</span>
@@ -142,7 +142,7 @@ export function MarketOrderActivity({ marketId }: { marketId: number }) {
 
   if (!sessionUserId) {
     return (
-      <section className={`panel ${styles.panel}`}>
+      <section className={embedded ? styles.panelEmbedded : `panel ${styles.panel}`}>
         <div className={styles.header}>
           <div>
             <span className="eyebrow">我的订单</span>
@@ -154,7 +154,7 @@ export function MarketOrderActivity({ marketId }: { marketId: number }) {
   }
 
   return (
-    <section className={`panel ${styles.panel}`}>
+    <section className={embedded ? styles.panelEmbedded : `panel ${styles.panel}`}>
       <div className={styles.header}>
         <div>
           <span className="eyebrow">我的订单</span>

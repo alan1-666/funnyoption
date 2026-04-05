@@ -359,7 +359,6 @@ export function LiveMarketPanel({ market, trades }: { market: Market; trades: Tr
       <div className={styles.header}>
         <div className={styles.headerIntro}>
           <span className="eyebrow">市场详情</span>
-          <p className={styles.copy}>把走势、你的订单、活动和规则收在一块连续阅读，不再像以前那样拆成很多松散的小卡片。</p>
         </div>
         <span className="pill">{status}</span>
       </div>

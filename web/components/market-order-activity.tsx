@@ -133,7 +133,7 @@ export function MarketOrderActivity({ marketId, embedded = false }: { marketId: 
         <div className={styles.header}>
           <div>
             <span className="eyebrow">我的订单</span>
-            <h2 className={styles.title}>连接钱包后，这里会显示你的挂单和成交状态。</h2>
+            <h2 className={styles.title}>连接钱包后查看订单</h2>
           </div>
         </div>
       </section>
@@ -146,7 +146,7 @@ export function MarketOrderActivity({ marketId, embedded = false }: { marketId: 
         <div className={styles.header}>
           <div>
             <span className="eyebrow">我的订单</span>
-            <h2 className={styles.title}>完成交易授权后，就能在这里看到是否挂单、是否部分成交、以及最终结果。</h2>
+            <h2 className={styles.title}>完成授权后查看订单</h2>
           </div>
         </div>
       </section>
@@ -158,7 +158,7 @@ export function MarketOrderActivity({ marketId, embedded = false }: { marketId: 
       <div className={styles.header}>
         <div>
           <span className="eyebrow">我的订单</span>
-          <h2 className={styles.title}>下单后，挂单、部分成交、已成交都会在这里实时更新。</h2>
+          <h2 className={styles.title}>订单状态</h2>
         </div>
         <div className={styles.headerMeta}>
           <span>{syncing ? "同步中" : `${openOrders.length} 笔挂单`}</span>
@@ -197,7 +197,7 @@ export function MarketOrderActivity({ marketId, embedded = false }: { marketId: 
                 ))}
               </div>
             ) : (
-              <div className={styles.emptyState}>这个市场当前没有你的活动挂单。新委托提交后，这里会先显示挂单，再随着成交进度变化。</div>
+              <div className={styles.emptyState}>暂无活动挂单</div>
             )}
           </div>
 
@@ -230,7 +230,7 @@ export function MarketOrderActivity({ marketId, embedded = false }: { marketId: 
                 ))}
               </div>
             ) : (
-              <div className={styles.emptyState}>还没有这一个市场的历史结果。成交或取消之后，这里会保留最近状态。</div>
+              <div className={styles.emptyState}>暂无历史结果</div>
             )}
           </div>
         </>

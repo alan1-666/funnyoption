@@ -145,8 +145,8 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ m
                 <section className={styles.contextCard}>
                   <div className={styles.contextHeader}>
                     <div>
-                      <span className={styles.contextLabel}>市场合约</span>
-                      <h2 className={styles.contextTitle}>像 Worm 一样把事件、赔率和时间线收成一个主舞台。</h2>
+                      <span className={styles.contextLabel}>市场时间线</span>
+                      <h2 className={styles.contextTitle}>结果与时间</h2>
                     </div>
                     <span className={styles.contextStatus}>{statusLabel}</span>
                   </div>

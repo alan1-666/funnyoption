@@ -143,7 +143,7 @@ export function OrderTicket({ market }: { market: Market }) {
       <div className={styles.railHeader}>
         <div>
           <span className="eyebrow">交易面板</span>
-          <h2 className={styles.railTitle}>把下单动作收紧到右侧一条 rail，信息不再和主内容互相抢。</h2>
+          <h2 className={styles.railTitle}>下单</h2>
         </div>
         <span className={styles.marketState}>{zhMarketStatus(market.status)}</span>
       </div>

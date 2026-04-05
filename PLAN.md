@@ -198,6 +198,9 @@ Detailed execution lives in `docs/harness/plans/active/`.
     now proactively cancelled through the matching/order-event lane, and market
     detail shows connected-user order/fill state directly while dropping the
     duplicated left-side summary blocks
+  - `TASK-OFFCHAIN-019` is complete: the public market detail page now follows
+    a Worm-style hierarchy with one strong event hero, a tighter trading rail,
+    and the connected user's order state folded into the main tab surface
   - any on-chain contract surface added for the oracle lane should stay on the repo's existing Foundry toolchain, not a second Solidity framework
   - next auth cleanup, when worthwhile, should migrate repo proof tooling off deprecated `/api/v1/sessions` before retiring that blank-vault compatibility carrier
 - Chain hardening: listener-driven local deposit proof is in place, and legacy local `chain_deposits` schema drift now has a documented repair path plus repair migration

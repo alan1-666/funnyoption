@@ -63,3 +63,30 @@
 - next:
   - push this tranche to staging and run one visual verification pass on the
     redesigned detail page
+
+### 2026-04-06 03:01 CST
+
+- validated:
+  - pushed `76ec049` to `main`
+  - staging deploy run `24007891259` completed successfully
+  - `curl -sS https://funnyoption.xyz/healthz`
+  - browser verification on
+    `https://funnyoption.xyz/markets/1775197275497`
+- staging verification notes:
+  - the public detail page now reads as one intentional Worm-style flow:
+    hero/context on the left, compact trading rail on the right, and one
+    combined chart/tabs surface below
+  - “我的订单” is now inside the main tab surface instead of isolated as a
+    separate right-rail card
+  - the right-hand trade rail no longer repeats market title/context already
+    established by the hero
+  - viewport screenshot saved to:
+    `output/playwright/staging-market-detail-worm-redesign.png`
+- residual limitations:
+  - this is a hierarchy/visual redesign only; no backend protocol or websocket
+    contract changed
+  - sports markets still use FunnyOption's current metadata model, so the page
+    mirrors Worm's hierarchy without inventing unavailable home/away/team
+    metadata
+- next:
+  - commander can close this task as complete

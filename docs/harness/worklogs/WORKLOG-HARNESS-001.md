@@ -2162,3 +2162,29 @@
 - next:
   - push this lifecycle tranche and verify the new `WAITING_RESOLUTION`
     behavior on staging
+
+### 2026-04-06 15:58 CST
+
+- thread: COMMANDER
+- scope:
+  - reviewed and accepted `TASK-OFFCHAIN-019`
+  - verified the Worm-inspired detail-page redesign on staging
+- changed:
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+    - `docs/harness/handshakes/HANDSHAKE-OFFCHAIN-019.md`
+    - `docs/harness/worklogs/WORKLOG-OFFCHAIN-019.md`
+- validated:
+  - deploy run `24007891259` succeeded for `HEAD=76ec049`
+  - `curl -sS https://funnyoption.xyz/healthz`
+  - browser verification on `https://funnyoption.xyz/markets/1775197275497`
+  - accepted the visual contract:
+    - event/context hero on the left
+    - tighter trade rail on the right
+    - chart, activity, rules, and “我的订单” consolidated into one main surface
+- blockers:
+  - none
+- next:
+  - continue the main product lane on lifecycle/runtime or operator UX rather
+    than widening the repo structure

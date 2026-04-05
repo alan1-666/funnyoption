@@ -140,7 +140,6 @@ export function PortfolioShell({
     ? portfolioSyncing
       ? `正在同步 user #${sessionUserId} 的余额、持仓、订单和结算记录...`
       : [
-          `当前展示 user #${sessionUserId} 的账户数据。`,
           balancesResult.state === "unavailable"
             ? balancesResult.error?.message ?? "余额接口暂不可用，请稍后刷新。"
             : "",
@@ -299,9 +298,7 @@ export function PortfolioShell({
       : busy === "session"
         ? "授权中..."
         : wallet
-          ? session
-            ? "交易已开启"
-            : "授权交易"
+          ? "授权交易"
           : "连接钱包";
 
   return (
@@ -397,14 +394,16 @@ export function PortfolioShell({
                 </span>
               </div>
 
-              <button
-                type="button"
-                className={styles.primaryButton}
-                onClick={handlePrimaryAction}
-                disabled={busy !== null || Boolean(session)}
-              >
-                {primaryActionLabel}
-              </button>
+              {!session || busy !== null ? (
+                <button
+                  type="button"
+                  className={styles.primaryButton}
+                  onClick={handlePrimaryAction}
+                  disabled={busy !== null || Boolean(session)}
+                >
+                  {primaryActionLabel}
+                </button>
+              ) : null}
             </div>
           </div>
         </section>
@@ -431,7 +430,7 @@ export function PortfolioShell({
               </strong>
             </div>
           </div>
-          <p className={styles.sideFoot}>{overviewStatusCopy}</p>
+          {overviewStatusCopy ? <p className={styles.sideFoot}>{overviewStatusCopy}</p> : null}
         </aside>
       </div>
 

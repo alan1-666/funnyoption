@@ -1120,3 +1120,27 @@
     - reduce provider chooser friction further if wallet SDK behavior allows
     - consider backend collateral-asset prioritization if a user can exceed the
       current frontend fallback window of `limit=200`
+
+### 2026-04-05 03:14 CST
+
+- read:
+  - `web/components/portfolio-shell.tsx`
+  - `web/components/home-market-board.module.css`
+  - `web/components/home-market-card.module.css`
+- changed:
+  - applied one user-requested post-verification micro-polish set:
+    - removed the personal-page CTA copy `交易已开启` by hiding the already-on
+      primary action once trading is active
+    - removed the overview sentence
+      `当前展示 user #<id> 的账户数据。`
+    - aligned the home market board width to the same `1380px` rail used by the
+      portfolio page
+    - reduced home market-card density slightly so the narrower rail still
+      feels balanced
+- validated:
+  - `cd web && npm run build`
+- blockers:
+  - none
+- next:
+  - push the micro-polish set to staging if the user wants to inspect the new
+    homepage density and quieter portfolio copy on the deployed environment

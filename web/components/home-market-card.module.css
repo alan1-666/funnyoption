@@ -2,9 +2,9 @@
   position: relative;
   display: grid;
   overflow: hidden;
-  min-height: 272px;
+  min-height: 248px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 28px;
+  border-radius: 24px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01)),
     rgba(13, 13, 14, 0.96);
@@ -38,8 +38,8 @@
 
 .portrait {
   grid-row: span 2;
-  min-height: 592px;
-  grid-template-rows: minmax(280px, 1fr) auto auto;
+  min-height: 520px;
+  grid-template-rows: minmax(248px, 1fr) auto auto;
 }
 
 .media {
@@ -85,7 +85,7 @@
   justify-content: space-between;
   align-items: center;
   gap: 10px;
-  padding: 14px 14px 0;
+  padding: 12px 12px 0;
 }
 
 .metaTag,
@@ -112,8 +112,8 @@
 .content {
   align-self: end;
   display: grid;
-  gap: 16px;
-  padding: 16px 14px 14px;
+  gap: 14px;
+  padding: 14px 12px 12px;
 }
 
 .headingBlock {
@@ -130,7 +130,7 @@
 .title {
   margin: 0;
   max-width: 20ch;
-  font-size: clamp(0.98rem, 1.7vw, 1.28rem);
+  font-size: clamp(0.94rem, 1.45vw, 1.18rem);
   line-height: 1.16;
   letter-spacing: -0.03em;
   font-weight: 600;
@@ -139,7 +139,7 @@
 
 .portrait .title {
   max-width: 13ch;
-  font-size: clamp(1.2rem, 2.2vw, 1.7rem);
+  font-size: clamp(1.08rem, 1.9vw, 1.48rem);
 }
 
 .binaryBoard,
@@ -181,8 +181,8 @@
 }
 
 .optionRow {
-  min-height: 44px;
-  padding: 0 14px;
+  min-height: 40px;
+  padding: 0 12px;
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.035);
@@ -193,26 +193,26 @@
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 0 14px 14px;
+  padding: 0 12px 12px;
   color: rgba(255, 255, 255, 0.54);
   font-size: 12px;
 }
 
 @media (max-width: 1100px) {
   .portrait {
-    min-height: 520px;
+    min-height: 460px;
   }
 }
 
 @media (max-width: 760px) {
   .card {
-    min-height: 256px;
+    min-height: 238px;
     border-radius: 22px;
   }
 
   .portrait {
     grid-row: span 1;
-    min-height: 360px;
+    min-height: 340px;
   }
 
   .title,

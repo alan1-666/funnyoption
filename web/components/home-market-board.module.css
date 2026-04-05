@@ -1,4 +1,6 @@
 .shell {
+  width: min(1380px, 100%);
+  margin: 0 auto;
   display: grid;
   gap: 18px;
   padding: 12px 0 40px;
@@ -319,7 +321,7 @@
 .board {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
+  gap: 14px;
   grid-auto-flow: dense;
 }
 
@@ -405,6 +407,7 @@
 
 @media (max-width: 640px) {
   .shell {
+    width: 100%;
     gap: 14px;
   }
 

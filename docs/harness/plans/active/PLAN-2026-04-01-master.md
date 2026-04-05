@@ -235,6 +235,21 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
   - define whether the product truly derives a deterministic Stark/private trading key from the wallet signature, or instead wallet-authorizes a locally generated Stark key
   - define the exact signing message/domain, key registration flow, nonce/replay model, browser storage, revocation, and migration path from the current ed25519-style session model
 - `TASK-OFFCHAIN-013` is complete: frontend restore now reconciles exact local key truth before any reauthorization prompt, expired / revoked / rotated / missing-local-key states fail honestly, and new browser registration still stays on the canonical trading-key routes
+- deployed staging wallet/portfolio polish is now complete:
+  - refresh with one unambiguous local trading key restores without reopening
+    the wallet-provider chooser on mount; user-triggered trading actions still
+    force a real wallet reconnect before signing
+  - collateral balance reads now fall back to a larger `balances` page when
+    `USDT` is paged out by `POSITION:*` rows, so position-heavy users no longer
+    look empty-funded in the main wallet summary
+  - wallet-address copy now has a visible success affordance, and the QR
+    dialog opens higher with a more natural viewport center
+- `TASK-OFFCHAIN-017` is complete; remaining tradeoffs stay narrow:
+  - multiple local trading keys for the same `chain + vault` still require an
+    explicit wallet reconnect instead of guessing
+  - the frontend balance fallback currently tops out at `limit=200`; backend
+    asset prioritization would still be cleaner if one user eventually exceeds
+    that many `POSITION:*` rows
 - `TASK-CHAIN-005` should stay design-first before runtime implementation:
   - define the metadata contract for oracle-settled crypto markets
   - define where oracle fetch / evidence persistence / auto-resolution lives

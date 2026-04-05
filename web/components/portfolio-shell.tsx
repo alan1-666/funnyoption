@@ -115,6 +115,7 @@ export function PortfolioShell({
   const currentProfile = profileResult.item;
   const profileWallet = currentWallet || currentProfile?.wallet_address || "";
   const activePayoutWallet = currentWallet || "";
+  const copyFeedbackText = copiedWallet ? "钱包地址已复制到剪贴板" : "";
   const balanceDisplay =
     sessionUserId && balancesResult.state !== "unavailable" && !portfolioSyncing
       ? `${formatAssetAmount(usdt?.available ?? 0, COLLATERAL_SYMBOL)} ${COLLATERAL_SYMBOL}`
@@ -196,7 +197,7 @@ export function PortfolioShell({
     setClaimStatus({});
 
     void Promise.all([
-      getBalancesRead(sessionUserId),
+      getBalancesRead(sessionUserId, { ensureAsset: COLLATERAL_SYMBOL }),
       getPositionsRead(sessionUserId),
       getOrdersRead(sessionUserId),
       getPayoutsRead(sessionUserId),
@@ -371,17 +372,29 @@ export function PortfolioShell({
                 </span>
                 <button
                   type="button"
-                  className={styles.copyButton}
+                  className={`${styles.copyButton} ${copiedWallet ? styles.copyButtonSuccess : ""}`}
                   onClick={handleCopyWallet}
                   disabled={!profileWallet}
                   aria-label="复制钱包地址"
                   title={copiedWallet ? "已复制" : "复制钱包地址"}
                 >
-                  <svg viewBox="0 0 24 24" className={styles.iconSvg} aria-hidden="true">
-                    <rect x="9" y="9" width="10" height="10" rx="2" />
-                    <path d="M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1" />
-                  </svg>
+                  {copiedWallet ? (
+                    <svg viewBox="0 0 24 24" className={styles.iconSvg} aria-hidden="true">
+                      <path d="M5 13.2 9.2 17 19 7.5" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" className={styles.iconSvg} aria-hidden="true">
+                      <rect x="9" y="9" width="10" height="10" rx="2" />
+                      <path d="M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  )}
                 </button>
+              </div>
+
+              <div className={styles.copyFeedbackRow} aria-live="polite">
+                <span className={`${styles.copyFeedback} ${copiedWallet ? styles.copyFeedbackVisible : ""}`}>
+                  {copyFeedbackText}
+                </span>
               </div>
 
               <button
@@ -608,20 +621,34 @@ export function PortfolioShell({
               </div>
 
               <div className={styles.qrFooter}>
-                <span className={styles.qrAddress} title={profileWallet}>
-                  {profileWallet}
-                </span>
+                <div className={styles.qrFooterMeta}>
+                  <span className={styles.qrAddress} title={profileWallet}>
+                    {profileWallet}
+                  </span>
+                  <span
+                    className={`${styles.copyFeedback} ${styles.qrCopyFeedback} ${copiedWallet ? styles.copyFeedbackVisible : ""}`}
+                    aria-live="polite"
+                  >
+                    {copyFeedbackText}
+                  </span>
+                </div>
                 <button
                   type="button"
-                  className={styles.copyButton}
+                  className={`${styles.copyButton} ${copiedWallet ? styles.copyButtonSuccess : ""}`}
                   onClick={handleCopyWallet}
                   aria-label="复制钱包地址"
                   title={copiedWallet ? "已复制" : "复制钱包地址"}
                 >
-                  <svg viewBox="0 0 24 24" className={styles.iconSvg} aria-hidden="true">
-                    <rect x="9" y="9" width="10" height="10" rx="2" />
-                    <path d="M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1" />
-                  </svg>
+                  {copiedWallet ? (
+                    <svg viewBox="0 0 24 24" className={styles.iconSvg} aria-hidden="true">
+                      <path d="M5 13.2 9.2 17 19 7.5" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" className={styles.iconSvg} aria-hidden="true">
+                      <rect x="9" y="9" width="10" height="10" rx="2" />
+                      <path d="M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  )}
                 </button>
               </div>
             </div>

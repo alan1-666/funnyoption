@@ -74,6 +74,11 @@ Detailed execution lives in `docs/harness/plans/active/`.
   - `TASK-OFFCHAIN-013` is complete: the browser restore UX now reconciles before reauthorization, surfaces restore-in-progress / reauthorization-needed states honestly, and keeps new browser registration on the canonical trading-key routes
   - `TASK-OFFCHAIN-016` is complete: `wallet_sessions` now durably scopes canonical trading-key rows by `wallet + chain + vault`, including uniqueness that allows reusing the same trading public key across two vaults on one wallet without cross-vault rotation or readback ambiguity
   - `TASK-CHAIN-007` is complete: oracle `OBSERVED` rows now carry a dispatch checkpoint so `publish failed after OBSERVED` can retry safely without replaying settlement/account side effects
+  - `TASK-OFFCHAIN-017` is complete: refresh with one unambiguous local
+    trading key now restores quietly without probing the provider on mount,
+    collateral balance reads retry when `USDT` is paged out by `POSITION:*`
+    rows, wallet-address copy shows an obvious success state, and the personal
+    page QR dialog opens higher with a more natural visual center
   - any on-chain contract surface added for the oracle lane should stay on the repo's existing Foundry toolchain, not a second Solidity framework
   - next auth cleanup, when worthwhile, should migrate repo proof tooling off deprecated `/api/v1/sessions` before retiring that blank-vault compatibility carrier
 - Chain hardening: listener-driven local deposit proof is in place, and legacy local `chain_deposits` schema drift now has a documented repair path plus repair migration

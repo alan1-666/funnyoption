@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTradingSession } from "@/components/trading-session-provider";
 import { UserAvatar } from "@/components/user-avatar";
 import { formatAssetAmount, shortenAddress } from "@/lib/format";
+import { getBalancesRead } from "@/lib/api";
 import type { Balance, UserProfile } from "@/lib/types";
 import styles from "@/components/shell-top-bar.module.css";
 
@@ -14,16 +15,13 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8
 const COLLATERAL_SYMBOL = (process.env.NEXT_PUBLIC_COLLATERAL_SYMBOL ?? "USDT").toUpperCase();
 
 async function fetchAvailableBalance(userId: number) {
-  const response = await fetch(`${API_BASE_URL}/api/v1/balances?user_id=${userId}&limit=10`, {
-    cache: "no-store"
+  const balancesResult = await getBalancesRead(userId, {
+    ensureAsset: COLLATERAL_SYMBOL
   });
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+  if (balancesResult.state === "unavailable") {
+    throw new Error(balancesResult.error?.message ?? "读取余额失败");
   }
-
-  const payload = (await response.json()) as { items?: Balance[] };
-  const balances = payload.items ?? [];
+  const balances = balancesResult.items;
   return balances.find((balance) => balance.asset.toUpperCase() === COLLATERAL_SYMBOL) ?? null;
 }
 

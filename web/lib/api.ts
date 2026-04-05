@@ -33,6 +33,15 @@ const EMPTY_MARKET_RUNTIME: MarketRuntime = {
   failed_claim_count: 0
 };
 
+const DEFAULT_BALANCE_LIMIT = 10;
+const MAX_BALANCE_LIMIT = 200;
+
+export interface BalanceReadOptions {
+  limit?: number;
+  ensureAsset?: string;
+  fallbackLimit?: number;
+}
+
 async function fetchItems<T>(path: string): Promise<T[]> {
   const result = await fetchCollection<T>(path);
   return result.items;
@@ -45,6 +54,15 @@ async function fetchObject<T>(path: string): Promise<T | null> {
 
 function hasScopedUserId(userId?: number) {
   return Number.isInteger(userId) && Number(userId) > 0;
+}
+
+function clampCollectionLimit(limit: number | undefined, fallback: number) {
+  return Math.max(1, Math.min(limit ?? fallback, MAX_BALANCE_LIMIT));
+}
+
+function hasBalanceForAsset(items: Balance[], asset: string) {
+  const normalizedAsset = asset.trim().toUpperCase();
+  return items.some((item) => item.asset.toUpperCase() === normalizedAsset);
 }
 
 function normalizeMarket(market: Market): Market {
@@ -256,16 +274,36 @@ export async function getOrders(userId?: number, marketId?: number) {
   return (await getOrdersRead(userId, marketId)).items;
 }
 
-export async function getBalancesRead(userId?: number): Promise<ApiCollectionResult<Balance>> {
+export async function getBalancesRead(
+  userId?: number,
+  options?: BalanceReadOptions
+): Promise<ApiCollectionResult<Balance>> {
   if (!hasScopedUserId(userId)) {
     return normalizeCollectionState<Balance>([]);
   }
 
-  return fetchCollection<Balance>(`/api/v1/balances?user_id=${userId}&limit=10`);
+  const limit = clampCollectionLimit(options?.limit, DEFAULT_BALANCE_LIMIT);
+  const ensureAsset = options?.ensureAsset?.trim().toUpperCase();
+  const fallbackLimit = clampCollectionLimit(options?.fallbackLimit, MAX_BALANCE_LIMIT);
+  const path = `/api/v1/balances?user_id=${userId}&limit=${limit}`;
+  const result = await fetchCollection<Balance>(path);
+
+  if (
+    !ensureAsset ||
+    result.state === "unavailable" ||
+    hasBalanceForAsset(result.items, ensureAsset) ||
+    fallbackLimit <= limit
+  ) {
+    return result;
+  }
+
+  const fallbackPath = `/api/v1/balances?user_id=${userId}&limit=${fallbackLimit}`;
+  const fallbackResult = await fetchCollection<Balance>(fallbackPath);
+  return fallbackResult.state === "unavailable" ? result : fallbackResult;
 }
 
-export async function getBalances(userId?: number) {
-  return (await getBalancesRead(userId)).items;
+export async function getBalances(userId?: number, options?: BalanceReadOptions) {
+  return (await getBalancesRead(userId, options)).items;
 }
 
 export async function getProfileRead(

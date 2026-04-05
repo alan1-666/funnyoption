@@ -920,3 +920,203 @@
 - next:
   - if we want this harness to become the strongest local acceptance gate,
     add a narrow follow-up to prove deposit freshness explicitly
+
+### 2026-04-05 02:18 CST
+
+- read:
+  - `scripts/staging-concurrency-orders.mjs`
+  - `docs/operations/core-business-test-flow.md`
+  - `docs/harness/worklogs/WORKLOG-STAGING-001.md`
+- changed:
+  - pushed integrated auth/oracle/full-flow branch to `origin/main` as
+    `c9ad5e6 Land trading-key auth, oracle settlement, and local full-flow harness`
+  - watched GitHub Actions run
+    `https://github.com/alan1-666/funnyoption/actions/runs/23984469462`
+    complete `success`
+  - confirmed deployed staging API health:
+    - `GET https://funnyoption.xyz/healthz => {"env":"staging","service":"api","status":"ok"}`
+  - confirmed canonical V2 auth route is live on deployed staging:
+    - `POST https://funnyoption.xyz/api/v1/trading-keys/challenge`
+      with `chain_id=97` and vault
+      `0x7665d943c62268d27ffcbed29c6a8281f7364534` returned `201`
+  - recorded one staging-harness false-negative:
+    - `node scripts/staging-concurrency-orders.mjs --users 2 --seller-users 1 --orders-per-user 1 --concurrency 1 --poll-timeout-ms 180000 --poll-interval-ms 3000`
+      exited `FAIL`, but the failure is in the harness wait condition rather
+      than the deployed product path
+- validated:
+  - pre-push broad checks:
+    - `go test ./cmd/local-lifecycle ./cmd/oracle ./internal/shared/auth ./internal/api/... ./internal/oracle/service ./internal/settlement/service ./internal/account/service ./internal/chain/service`
+    - `cd web && npm run build`
+    - `cd admin && npm run build`
+    - `git diff --check`
+  - staging deploy:
+    - pushed `main -> origin/main`
+    - workflow run `23984469462` finished `success`
+  - staging readback after the mini E2E script failure:
+    - `GET /api/v1/markets/1775325910776` showed `status=OPEN`,
+      `active_order_count=1`
+    - `GET /api/v1/orders?user_id=1002&market_id=1775325910776&limit=20`
+      showed bootstrap order
+      `ord_bootstrap_9804827a5c26d5dafe3e3e8d31d923cd status=NEW`
+    - `GET /api/v1/positions?user_id=1002&market_id=1775325910776&limit=20`
+      showed maker YES/NO inventory both present at quantity `1`
+    - `GET /api/v1/balances?user_id=1002` showed `USDT available=2168`
+- findings:
+  - the current staging concurrency harness calls
+    `GET /api/v1/balances?user_id=<maker>&limit=20` during the
+    `wait maker bootstrap order and inventory` step, then searches only that
+    truncated page for asset `USDT`
+  - on current staging, maker `user_id=1002` already has more than 20 balance
+    rows, so `USDT` is paged out even though the bootstrap order and inventory
+    are already live
+  - this makes the harness report
+    `wait maker bootstrap order and inventory timeout after 180000ms; last=null`
+    while the deployed product state is healthy
+- blockers:
+  - no staging deployment blocker
+  - one harness-only follow-up remains if we want this script to be a truthful
+    staging gate under high-balance-history users
+- next:
+  - keep manual browser-wallet verification as the remaining human-in-the-loop
+    step for staging
+  - if we want automated staging E2E to go green again, narrow-fix the harness
+    balance lookup so it does not false-fail on paginated users
+
+### 2026-04-05 02:24 CST
+
+- read:
+  - staging readbacks only
+- changed:
+  - confirmed one real-browser manual wallet authorization on deployed staging
+    for wallet `0xc421d5ff322e4213a913ec257d6b4458af4255c6`
+- validated:
+  - `GET https://funnyoption.xyz/api/v1/sessions?wallet_address=0xc421d5ff322e4213a913ec257d6b4458af4255c6&vault_address=0x7665d943c62268d27ffcbed29c6a8281f7364534&status=ACTIVE&limit=20`
+  - `GET https://funnyoption.xyz/api/v1/sessions?wallet_address=0xc421d5ff322e4213a913ec257d6b4458af4255c6&limit=20`
+  - `GET https://funnyoption.xyz/api/v1/profile?wallet_address=0xc421d5ff322e4213a913ec257d6b4458af4255c6`
+  - canonical V2 auth row observed:
+    - `session_id=tk_128797dea6ba55823159fc7ec1200865`
+    - `user_id=1001`
+    - `scope=TRADE`
+    - `chain_id=97`
+    - `vault_address=0x7665d943c62268d27ffcbed29c6a8281f7364534`
+    - `status=ACTIVE`
+    - `issued_at=1775326136201`
+    - `last_order_nonce=1`
+  - profile readback stayed truthful for the same wallet:
+    - `user_id=1001`
+    - `updated_at=1775326136`
+- blockers:
+  - none for this manual authorization proof
+- next:
+  - manual follow-up can now focus on refresh-restore and one real browser
+    order placement, because the wallet authorization itself is confirmed
+
+### 2026-04-05 02:29 CST
+
+- read:
+  - staging auth/balance readbacks after manual browser refresh
+- changed:
+  - recorded one real-browser refresh observation:
+    - refresh reopened the wallet-provider chooser
+      (`MetaMask` / `Phantom`)
+    - no new signing prompt appeared
+- validated:
+  - `GET https://funnyoption.xyz/api/v1/sessions?wallet_address=0xc421d5ff322e4213a913ec257d6b4458af4255c6&vault_address=0x7665d943c62268d27ffcbed29c6a8281f7364534&status=ACTIVE&limit=20`
+    still returned the same canonical row:
+    - `session_id=tk_128797dea6ba55823159fc7ec1200865`
+    - `issued_at=1775326136201`
+    - `last_order_nonce=1`
+  - `GET https://funnyoption.xyz/api/v1/balances?user_id=1001&limit=50`
+    returned:
+    - `USDT available=9590`
+    - `USDT frozen=500`
+- findings:
+  - refresh did not create a new trading-key session and did not require a new
+    authorization signature
+  - the remaining UX gap is narrower:
+    wallet-provider reconnect still reopens the provider chooser on refresh,
+    even though the V2 trading-key restore itself is preserved
+  - server-side balance is present; if the browser looked like “no balance”
+    before reconnect completed, that is a frontend/provider restore experience
+    issue rather than missing funds on the backend
+- blockers:
+  - no backend auth blocker
+  - one frontend wallet reconnect UX follow-up remains if we want refresh to be
+    fully quiet
+- next:
+  - treat “no repeated signature” as PASS
+  - treat “provider chooser still opens on refresh” as a narrower UX polish
+    follow-up rather than an auth-runtime regression
+
+### 2026-04-05 02:35 CST
+
+- read:
+  - staging API readbacks for wallet `0xc421d5ff322e4213a913ec257d6b4458af4255c6`
+- changed:
+  - recorded one concrete staging read-model issue behind the browser “no
+    balance” symptom
+- validated:
+  - `GET https://funnyoption.xyz/api/v1/profile?user_id=1001`
+    returned the expected wallet/profile row
+  - `GET https://funnyoption.xyz/api/v1/balances?user_id=1001&limit=10`
+    returned only ten `POSITION:*` assets and no `USDT`
+  - `GET https://funnyoption.xyz/api/v1/balances?user_id=1001&limit=50`
+    returned the same ten position assets plus:
+    - `asset=USDT`
+    - `available=9590`
+    - `frozen=500`
+  - `GET https://funnyoption.xyz/api/v1/positions?user_id=1001&limit=20`
+    returned ten position rows, matching the assets that fill the first
+    `balances?limit=10` page
+- findings:
+  - the test-environment API does return the user’s USDT balance, but not on
+    the first `balances?limit=10` page for this wallet
+  - current symptom is pagination/read-shape, not missing funds:
+    the first ten balance rows are all `POSITION:*`, and `USDT` appears only
+    once the page size exceeds ten
+- blockers:
+  - no backend balance-loss blocker
+  - one read-model/frontend query-shape follow-up remains if we want the main
+    wallet summary to reliably show collateral balances for position-heavy users
+- next:
+  - treat this as a staging read-path issue: either request a larger balance
+    page or prioritize collateral assets like `USDT` in the balance response
+
+### 2026-04-05 03:01 CST
+
+- read:
+  - `TASK-OFFCHAIN-017.md`
+  - `HANDSHAKE-OFFCHAIN-017.md`
+  - `WORKLOG-OFFCHAIN-017.md`
+  - `web/lib/session-client.ts`
+  - `web/components/trading-session-provider.tsx`
+  - `web/lib/api.ts`
+  - `web/components/shell-top-bar.tsx`
+  - `web/components/portfolio-shell.tsx`
+  - `web/components/portfolio-shell.module.css`
+- changed:
+  - commander accepted `TASK-OFFCHAIN-017` as completed and synchronized plan
+    state after re-review
+- validated:
+  - `cd web && npm run build`
+  - reviewed the landed frontend diff against the task acceptance criteria
+  - worker browser proof recorded:
+    - silent refresh restore with `walletCalls=[]`
+    - `balances?limit=10` then fallback `balances?limit=200`
+    - visible `9,590 USDT`
+    - visible copy-success state
+    - QR dialog screenshot artifact:
+      `/Users/zhangza/code/funnyoption/output/playwright/task-offchain-017-portfolio.png`
+- findings:
+  - no new P0/P1 found in the narrow wallet/portfolio slice
+  - this closure is consistent with the staged browser observations:
+    - no repeated signature prompt
+    - no new server-side trading-key row created on refresh
+    - balance truth restored for the position-heavy staging account
+- blockers:
+  - no release blocker remains in this slice
+- next:
+  - any later polish can stay narrow:
+    - reduce provider chooser friction further if wallet SDK behavior allows
+    - consider backend collateral-asset prioritization if a user can exceed the
+      current frontend fallback window of `limit=200`

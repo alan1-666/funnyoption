@@ -84,6 +84,10 @@ export interface RestoreSessionResult {
   message: string;
 }
 
+interface RestoreSessionOptions {
+  allowWalletProbe?: boolean;
+}
+
 interface RemoteChainTask {
   id: number;
   biz_type: string;
@@ -519,64 +523,15 @@ function buildRestoreFailure(status: RestoreSessionStatus, message: string): Res
   };
 }
 
-export async function restoreStoredSession(activeWallet?: WalletConnection | null): Promise<RestoreSessionResult> {
-  const targetVaultAddress = ensureTargetVaultAddress();
-  const storedItems = listStoredSessionMetadata();
-  const connectedWallet = activeWallet ?? (await getWalletConnection().catch(() => null));
-  if (!connectedWallet) {
-    if (storedItems.some((item) => item.chainId === TARGET_CHAIN_ID && item.vaultAddress === targetVaultAddress)) {
-      return {
-        session: null,
-        status: "wallet_required",
-        message: "检测到本地交易密钥，连接原钱包后可恢复。"
-      };
-    }
-    return {
-      session: null,
-      status: "missing",
-      message: "未发现本地交易密钥"
-    };
-  }
+function getTargetStoredSessions(storedItems: SessionRecord[], targetVaultAddress: string) {
+  return storedItems.filter((item) => item.chainId === TARGET_CHAIN_ID && item.vaultAddress === targetVaultAddress);
+}
 
-  const walletScopedItems = storedItems.filter((item) => item.walletAddress === normalizeAddress(connectedWallet.walletAddress));
-  if (connectedWallet.chainId !== TARGET_CHAIN_ID) {
-    if (walletScopedItems.some((item) => item.chainId === TARGET_CHAIN_ID && item.vaultAddress === targetVaultAddress)) {
-      return {
-        session: null,
-        status: "chain_mismatch",
-        message: `钱包当前在链 ${connectedWallet.chainId}，切回 ${TARGET_CHAIN.chainName} 后可恢复交易密钥。`
-      };
-    }
-    return {
-      session: null,
-      status: "missing",
-      message: "当前钱包在错误链上，且没有可恢复的交易密钥。"
-    };
-  }
-
-  const stored = loadStoredSessionMetadata(connectedWallet.walletAddress, TARGET_CHAIN_ID, targetVaultAddress);
-  if (!stored) {
-    if (walletScopedItems.some((item) => item.chainId === TARGET_CHAIN_ID && item.vaultAddress !== targetVaultAddress)) {
-      return {
-        session: null,
-        status: "vault_mismatch",
-        message: "本地交易密钥属于另一个 vault 环境，当前环境需要重新授权。"
-      };
-    }
-    if (storedItems.some((item) => item.chainId === TARGET_CHAIN_ID && item.vaultAddress === targetVaultAddress)) {
-      return {
-        session: null,
-        status: "wallet_mismatch",
-        message: "当前连接的钱包与本地交易密钥不匹配。"
-      };
-    }
-    return {
-      session: null,
-      status: "missing",
-      message: "当前钱包没有可恢复的交易密钥。"
-    };
-  }
-
+async function restoreStoredSessionRecord(
+  stored: SessionRecord,
+  targetVaultAddress: string,
+  restoredMessage = "已恢复本地交易密钥"
+): Promise<RestoreSessionResult> {
   if (normalizeAddress(stored.vaultAddress) !== targetVaultAddress) {
     await clearStoredSession(stored);
     return {
@@ -625,7 +580,7 @@ export async function restoreStoredSession(activeWallet?: WalletConnection | nul
         return {
           session: restored,
           status: "restored",
-          message: "已恢复本地交易密钥"
+          message: restoredMessage
         };
       }
       case "ROTATED":
@@ -669,6 +624,64 @@ export async function restoreStoredSession(activeWallet?: WalletConnection | nul
 
   await clearStoredSession(stored);
   return buildRestoreFailure("remote_missing", "服务端已找不到这把交易密钥，必须重新授权。");
+}
+
+export async function restoreStoredSession(
+  activeWallet?: WalletConnection | null,
+  options?: RestoreSessionOptions
+): Promise<RestoreSessionResult> {
+  const targetVaultAddress = ensureTargetVaultAddress();
+  const storedItems = listStoredSessionMetadata();
+  const targetStoredItems = getTargetStoredSessions(storedItems, targetVaultAddress);
+  const connectedWallet =
+    activeWallet ?? ((options?.allowWalletProbe ?? true) ? await getWalletConnection().catch(() => null) : null);
+
+  if (!connectedWallet) {
+    if (targetStoredItems.length === 1) {
+      return restoreStoredSessionRecord(
+        targetStoredItems[0],
+        targetVaultAddress,
+        "已恢复本地交易密钥，钱包将在需要时校验。"
+      );
+    }
+    if (targetStoredItems.length > 1) {
+      return buildRestoreFailure("wallet_required", "检测到多个本地交易密钥，连接对应钱包后可恢复。");
+    }
+    return buildRestoreFailure("missing", "未发现本地交易密钥");
+  }
+
+  const walletScopedItems = storedItems.filter((item) => item.walletAddress === normalizeAddress(connectedWallet.walletAddress));
+  if (connectedWallet.chainId !== TARGET_CHAIN_ID) {
+    if (walletScopedItems.some((item) => item.chainId === TARGET_CHAIN_ID && item.vaultAddress === targetVaultAddress)) {
+      return {
+        session: null,
+        status: "chain_mismatch",
+        message: `钱包当前在链 ${connectedWallet.chainId}，切回 ${TARGET_CHAIN.chainName} 后可恢复交易密钥。`
+      };
+    }
+    return buildRestoreFailure("missing", "当前钱包在错误链上，且没有可恢复的交易密钥。");
+  }
+
+  const stored = loadStoredSessionMetadata(connectedWallet.walletAddress, TARGET_CHAIN_ID, targetVaultAddress);
+  if (!stored) {
+    if (walletScopedItems.some((item) => item.chainId === TARGET_CHAIN_ID && item.vaultAddress !== targetVaultAddress)) {
+      return {
+        session: null,
+        status: "vault_mismatch",
+        message: "本地交易密钥属于另一个 vault 环境，当前环境需要重新授权。"
+      };
+    }
+    if (targetStoredItems.length > 0) {
+      return {
+        session: null,
+        status: "wallet_mismatch",
+        message: "当前连接的钱包与本地交易密钥不匹配。"
+      };
+    }
+    return buildRestoreFailure("missing", "当前钱包没有可恢复的交易密钥。");
+  }
+
+  return restoreStoredSessionRecord(stored, targetVaultAddress);
 }
 
 export async function clearStoredSession(record?: SessionRecord | null) {

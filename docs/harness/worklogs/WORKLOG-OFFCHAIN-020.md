@@ -57,3 +57,22 @@
 - validated:
   - `cd web && npm run build`
   - `git diff --check`
+
+### 2026-04-06 03:32 CST
+
+- validated:
+  - pushed `e4bec9a` to `main`
+  - staging deploy run `24008322269` completed successfully
+  - `curl -sS https://funnyoption.xyz/healthz`
+  - browser verification on
+    `https://funnyoption.xyz/markets/1775197275497`
+- staging verification notes:
+  - the meta/design-rationale copy on the detail page is gone
+  - the previously flagged phrases are no longer present on the live page
+  - the remaining text is now short and state-oriented:
+    - `市场时间线`
+    - `结果与时间`
+    - `订单状态`
+    - `下单`
+- next:
+  - commander can close this task as complete

@@ -2188,3 +2188,27 @@
 - next:
   - continue the main product lane on lifecycle/runtime or operator UX rather
     than widening the repo structure
+
+### 2026-04-06 16:32 CST
+
+- thread: COMMANDER
+- scope:
+  - reviewed and accepted `TASK-OFFCHAIN-020`
+  - confirmed the new frontend surface-copy guideline is checked into the repo
+- changed:
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+    - `docs/harness/handshakes/HANDSHAKE-OFFCHAIN-020.md`
+    - `docs/harness/worklogs/WORKLOG-OFFCHAIN-020.md`
+    - `docs/architecture/frontend-surface-copy.md`
+- validated:
+  - deploy run `24008322269` succeeded for `HEAD=e4bec9a`
+  - browser verification on `https://funnyoption.xyz/markets/1775197275497`
+  - confirmed the previously flagged meta copy is no longer present on the
+    live detail page
+- blockers:
+  - none
+- next:
+  - follow `docs/architecture/frontend-surface-copy.md` for future UI slices,
+    especially on market detail, portfolio, and admin-facing surfaces

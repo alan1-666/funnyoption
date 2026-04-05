@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"funnyoption/internal/api/dto"
+	"funnyoption/internal/rollup"
 
 	"github.com/lib/pq"
 )
@@ -20,6 +21,8 @@ var ErrSessionNonceConflict = errors.New("session nonce conflict")
 var ErrInvalidMarketCategory = errors.New("market category is invalid")
 var ErrTradingKeyChallengeExpired = errors.New("trading key challenge expired")
 var ErrTradingKeyChallengeConsumed = errors.New("trading key challenge already used")
+
+const maxInt64Uint64 = uint64(^uint64(0) >> 1)
 
 type QueryStore interface {
 	CreateMarket(ctx context.Context, req dto.CreateMarketRequest) (dto.MarketResponse, error)
@@ -33,7 +36,7 @@ type QueryStore interface {
 	GetSession(ctx context.Context, sessionID string) (dto.SessionResponse, error)
 	GetLatestFreezeByRef(ctx context.Context, refType, refID string) (dto.FreezeResponse, error)
 	RevokeSession(ctx context.Context, sessionID string) (dto.SessionResponse, error)
-	AdvanceSessionNonce(ctx context.Context, sessionID string, nonce uint64) (dto.SessionResponse, error)
+	AdvanceSessionNonce(ctx context.Context, req dto.AdvanceSessionNonceRequest) (dto.SessionResponse, error)
 	GetMarket(ctx context.Context, marketID int64) (dto.MarketResponse, error)
 	GetMarketResolution(ctx context.Context, marketID int64) (MarketResolutionState, bool, error)
 	ListMarkets(ctx context.Context, req dto.ListMarketsRequest) ([]dto.MarketResponse, error)
@@ -53,7 +56,8 @@ type QueryStore interface {
 }
 
 type SQLStore struct {
-	db *sql.DB
+	db     *sql.DB
+	rollup *rollup.Store
 }
 
 type MarketResolutionState struct {
@@ -75,6 +79,11 @@ type tradingKeyChallengeRecord struct {
 
 func NewSQLStore(db *sql.DB) *SQLStore {
 	return &SQLStore{db: db}
+}
+
+func (s *SQLStore) WithRollup(store *rollup.Store) *SQLStore {
+	s.rollup = store
+	return s
 }
 
 func (s *SQLStore) CreateMarket(ctx context.Context, req dto.CreateMarketRequest) (dto.MarketResponse, error) {
@@ -376,6 +385,15 @@ func (s *SQLStore) RegisterTradingKey(ctx context.Context, req dto.RegisterTradi
 	if err := ensureUserProfileTx(ctx, tx, session.UserID, session.WalletAddress); err != nil {
 		return dto.SessionResponse{}, err
 	}
+	if s.rollup != nil {
+		entry, buildErr := buildTradingKeyAuthorizedEntry(session, req, req.WalletSignature)
+		if buildErr != nil {
+			return dto.SessionResponse{}, buildErr
+		}
+		if err := s.rollup.AppendEntriesTx(ctx, tx, []rollup.JournalAppend{entry}); err != nil {
+			return dto.SessionResponse{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return dto.SessionResponse{}, err
 	}
@@ -514,27 +532,60 @@ func (s *SQLStore) RevokeSession(ctx context.Context, sessionID string) (dto.Ses
 	return scanSession(row)
 }
 
-func (s *SQLStore) AdvanceSessionNonce(ctx context.Context, sessionID string, nonce uint64) (dto.SessionResponse, error) {
-	row := s.db.QueryRowContext(ctx, `
+func (s *SQLStore) AdvanceSessionNonce(ctx context.Context, req dto.AdvanceSessionNonceRequest) (dto.SessionResponse, error) {
+	if req.Nonce > maxInt64Uint64 {
+		return dto.SessionResponse{}, fmt.Errorf("order nonce exceeds supported range")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return dto.SessionResponse{}, err
+	}
+	defer tx.Rollback()
+
+	now := time.Now()
+	row := tx.QueryRowContext(ctx, `
 		UPDATE wallet_sessions
 		SET last_order_nonce = $2,
-			updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+			updated_at = $3
 		WHERE session_id = $1
 		  AND status = 'ACTIVE'
 		  AND last_order_nonce < $2
 		RETURNING session_id, user_id, wallet_address, session_public_key, scope, chain_id, vault_address,
 		          session_nonce, last_order_nonce, status, issued_at, expires_at, revoked_at, created_at, updated_at
-	`, strings.TrimSpace(sessionID), int64(nonce))
+	`, strings.TrimSpace(req.SessionID), int64(req.Nonce), now.Unix())
 
 	session, err := scanSession(row)
 	if err == nil {
+		if s.rollup != nil {
+			entry, buildErr := buildNonceAdvanceEntry(session, req.Nonce, now.UnixMilli(), req.AuthorizationWitness)
+			if buildErr != nil {
+				return dto.SessionResponse{}, buildErr
+			}
+			if err := s.rollup.AppendEntriesTx(ctx, tx, []rollup.JournalAppend{entry}); err != nil {
+				return dto.SessionResponse{}, err
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return dto.SessionResponse{}, err
+		}
 		return session, nil
 	}
 	if errors.Is(err, ErrNotFound) {
-		if _, lookupErr := s.GetSession(ctx, sessionID); lookupErr == nil {
+		lookupRow := tx.QueryRowContext(ctx, `
+			SELECT session_id, user_id, wallet_address, session_public_key, scope, chain_id, vault_address,
+			       session_nonce, last_order_nonce, status, issued_at, expires_at, revoked_at, created_at, updated_at
+			FROM wallet_sessions
+			WHERE session_id = $1
+		`, strings.TrimSpace(req.SessionID))
+		_, lookupErr := scanSession(lookupRow)
+		if lookupErr == nil {
 			return dto.SessionResponse{}, ErrSessionNonceConflict
 		}
-		return dto.SessionResponse{}, ErrNotFound
+		if errors.Is(lookupErr, ErrNotFound) {
+			return dto.SessionResponse{}, ErrNotFound
+		}
+		return dto.SessionResponse{}, lookupErr
 	}
 	return dto.SessionResponse{}, err
 }
@@ -551,7 +602,7 @@ func (s *SQLStore) GetMarket(ctx context.Context, marketID int64) (dto.MarketRes
 		return dto.MarketResponse{}, err
 	}
 	items := []dto.MarketResponse{item}
-	if err := s.attachMarketRuntime(ctx, items); err != nil {
+	if err := s.attachMarketRuntimeAt(ctx, items, time.Now().Unix()); err != nil {
 		return dto.MarketResponse{}, err
 	}
 	return items[0], nil
@@ -589,6 +640,7 @@ func (s *SQLStore) ListMarkets(ctx context.Context, req dto.ListMarketsRequest) 
 		args    []any
 		filters []string
 	)
+	nowUnix := time.Now().Unix()
 	query := `
 		SELECT market_id, title, description, collateral_asset, status, open_at, close_at, resolve_at,
 		       resolved_outcome, created_by, metadata, created_at, updated_at
@@ -596,8 +648,17 @@ func (s *SQLStore) ListMarkets(ctx context.Context, req dto.ListMarketsRequest) 
 	`
 
 	if status := normalizeOptional(req.Status); status != "" {
-		args = append(args, status)
-		filters = append(filters, fmt.Sprintf("status = $%d", len(args)))
+		switch status {
+		case "OPEN":
+			args = append(args, nowUnix)
+			filters = append(filters, fmt.Sprintf("status = 'OPEN' AND (close_at <= 0 OR close_at > $%d)", len(args)))
+		case "CLOSED":
+			args = append(args, nowUnix)
+			filters = append(filters, fmt.Sprintf("(status = 'CLOSED' OR (status = 'OPEN' AND close_at > 0 AND close_at <= $%d))", len(args)))
+		default:
+			args = append(args, status)
+			filters = append(filters, fmt.Sprintf("status = $%d", len(args)))
+		}
 	}
 	if req.CreatedBy > 0 {
 		args = append(args, req.CreatedBy)
@@ -631,7 +692,7 @@ func (s *SQLStore) ListMarkets(ctx context.Context, req dto.ListMarketsRequest) 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if err := s.attachMarketRuntime(ctx, markets); err != nil {
+	if err := s.attachMarketRuntimeAt(ctx, markets, nowUnix); err != nil {
 		return nil, err
 	}
 	return normalizeCollectionItems(markets), nil
@@ -1514,6 +1575,10 @@ func scanChainTransaction(row scanner) (dto.ChainTransactionResponse, error) {
 }
 
 func (s *SQLStore) attachMarketRuntime(ctx context.Context, markets []dto.MarketResponse) error {
+	return s.attachMarketRuntimeAt(ctx, markets, time.Now().Unix())
+}
+
+func (s *SQLStore) attachMarketRuntimeAt(ctx context.Context, markets []dto.MarketResponse, nowUnix int64) error {
 	if len(markets) == 0 {
 		return nil
 	}
@@ -1532,6 +1597,7 @@ func (s *SQLStore) attachMarketRuntime(ctx context.Context, markets []dto.Market
 	}
 
 	for index := range markets {
+		applyEffectiveMarketStatus(&markets[index], nowUnix)
 		runtime := runtimeByMarket[markets[index].MarketID]
 		markets[index].Category = categoriesByMarket[markets[index].MarketID]
 		if options, ok := optionsByMarket[markets[index].MarketID]; ok {

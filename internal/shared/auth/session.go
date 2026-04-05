@@ -23,6 +23,8 @@ const (
 	TradingAuthorizationDomainName    = "FunnyOption Trading Authorization"
 	TradingAuthorizationDomainVersion = "2"
 	AuthorizeTradingKeyAction         = "AUTHORIZE_TRADING_KEY"
+	CanonicalTradingKeyAuthVersion    = "TRADING_KEY_V2"
+	LegacySessionCompatAuthVersion    = "LEGACY_SESSION_COMPAT"
 )
 
 type SessionGrant struct {
@@ -61,6 +63,92 @@ type TradingKeyAuthorization struct {
 	KeyExpiresAtMillis       int64
 	ChainID                  int64
 	VaultAddress             string
+}
+
+type AuthorizedTradingKey struct {
+	TradingKeyID       string
+	AccountID          int64
+	WalletAddress      string
+	TradingPublicKey   string
+	TradingKeyScheme   string
+	Scope              string
+	ChainID            int64
+	VaultAddress       string
+	Status             string
+	ExpiresAtMillis    int64
+	AuthorizationNonce string
+}
+
+type TradingKeyAuthorizationWitness struct {
+	AuthVersion              string `json:"auth_version"`
+	VerifierEligible         bool   `json:"verifier_eligible"`
+	AuthorizationRef         string `json:"authorization_ref"`
+	TradingKeyID             string `json:"trading_key_id"`
+	AccountID                int64  `json:"account_id"`
+	WalletAddress            string `json:"wallet_address"`
+	ChainID                  int64  `json:"chain_id"`
+	VaultAddress             string `json:"vault_address"`
+	TradingPublicKey         string `json:"trading_public_key"`
+	TradingKeyScheme         string `json:"trading_key_scheme"`
+	Scope                    string `json:"scope"`
+	KeyStatus                string `json:"key_status"`
+	Challenge                string `json:"challenge"`
+	ChallengeExpiresAtMillis int64  `json:"challenge_expires_at_millis"`
+	KeyExpiresAtMillis       int64  `json:"key_expires_at_millis"`
+	AuthorizedAtMillis       int64  `json:"authorized_at_millis"`
+	WalletSignatureStandard  string `json:"wallet_signature_standard"`
+	WalletTypedDataHash      string `json:"wallet_typed_data_hash"`
+	WalletSignature          string `json:"wallet_signature"`
+}
+
+type OrderIntentWitness struct {
+	SessionID         string `json:"session_id"`
+	WalletAddress     string `json:"wallet_address"`
+	UserID            int64  `json:"user_id"`
+	MarketID          int64  `json:"market_id"`
+	Outcome           string `json:"outcome"`
+	Side              string `json:"side"`
+	OrderType         string `json:"order_type"`
+	TimeInForce       string `json:"time_in_force"`
+	Price             int64  `json:"price"`
+	Quantity          int64  `json:"quantity"`
+	ClientOrderID     string `json:"client_order_id,omitempty"`
+	Nonce             uint64 `json:"nonce"`
+	RequestedAtMillis int64  `json:"requested_at_millis"`
+	Message           string `json:"message"`
+	MessageHash       string `json:"message_hash"`
+	Signature         string `json:"signature"`
+}
+
+type OrderAuthorizationWitness struct {
+	AuthVersion        string             `json:"auth_version"`
+	VerifierEligible   bool               `json:"verifier_eligible"`
+	IneligibleReason   string             `json:"ineligible_reason,omitempty"`
+	AuthorizationRef   string             `json:"authorization_ref,omitempty"`
+	TradingKeyID       string             `json:"trading_key_id"`
+	AccountID          int64              `json:"account_id"`
+	WalletAddress      string             `json:"wallet_address"`
+	ChainID            int64              `json:"chain_id"`
+	VaultAddress       string             `json:"vault_address"`
+	TradingPublicKey   string             `json:"trading_public_key"`
+	TradingKeyScheme   string             `json:"trading_key_scheme"`
+	Scope              string             `json:"scope"`
+	KeyStatus          string             `json:"key_status"`
+	KeyExpiresAtMillis int64              `json:"key_expires_at_millis"`
+	Intent             OrderIntentWitness `json:"intent"`
+}
+
+type VerifierAuthBinding struct {
+	AuthorizationRef string `json:"authorization_ref"`
+	TradingKeyID     string `json:"trading_key_id"`
+	AccountID        int64  `json:"account_id"`
+	WalletAddress    string `json:"wallet_address"`
+	ChainID          int64  `json:"chain_id"`
+	VaultAddress     string `json:"vault_address"`
+	TradingPublicKey string `json:"trading_public_key"`
+	TradingKeyScheme string `json:"trading_key_scheme"`
+	Scope            string `json:"scope"`
+	KeyStatus        string `json:"key_status"`
 }
 
 func (g SessionGrant) Normalize() SessionGrant {
@@ -240,6 +328,49 @@ func (a TradingKeyAuthorization) Validate(now time.Time) error {
 	return nil
 }
 
+func (k AuthorizedTradingKey) Normalize() AuthorizedTradingKey {
+	k.TradingKeyID = strings.TrimSpace(k.TradingKeyID)
+	k.WalletAddress = NormalizeHex(k.WalletAddress)
+	k.TradingPublicKey = NormalizeHex(k.TradingPublicKey)
+	k.TradingKeyScheme = strings.ToUpper(strings.TrimSpace(k.TradingKeyScheme))
+	if k.TradingKeyScheme == "" {
+		k.TradingKeyScheme = DefaultTradingKeyScheme
+	}
+	k.Scope = strings.ToUpper(strings.TrimSpace(k.Scope))
+	if k.Scope == "" {
+		k.Scope = DefaultSessionScope
+	}
+	k.VaultAddress = NormalizeHex(k.VaultAddress)
+	k.Status = strings.ToUpper(strings.TrimSpace(k.Status))
+	k.AuthorizationNonce = formatHexWithPrefix(k.AuthorizationNonce)
+	return k
+}
+
+func (k AuthorizedTradingKey) AuthorizationRef() string {
+	normalized := k.Normalize()
+	if normalized.TradingKeyID == "" || normalized.AuthorizationNonce == "" {
+		return ""
+	}
+	return normalized.TradingKeyID + ":" + normalized.AuthorizationNonce
+}
+
+func (k AuthorizedTradingKey) VerifierEligibility() (bool, string) {
+	normalized := k.Normalize()
+	if !strings.HasPrefix(normalized.TradingKeyID, "tk_") {
+		return false, "deprecated /api/v1/sessions compatibility trading key"
+	}
+	if normalized.VaultAddress == "" {
+		return false, "blank-vault auth rows are deprecated compatibility state"
+	}
+	if normalized.ChainID <= 0 {
+		return false, "chain_id is missing from trading key scope"
+	}
+	if normalized.TradingPublicKey == "" {
+		return false, "trading public key is missing from trading key scope"
+	}
+	return true, ""
+}
+
 func (a TradingKeyAuthorization) TradingKeyID() string {
 	normalized := a.Normalize()
 	sum := sha256.Sum256([]byte(
@@ -249,6 +380,145 @@ func (a TradingKeyAuthorization) TradingKeyID() string {
 			":" + normalized.TradingPublicKey,
 	))
 	return "tk_" + hex.EncodeToString(sum[:16])
+}
+
+func BuildTradingKeyAuthorizationWitness(accountID int64, authz TradingKeyAuthorization, key AuthorizedTradingKey, walletSignature string, authorizedAtMillis int64) (TradingKeyAuthorizationWitness, error) {
+	normalizedAuthz := authz.Normalize()
+	normalizedKey := key.Normalize()
+	typedDataHash, _, err := apitypes.TypedDataAndHash(normalizedAuthz.TypedData())
+	if err != nil {
+		return TradingKeyAuthorizationWitness{}, err
+	}
+	eligible, _ := normalizedKey.VerifierEligibility()
+	return TradingKeyAuthorizationWitness{
+		AuthVersion:              CanonicalTradingKeyAuthVersion,
+		VerifierEligible:         eligible,
+		AuthorizationRef:         normalizedKey.AuthorizationRef(),
+		TradingKeyID:             normalizedKey.TradingKeyID,
+		AccountID:                accountID,
+		WalletAddress:            normalizedAuthz.WalletAddress,
+		ChainID:                  normalizedAuthz.ChainID,
+		VaultAddress:             normalizedAuthz.VaultAddress,
+		TradingPublicKey:         normalizedAuthz.TradingPublicKey,
+		TradingKeyScheme:         normalizedAuthz.TradingKeyScheme,
+		Scope:                    normalizedAuthz.Scope,
+		KeyStatus:                normalizedKey.Status,
+		Challenge:                normalizedAuthz.Challenge,
+		ChallengeExpiresAtMillis: normalizedAuthz.ChallengeExpiresAtMillis,
+		KeyExpiresAtMillis:       normalizedAuthz.KeyExpiresAtMillis,
+		AuthorizedAtMillis:       authorizedAtMillis,
+		WalletSignatureStandard:  DefaultWalletSignatureStandard,
+		WalletTypedDataHash:      "0x" + hex.EncodeToString(typedDataHash),
+		WalletSignature:          NormalizeHex(walletSignature),
+	}, nil
+}
+
+func BuildOrderIntentWitness(intent OrderIntent, signature string) OrderIntentWitness {
+	normalized := intent.Normalize()
+	message := normalized.Message()
+	return OrderIntentWitness{
+		SessionID:         normalized.SessionID,
+		WalletAddress:     normalized.WalletAddress,
+		UserID:            normalized.UserID,
+		MarketID:          normalized.MarketID,
+		Outcome:           normalized.Outcome,
+		Side:              normalized.Side,
+		OrderType:         normalized.OrderType,
+		TimeInForce:       normalized.TimeInForce,
+		Price:             normalized.Price,
+		Quantity:          normalized.Quantity,
+		ClientOrderID:     normalized.ClientOrderID,
+		Nonce:             normalized.Nonce,
+		RequestedAtMillis: normalized.RequestedAtMillis,
+		Message:           message,
+		MessageHash:       messageHashHex(message),
+		Signature:         NormalizeHex(signature),
+	}
+}
+
+func BuildOrderAuthorizationWitness(accountID int64, key AuthorizedTradingKey, intent OrderIntent, signature string) OrderAuthorizationWitness {
+	normalizedKey := key.Normalize()
+	eligible, reason := normalizedKey.VerifierEligibility()
+	authVersion := CanonicalTradingKeyAuthVersion
+	authorizationRef := normalizedKey.AuthorizationRef()
+	if !strings.HasPrefix(normalizedKey.TradingKeyID, "tk_") {
+		authVersion = LegacySessionCompatAuthVersion
+		authorizationRef = ""
+	}
+	return OrderAuthorizationWitness{
+		AuthVersion:        authVersion,
+		VerifierEligible:   eligible,
+		IneligibleReason:   reason,
+		AuthorizationRef:   authorizationRef,
+		TradingKeyID:       normalizedKey.TradingKeyID,
+		AccountID:          accountID,
+		WalletAddress:      normalizedKey.WalletAddress,
+		ChainID:            normalizedKey.ChainID,
+		VaultAddress:       normalizedKey.VaultAddress,
+		TradingPublicKey:   normalizedKey.TradingPublicKey,
+		TradingKeyScheme:   normalizedKey.TradingKeyScheme,
+		Scope:              normalizedKey.Scope,
+		KeyStatus:          normalizedKey.Status,
+		KeyExpiresAtMillis: normalizedKey.ExpiresAtMillis,
+		Intent:             BuildOrderIntentWitness(intent, signature),
+	}
+}
+
+func (w TradingKeyAuthorizationWitness) VerifierBinding() (VerifierAuthBinding, error) {
+	if !w.VerifierEligible {
+		return VerifierAuthBinding{}, fmt.Errorf("trading key authorization witness is not verifier-eligible")
+	}
+	if strings.TrimSpace(w.AuthVersion) != CanonicalTradingKeyAuthVersion {
+		return VerifierAuthBinding{}, fmt.Errorf("trading key authorization witness auth_version must be %s", CanonicalTradingKeyAuthVersion)
+	}
+	return normalizeVerifierAuthBinding(VerifierAuthBinding{
+		AuthorizationRef: w.AuthorizationRef,
+		TradingKeyID:     w.TradingKeyID,
+		AccountID:        w.AccountID,
+		WalletAddress:    w.WalletAddress,
+		ChainID:          w.ChainID,
+		VaultAddress:     w.VaultAddress,
+		TradingPublicKey: w.TradingPublicKey,
+		TradingKeyScheme: w.TradingKeyScheme,
+		Scope:            w.Scope,
+		KeyStatus:        w.KeyStatus,
+	}).validate("trading key authorization witness")
+}
+
+func (w OrderAuthorizationWitness) VerifierBinding() (VerifierAuthBinding, error) {
+	if !w.VerifierEligible {
+		return VerifierAuthBinding{}, fmt.Errorf("order authorization witness is not verifier-eligible")
+	}
+	if strings.TrimSpace(w.AuthVersion) != CanonicalTradingKeyAuthVersion {
+		return VerifierAuthBinding{}, fmt.Errorf("order authorization witness auth_version must be %s", CanonicalTradingKeyAuthVersion)
+	}
+	return normalizeVerifierAuthBinding(VerifierAuthBinding{
+		AuthorizationRef: w.AuthorizationRef,
+		TradingKeyID:     w.TradingKeyID,
+		AccountID:        w.AccountID,
+		WalletAddress:    w.WalletAddress,
+		ChainID:          w.ChainID,
+		VaultAddress:     w.VaultAddress,
+		TradingPublicKey: w.TradingPublicKey,
+		TradingKeyScheme: w.TradingKeyScheme,
+		Scope:            w.Scope,
+		KeyStatus:        w.KeyStatus,
+	}).validate("order authorization witness")
+}
+
+func ValidateVerifierBindingMatch(authorized, order VerifierAuthBinding) error {
+	left, err := normalizeVerifierAuthBinding(authorized).validate("authorized binding")
+	if err != nil {
+		return err
+	}
+	right, err := normalizeVerifierAuthBinding(order).validate("order binding")
+	if err != nil {
+		return err
+	}
+	if left != right {
+		return fmt.Errorf("verifier auth binding mismatch: authorized=%+v order=%+v", left, right)
+	}
+	return nil
 }
 
 func (a TradingKeyAuthorization) TypedData() apitypes.TypedData {
@@ -412,6 +682,68 @@ func NormalizeHex(value string) string {
 		return ""
 	}
 	return strings.ToLower(trimmed)
+}
+
+func messageHashHex(message string) string {
+	sum := sha256.Sum256([]byte(message))
+	return "0x" + hex.EncodeToString(sum[:])
+}
+
+func formatHexWithPrefix(value string) string {
+	normalized := NormalizeHex(value)
+	if normalized == "" {
+		return ""
+	}
+	if strings.HasPrefix(normalized, "0x") {
+		return normalized
+	}
+	return "0x" + normalized
+}
+
+func normalizeVerifierAuthBinding(binding VerifierAuthBinding) VerifierAuthBinding {
+	binding.AuthorizationRef = strings.TrimSpace(binding.AuthorizationRef)
+	binding.TradingKeyID = strings.TrimSpace(binding.TradingKeyID)
+	binding.WalletAddress = NormalizeHex(binding.WalletAddress)
+	binding.VaultAddress = NormalizeHex(binding.VaultAddress)
+	binding.TradingPublicKey = NormalizeHex(binding.TradingPublicKey)
+	binding.TradingKeyScheme = strings.ToUpper(strings.TrimSpace(binding.TradingKeyScheme))
+	binding.Scope = strings.ToUpper(strings.TrimSpace(binding.Scope))
+	binding.KeyStatus = strings.ToUpper(strings.TrimSpace(binding.KeyStatus))
+	return binding
+}
+
+func (b VerifierAuthBinding) validate(label string) (VerifierAuthBinding, error) {
+	if strings.TrimSpace(b.AuthorizationRef) == "" {
+		return VerifierAuthBinding{}, fmt.Errorf("%s authorization_ref is required", label)
+	}
+	if strings.TrimSpace(b.TradingKeyID) == "" {
+		return VerifierAuthBinding{}, fmt.Errorf("%s trading_key_id is required", label)
+	}
+	if b.AccountID <= 0 {
+		return VerifierAuthBinding{}, fmt.Errorf("%s account_id must be positive", label)
+	}
+	if b.WalletAddress == "" {
+		return VerifierAuthBinding{}, fmt.Errorf("%s wallet_address is required", label)
+	}
+	if b.ChainID <= 0 {
+		return VerifierAuthBinding{}, fmt.Errorf("%s chain_id must be positive", label)
+	}
+	if b.VaultAddress == "" {
+		return VerifierAuthBinding{}, fmt.Errorf("%s vault_address is required", label)
+	}
+	if b.TradingPublicKey == "" {
+		return VerifierAuthBinding{}, fmt.Errorf("%s trading_public_key is required", label)
+	}
+	if b.TradingKeyScheme == "" {
+		return VerifierAuthBinding{}, fmt.Errorf("%s trading_key_scheme is required", label)
+	}
+	if b.Scope == "" {
+		return VerifierAuthBinding{}, fmt.Errorf("%s scope is required", label)
+	}
+	if b.KeyStatus == "" {
+		return VerifierAuthBinding{}, fmt.Errorf("%s key_status is required", label)
+	}
+	return b, nil
 }
 
 func validateFixedHex(label, value string, size int) error {

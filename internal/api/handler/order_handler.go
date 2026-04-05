@@ -315,7 +315,7 @@ func (h *OrderHandler) CreateFirstLiquidity(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadGateway, gin.H{"error": "get market failed"})
 		return
 	}
-	if !isTradableMarketStatus(market.Status) {
+	if !isTradableMarket(market) {
 		ctx.JSON(http.StatusConflict, gin.H{"error": "market is not tradable"})
 		return
 	}
@@ -907,6 +907,10 @@ func (h *OrderHandler) ListSessions(ctx *gin.Context) {
 	writeCollectionResponse(ctx, http.StatusOK, items)
 }
 
+func (h *OrderHandler) ListTradingKeys(ctx *gin.Context) {
+	h.ListSessions(ctx)
+}
+
 func (h *OrderHandler) RevokeSession(ctx *gin.Context) {
 	sessionID := strings.TrimSpace(ctx.Param("session_id"))
 	if sessionID == "" {
@@ -1117,7 +1121,15 @@ func (h *OrderHandler) CreateOrder(ctx *gin.Context) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if _, err := h.store.AdvanceSessionNonce(ctx, session.SessionID, req.OrderNonce); err != nil {
+		nonceAdvanceReq := dto.AdvanceSessionNonceRequest{
+			SessionID: session.SessionID,
+			Nonce:     req.OrderNonce,
+			AuthorizationWitness: func() *sharedauth.OrderAuthorizationWitness {
+				witness := sharedauth.BuildOrderAuthorizationWitness(session.UserID, authorizedTradingKeyFromSession(session), intent, req.SessionSignature)
+				return &witness
+			}(),
+		}
+		if _, err := h.store.AdvanceSessionNonce(ctx, nonceAdvanceReq); err != nil {
 			if errors.Is(err, ErrSessionNonceConflict) {
 				ctx.JSON(http.StatusConflict, gin.H{"error": "trading key nonce conflict"})
 				return
@@ -1194,7 +1206,7 @@ func (h *OrderHandler) CreateOrder(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadGateway, gin.H{"error": "get market failed"})
 		return
 	}
-	if !isTradableMarketStatus(market.Status) {
+	if !isTradableMarket(market) {
 		ctx.JSON(http.StatusConflict, gin.H{"error": "market is not tradable"})
 		return
 	}
@@ -1297,8 +1309,8 @@ func calculateFreeze(side, orderType string, marketID int64, outcome string, pri
 	}
 }
 
-func isTradableMarketStatus(status string) bool {
-	return strings.ToUpper(strings.TrimSpace(status)) == "OPEN"
+func isTradableMarket(market dto.MarketResponse) bool {
+	return marketIsOpenForTrading(market, time.Now().Unix())
 }
 
 type issuedFirstLiquidityInventory struct {
@@ -1428,7 +1440,7 @@ func (h *OrderHandler) ResolveMarket(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadGateway, gin.H{"error": "load market failed"})
 		return
 	}
-	if normalizeMarketStatus(market.Status) == "RESOLVED" {
+	if effectiveMarketStatusAt(market.Status, market.CloseAt, time.Now().Unix()) == "RESOLVED" {
 		ctx.JSON(http.StatusConflict, gin.H{"error": "market is already resolved"})
 		return
 	}

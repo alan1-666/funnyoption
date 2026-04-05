@@ -319,6 +319,12 @@
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.1));
 }
 
+.primary:disabled {
+  cursor: not-allowed;
+  transform: none;
+  opacity: 0.56;
+}
+
 .status {
   min-height: 20px;
   color: rgba(255, 255, 255, 0.52);

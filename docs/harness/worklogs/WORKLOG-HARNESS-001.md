@@ -1144,3 +1144,988 @@
 - next:
   - push the micro-polish set to staging if the user wants to inspect the new
     homepage density and quieter portfolio copy on the deployed environment
+
+### 2026-04-05 03:28 CST
+
+- read:
+  - `docs/architecture/direct-deposit-session-key.md`
+  - `docs/architecture/order-flow.md`
+  - `docs/architecture/oracle-settled-crypto-markets.md`
+  - `internal/api/handler/order_handler.go`
+  - `internal/oracle/service/worker.go`
+  - `internal/oracle/service/sql_store.go`
+  - `internal/settlement/service/processor.go`
+  - official StarkEx / SHARP documentation and deployments references
+- changed:
+  - recorded one architecture-level conclusion for commander:
+    - current FunnyOption settlement is not “time reached -> generic automatic
+      settlement”
+    - non-oracle markets still require an explicit resolve event
+    - oracle crypto markets auto-resolve only off `resolve_at`, not `close_at`
+  - recorded one architecture-feasibility conclusion for the proposed
+    StarkEx-style batch proof design:
+    - the high-level flow is technically coherent and broadly matches official
+      StarkEx docs
+    - but it is not a narrow extension of the current repo; it is a new
+      product architecture that would replace the current centralized
+      account/matching/settlement boundary
+- validated:
+  - current runtime truth:
+    - order ingress only blocks on `market.status == OPEN`; it does not
+      currently enforce `close_at` as a hard stop
+    - manual resolve publishes `market.event(status=RESOLVED)` and settlement
+      consumes that event to cancel active orders and publish payouts
+    - oracle auto-resolution scans `resolve_at <= now` eligible CRYPTO markets,
+      writes `market_resolutions`, then publishes the same resolved
+      `market.event`
+  - official StarkEx docs confirm:
+    - applications execute transactions offchain, batch them, send them to the
+      StarkEx service, then to SHARP, then to an onchain verifier / fact
+      registry, after which the application contract applies the state update
+    - application state is committed on a dedicated Ethereum-based contract
+    - shared SHARP exists, but not every listed client uses it the same way;
+      the StarkEx deployments page currently lists dYdX under a separate prover
+      while several other apps use SHARP
+- findings:
+  - the user’s target design is viable in principle, but only if FunnyOption is
+    willing to become a validity-rollup-style exchange architecture instead of
+    the current “direct vault deposit + centralized offchain balances and
+    settlement” system
+  - the biggest gap is not frontend signing UX; it is replacing or bypassing
+    these current repo assumptions:
+    - mutable SQL balances instead of a Merkle state tree
+    - Kafka event-driven centralized settlement instead of proof-driven state
+      updates
+    - BSC vault contract flow instead of a StarkEx dedicated Ethereum-based
+      application contract / fact-registry integration
+    - no forced-withdrawal / escape-hatch lifecycle in the current product
+- blockers:
+  - no immediate code blocker, because this is still architecture analysis
+  - strong scope warning:
+    - pursuing StarkEx / SHARP is a platform rewrite lane, not a small feature
+    - the nearer-term product need is still to harden `close_at` / `resolve_at`
+      lifecycle semantics in the current architecture
+- next:
+  - if the user wants to pursue this seriously, create a design-first task that
+    compares three paths explicitly:
+    - keep current centralized offchain engine and just harden lifecycle rules
+    - app-specific validity rollup / proof-batched architecture
+    - StarkEx-as-a-service style integration with Ethereum-based contracts and
+      forced-operation requirements
+
+## 2026-04-05 03:41 CST - Commander architecture review on user-supplied Mode B service map
+
+- thread: COMMANDER
+- scope:
+  - reviewed the user's target "CEX + onchain settlement layer" decomposition
+    for a StarkEx-style Mode B exchange
+  - compared that target against current FunnyOption runtime boundaries and the
+    existing V2 trading-key architecture
+- validated:
+  - the user's component map is directionally correct for a validity-proof-based
+    exchange:
+    - most exchange services remain operator-run and offchain
+    - onchain scope narrows to custody, proof verification, state commitment,
+      withdrawals, and escape hatches
+  - the sharp edge is not matching-engine design; it is proving and recovery:
+    - a durable sequencer log is required; "orderbook in memory" can be true for
+      live matching, but batch inputs cannot exist only in memory
+    - data availability is a first-class security boundary, not an optional
+      optimization
+    - escape hatch / forced withdrawal is part of the product contract, not a
+      later add-on
+  - current FunnyOption V2 deliberately stopped at "Stark-style UX" rather than
+    "StarkEx state model":
+    - browser-local trading key
+    - wallet authorizes once with EIP-712
+    - backend still owns centralized matching, balances, and settlement
+- findings:
+  - the proposed Mode B target is viable in principle and is a reasonable
+    reference model if the long-term goal is "DEX with operator-run execution
+    but user-protected custody"
+  - however, moving from the current repo to that target would require
+    replacing four core truth boundaries:
+    - SQL balances -> Merkle / state-root based state
+    - Kafka settlement events -> batch state transitions proved as valid
+    - direct BSC vault + listener accounting -> proof-aware deposit,
+      withdrawal, and claim lifecycle
+    - current "operator may go down but system has no L1 escape path" -> forced
+      withdrawal / freeze / exit guarantees
+  - the user's proposed service list is missing one implementation-critical
+    operator component:
+    - a durable batch journal / sequencer log that is authoritative for prover
+      input, replay, retry, and audit
+  - the user's proposed proving lane also needs an explicit product choice on
+    DA mode up front:
+    - rollup-style L1 DA for strongest exit guarantees
+    - external DA or validium only if the product accepts weaker withdrawal
+      assumptions
+- recommendation:
+  - near term:
+    - keep improving the current architecture as a centralized offchain engine
+      with better lifecycle semantics and UX
+  - design lane:
+    - if the team wants Mode B seriously, open a dedicated architecture task
+      around:
+      - state model
+      - DA model
+      - forced withdrawal / escape hatch
+      - proving integration choice
+      - migration path from current BSC vault model
+
+## 2026-04-05 03:49 CST - Commander captured preferred DA and withdrawal model for Mode B
+
+- thread: COMMANDER
+- scope:
+  - captured two product-level decisions from the user for the target Mode B
+    architecture
+- decisions:
+  - data availability:
+    - preferred mode is `ZK-Rollup`
+    - rationale accepted:
+      - strongest user exit guarantees
+      - L1-native DA instead of external DA or validium committee trust
+      - more appropriate for a financial exchange than cheaper but weaker DA
+        modes
+  - withdrawal model:
+    - `slow withdrawal`:
+      - user requests withdrawal offchain
+      - operator includes it in a later batch
+      - proof is verified on L1
+      - vault releases claimable funds to the user
+    - `fast withdrawal`:
+      - offchain request is matched with an LP
+      - LP advances L1 funds immediately to the user
+      - later batch settlement reimburses the LP from the user's vault balance
+      - this is effectively a conditional-transfer / liquidity-provider lane
+    - `forced withdrawal`:
+      - user can bypass the operator through an L1 forced-withdrawal request
+      - operator gets a grace period to process it
+      - timeout allows freeze / escape path
+      - user exits with Merkle proof against the committed L1 state
+- findings:
+  - this sharpens the target architecture materially:
+    - the team is not targeting validium
+    - the team is not targeting a "single withdrawal path" design
+  - as a result, any serious Mode B design task must now include:
+    - L1 calldata / state-diff cost modeling for rollup DA
+    - LP reimbursement semantics for fast withdrawal
+    - forced-withdrawal state transitions and freeze-state operations as first
+      class contracts, not optional add-ons
+- next:
+  - if this lane continues, the next architecture task should compare:
+    - the exact L1 contract surface for deposits, slow withdrawals, fast
+      withdrawals, and forced withdrawals
+    - how those flows map back to the batch journal, state tree, and proof
+      circuit
+
+## 2026-04-05 04:00 CST - Commander opened Mode B architecture lane
+
+- thread: COMMANDER
+- scope:
+  - formalized the user's Mode B / rollup target into harness task files so the
+    next design worker can execute against explicit repo artifacts instead of
+    chat-only context
+- changed:
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-008.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-008.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-008.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - the new task keeps the lane design-first
+  - the lane now has explicit outputs:
+    - Mode B component map
+    - state model
+    - batch truth / sequencer-journal model
+    - `ZK-Rollup` DA assumptions
+    - slow / fast / forced withdrawal state machines
+    - L1 contract boundary
+    - migration stages from current FunnyOption
+- blockers:
+  - none
+- next:
+  - launch one design worker on `TASK-CHAIN-008`
+
+## 2026-04-05 16:35 CST - Commander accepted Mode B architecture design and opened shadow-rollup tranche
+
+- thread: COMMANDER
+- scope:
+  - reviewed and accepted the `TASK-CHAIN-008` design output
+  - opened the first implementation tranche for the Mode B lane
+- changed:
+  - accepted:
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md` Mode B boundary notes
+    - `HANDSHAKE-CHAIN-008.md` status -> `completed`
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-009.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-009.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-009.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - no new P0/P1 architecture findings in the Mode B design doc
+  - the doc is explicit that current FunnyOption is not yet Mode B
+  - the accepted first implementation tranche is:
+    - append-only sequencer journal
+    - durable batch input
+    - deterministic shadow roots
+    - no prover/verifier/production claim rewrite yet
+- blockers:
+  - none at commander-planning level
+- next:
+  - launch one worker on `TASK-CHAIN-009`
+
+## 2026-04-05 17:05 CST - Commander accepted first shadow-rollup tranche and opened settlement-phase follow-up
+
+- thread: COMMANDER
+- scope:
+  - reviewed `TASK-CHAIN-009` output
+  - accepted the first shadow-rollup tranche
+  - opened the next settlement-phase follow-up tranche
+- changed:
+  - accepted:
+    - `internal/rollup/**`
+    - `migrations/014_rollup_shadow_lane.sql`
+    - `docs/sql/schema.md` shadow-rollup notes
+    - `HANDSHAKE-CHAIN-009.md` status -> `completed`
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-010.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-010.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-010.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - targeted tests passed:
+    - `go test ./internal/rollup ./internal/matching/service ./internal/chain/service`
+    - `go test -run TestReplayStoredBatchesDeterministic -v ./internal/rollup`
+  - migration `014_rollup_shadow_lane.sql` applied cleanly on the local dev DB
+  - `rollup_shadow_journal_entries` and `rollup_shadow_batches` exist
+  - deterministic replay proof is real for the current trading-phase input set
+- findings:
+  - non-blocking residual:
+    - `orders_root` still uses deterministic `ZeroNonceRoot()`; replay-protection state is not yet shadowed truthfully and must remain explicit in docs / witness contract
+- blockers:
+  - none at this tranche boundary
+- next:
+  - launch one worker on `TASK-CHAIN-010`
+
+## 2026-04-05 17:25 CST - Commander accepted settlement-phase shadow tranche and opened nonce/public-input follow-up
+
+- thread: COMMANDER
+- scope:
+  - reviewed `TASK-CHAIN-010` output
+  - accepted the settlement-phase shadow-rollup tranche
+  - opened the next nonce/public-input follow-up tranche
+- changed:
+  - accepted:
+    - `internal/rollup/**`
+    - `internal/settlement/service/**` settlement shadow capture
+    - `contracts/src/FunnyRollupCore.sol`
+    - `contracts/test/FunnyRollupCore.t.sol`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md`
+    - `HANDSHAKE-CHAIN-010.md` status -> `completed`
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-011.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-011.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-011.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - targeted tests passed:
+    - `go test ./internal/rollup ./internal/settlement/service`
+    - `go test -run TestReplayStoredBatchesSettlementDeterministic -v ./internal/rollup`
+    - `forge test --match-contract FunnyRollupCoreTest`
+    - `git diff --check`
+  - deterministic replay proof now includes settlement-phase inputs while still
+    replaying only durable `shadow-batch-v1` input, not live SQL snapshots or
+    Kafka offsets
+  - the minimal Foundry-only L1 surface is real but still metadata-only:
+    - `recordBatchMetadata(batch_id, batch_data_hash, prev_state_root,
+      next_state_root)`
+- findings:
+  - non-blocking residual:
+    - `orders_root.nonce_root` is still a deliberate `ZeroNonceRoot()`
+      witness-level limitation until API/auth nonce advances are carried into
+      the durable batch input contract
+- blockers:
+  - none at this tranche boundary
+- next:
+  - launch one worker on `TASK-CHAIN-011`
+
+## 2026-04-05 17:40 CST - Commander accepted truthful nonce shadowing and opened proof-lane design follow-up
+
+- thread: COMMANDER
+- scope:
+  - reviewed `TASK-CHAIN-011` output
+  - accepted truthful nonce shadowing into the shadow-rollup lane
+  - opened the next proof-lane nonce/verifier design follow-up
+- changed:
+  - accepted:
+    - `internal/rollup/**` truthful nonce replay updates
+    - `internal/api/handler/sql_store.go`
+    - `internal/api/handler/rollup_shadow.go`
+    - `internal/api/handler/rollup_shadow_test.go`
+    - `internal/api/server.go`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md`
+    - `HANDSHAKE-CHAIN-011.md` status -> `completed`
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-012.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-012.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-012.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - targeted tests passed:
+    - `go test ./internal/rollup`
+    - `go test ./internal/api/handler`
+    - `go test ./internal/shared/auth`
+    - `go test -run TestReplayStoredBatchesSettlementDeterministic -v ./internal/rollup`
+    - `git diff --check`
+  - `AdvanceSessionNonce` now updates `wallet_sessions.last_order_nonce` and
+    appends `NONCE_ADVANCED` to the shadow journal in one transaction
+  - `orders_root.nonce_root` is no longer derived from `ZeroNonceRoot()` and
+    now replays purely from durable `shadow-batch-v1` input
+- findings:
+  - non-blocking residual:
+    - nonce truth is now real shadow state, but the semantic contract is still
+      the current API/auth monotonic next-nonce floor and still allows nonce
+      gaps; the first proof lane must decide whether to accept that or tighten
+      to gapless/auth-gadget semantics before verifier-gated acceptance
+- blockers:
+  - none at this tranche boundary
+- next:
+  - launch one design worker on `TASK-CHAIN-012`
+
+## 2026-04-05 17:55 CST - Commander accepted proof-lane nonce/verifier design and opened canonical auth-witness follow-up
+
+- thread: COMMANDER
+- scope:
+  - reviewed `TASK-CHAIN-012` output
+  - accepted the first proof-lane nonce/auth and verifier-boundary design
+  - opened the next canonical auth-witness implementation follow-up
+- changed:
+  - accepted:
+    - `docs/architecture/mode-b-zk-rollup.md` proof-lane nonce/auth decision
+    - `docs/sql/schema.md` proof-lane storage/migration notes
+    - `HANDSHAKE-CHAIN-012.md` status -> `completed`
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-013.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-013.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-013.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - `git diff --check`
+  - design docs now explicitly fix:
+    - tranche-1 keeps the monotonic-floor nonce contract
+    - verifier-gated acceptance cannot rely on prior operator-side auth checks
+    - deprecated `/api/v1/sessions` compatibility rows are not verifier-eligible
+    - `FunnyRollupCore.recordBatchMetadata(...)` remains metadata-only until a
+      future verifier gate proves the stabilized public-input surface plus the
+      chosen nonce/auth contract
+- findings:
+  - non-blocking residual:
+    - the next implementation tranche must still add canonical V2 trading-key
+      auth witness material before verifier-gated batches can be sound
+- blockers:
+  - none at this tranche boundary
+- next:
+  - launch one worker on `TASK-CHAIN-013`
+
+## 2026-04-05 18:35 CST - Commander accepted canonical auth-witness lane and opened verifier-gated auth/proof follow-up
+
+- thread: COMMANDER
+- scope:
+  - reviewed `TASK-CHAIN-013` output
+  - accepted the canonical V2 auth-witness lane
+  - opened the next verifier-gated auth/proof implementation tranche
+- changed:
+  - accepted:
+    - `internal/shared/auth/session.go`
+    - `internal/rollup/**` auth-witness lane updates
+    - `internal/api/handler/rollup_shadow.go`
+    - `internal/api/handler/sql_store.go`
+    - `internal/api/handler/order_handler.go`
+    - `internal/api/routes_auth.go`
+    - `cmd/local-lifecycle/trading_key_oracle_flow.go`
+    - `scripts/staging-concurrency-orders.mjs`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/architecture/direct-deposit-session-key.md`
+    - `docs/sql/schema.md`
+    - `HANDSHAKE-CHAIN-013.md` status -> `completed`
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-014.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-014.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-014.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/shared/auth ./internal/rollup ./internal/api/handler ./internal/api ./cmd/local-lifecycle`
+  - `node --check scripts/staging-concurrency-orders.mjs`
+  - `git diff --check`
+  - canonical auth witness lane is now explicit:
+    - V2 registration appends `TRADING_KEY_AUTHORIZED` witness-only journal entries
+    - `NONCE_ADVANCED` can carry exact order-intent message/hash/signature plus `authorization_ref`
+    - `authorization_ref = trading_key_id:challenge` is the durable join between the two witness lanes
+- findings:
+  - non-blocking residual:
+    - verifier-eligible proof tooling moved to `trading-keys` routes, but
+      `docs/operations/local-full-flow-acceptance.md` still describes truthful
+      restore via `GET /api/v1/sessions`; this is a docs/runbook mismatch, not
+      a product/runtime blocker
+- blockers:
+  - none at this tranche boundary
+- next:
+  - launch one worker on `TASK-CHAIN-014`
+
+## 2026-04-05 20:32 CST - Commander accepted verifier-gated auth/proof prep and opened minimal verifier/state-root acceptance follow-up
+
+- thread: COMMANDER
+- scope:
+  - reviewed `TASK-CHAIN-014` output
+  - accepted the first verifier-gated auth/proof prep tranche
+  - opened the next minimal verifier/state-root acceptance follow-up
+- changed:
+  - accepted:
+    - `internal/shared/auth/session.go`
+    - `internal/shared/auth/session_test.go`
+    - `internal/rollup/types.go`
+    - `internal/rollup/verifier_contract.go`
+    - `internal/rollup/verifier_contract_test.go`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/architecture/direct-deposit-session-key.md`
+    - `docs/sql/schema.md`
+    - `docs/operations/local-full-flow-acceptance.md`
+    - `HANDSHAKE-CHAIN-014.md` status -> `completed`
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-015.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-015.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-015.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/shared/auth ./internal/rollup ./internal/api/handler ./internal/api`
+  - `git diff --check`
+  - `rg -n "/api/v1/sessions" docs/operations/local-full-flow-acceptance.md`
+  - canonical verifier-prep auth/proof contract is now explicit:
+    - `VerifierAuthBinding` fixes the join tuple future verifier workers must consume
+    - `BuildVerifierAuthProofContract(history, batch)` joins prior `TRADING_KEY_AUTHORIZED` to target-batch `NONCE_ADVANCED.payload.order_authorization`
+    - target-batch auth rows are classified as `JOINED`, `MISSING_TRADING_KEY_AUTHORIZED`, or `NON_VERIFIER_ELIGIBLE`
+    - `BuildVerifierGateBatchContract(history, batch)` packages stable public inputs, L1 batch metadata, and auth-proof material without widening `shadow-batch-v1`
+- findings:
+  - non-blocking residual:
+    - legacy smoke docs like local lifecycle may still mention deprecated `/api/v1/sessions`, but verifier-eligible runbooks now consistently point to `trading-keys`
+- blockers:
+  - none at this tranche boundary
+- next:
+  - launch one worker on `TASK-CHAIN-015`
+
+## 2026-04-05 20:58 CST - Commander accepted minimal verifier/state-root acceptance hook and opened metadata-anchored verifier artifact follow-up
+
+- thread: COMMANDER
+- scope:
+  - reviewed `TASK-CHAIN-015` output
+  - accepted the minimal Foundry-only verifier/state-root acceptance tranche
+  - opened one follow-up for metadata anchoring plus stable verifier artifact export
+- changed:
+  - accepted:
+    - `internal/rollup/types.go`
+    - `internal/rollup/verifier_contract.go`
+    - `internal/rollup/verifier_contract_test.go`
+    - `contracts/src/FunnyRollupCore.sol`
+    - `contracts/test/FunnyRollupCore.t.sol`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md`
+    - `HANDSHAKE-CHAIN-015.md` status -> `completed`
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-016.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-016.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-016.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/rollup ./internal/shared/auth`
+  - `forge test --match-contract FunnyRollupCoreTest`
+  - `git diff --check`
+  - the new acceptance hook is real but still narrow:
+    - `BuildVerifierStateRootAcceptanceContract(history, batch)` now projects the stable verifier-gate boundary into acceptance-facing `auth_statuses`
+    - `FunnyRollupCore.acceptVerifiedBatch(...)` rejects any target batch with non-`JOINED` auth rows before consulting the verifier stub
+    - accepted roots still stay separate from metadata-only `recordBatchMetadata(...)` and do not change production truth
+- findings:
+  - non-blocking follow-up:
+    - `acceptVerifiedBatch(...)` does not yet require the target batch to have been previously recorded through `recordBatchMetadata(...)`; if `batchMetadata[batchId]` is empty, the current subset check only proves calldata self-consistency, not anchoring to the metadata lane
+- blockers:
+  - none at this tranche boundary
+- next:
+  - launch one worker on `TASK-CHAIN-016`
+
+## 2026-04-05 21:15 CST - Commander accepted metadata-anchored verifier export and opened first prover/verifier artifact follow-up
+
+- thread: COMMANDER
+- scope:
+  - reviewed `TASK-CHAIN-016` output
+  - accepted the metadata-anchored verifier/export tranche
+  - opened the first prover/verifier artifact follow-up
+- changed:
+  - accepted:
+    - `internal/rollup/types.go`
+    - `internal/rollup/verifier_contract.go`
+    - `internal/rollup/verifier_contract_test.go`
+    - `contracts/src/FunnyRollupCore.sol`
+    - `contracts/test/FunnyRollupCore.t.sol`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md`
+    - `HANDSHAKE-CHAIN-016.md` status -> `completed`
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-017.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-017.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-017.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/rollup ./internal/shared/auth`
+  - `forge test --match-contract FunnyRollupCoreTest`
+  - `git diff --check`
+  - the acceptance/export boundary is now materially tighter:
+    - `BuildVerifierStateRootAcceptanceContract(...)` exports one stable `solidity_export` contract with fixed arg order, enum ordinals, and normalized `0x`-prefixed `bytes32` values
+    - `FunnyRollupCore.acceptVerifiedBatch(...)` now requires prior matching `recordBatchMetadata(...)` state for the same `batch_id`
+    - non-`JOINED` auth rows are still rejected before verifier verdict
+- findings:
+  - no new P0/P1 after the metadata-anchoring fix
+  - residual limitation:
+    - the verifier itself is still a stub interface and there is still no real prover-produced `verifierProof` lane
+- blockers:
+  - none at this tranche boundary
+- next:
+  - launch one worker on `TASK-CHAIN-017`
+
+## 2026-04-05 21:36 CST - Commander accepted first prover/verifier artifact bundle and opened first verifier implementation follow-up
+
+- thread: COMMANDER
+- scope:
+  - reviewed `TASK-CHAIN-017` output
+  - accepted the first prover/verifier artifact tranche
+  - opened the first real verifier implementation follow-up
+- changed:
+  - accepted:
+    - `internal/rollup/types.go`
+    - `internal/rollup/verifier_contract.go`
+    - `internal/rollup/verifier_contract_test.go`
+    - `contracts/src/FunnyRollupCore.sol`
+    - `contracts/src/FunnyRollupVerifier.sol`
+    - `contracts/test/FunnyRollupCore.t.sol`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md`
+    - `HANDSHAKE-CHAIN-017.md` status -> `completed`
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-018.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-018.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-018.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/rollup ./internal/shared/auth`
+  - `forge test --match-contract FunnyRollupCoreTest`
+  - `git diff --check`
+  - the first prover/verifier artifact boundary is now explicit:
+    - `BuildVerifierArtifactBundle(history, batch)` consumes `solidity_export`
+      and freezes deterministic `authProofHash` + `verifierGateHash`
+    - Go and Solidity now share one pinned digest-parity fixture for
+      `verifierGateHash`
+    - `FunnyRollupCore` now passes a full `VerifierContext` into
+      `IFunnyRollupBatchVerifier.verifyBatch(...)`
+- findings:
+  - no new P0/P1 at this tranche boundary
+  - residual limitation:
+    - the verifier itself is still interface-only; there is still no real
+      cryptographic or digest-constraining verifier implementation behind
+      `IFunnyRollupBatchVerifier`
+- blockers:
+  - none at this tranche boundary
+- next:
+  - launch one worker on `TASK-CHAIN-018`
+
+## 2026-04-05 22:16 CST - Commander accepted first real verifier boundary and opened proof/public-signal schema follow-up
+
+- thread: COMMANDER
+- scope:
+  - reviewed `TASK-CHAIN-018` output
+  - accepted the first real verifier implementation tranche
+  - opened the next proof/public-signal schema follow-up
+- changed:
+  - accepted:
+    - `internal/rollup/types.go`
+    - `internal/rollup/verifier_contract.go`
+    - `internal/rollup/verifier_contract_test.go`
+    - `contracts/src/FunnyRollupVerifier.sol`
+    - `contracts/test/FunnyRollupCore.t.sol`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md`
+    - `HANDSHAKE-CHAIN-018.md` status -> `completed`
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-019.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-019.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-019.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/rollup`
+  - `forge test --match-path contracts/test/FunnyRollupCore.t.sol`
+  - `git diff --check`
+  - the verifier boundary is now materially stronger:
+    - `BuildVerifierArtifactBundle(...)` freezes concrete verifier name, proof version hash, and placeholder proof calldata
+    - `FunnyRollupVerifier` directly consumes `VerifierContext`
+    - `FunnyRollupVerifier` recomputes `verifierGateHash` onchain instead of trusting the supplied digest alone
+    - Go and Foundry both pin the same proof-envelope / gate-hash parity fixtures
+- findings:
+  - no new P0/P1 at this tranche boundary
+  - residual limitation:
+    - the proof bytes are still only the placeholder envelope `abi.encode(proofTypeHash, verifierGateHash)`; there is still no real prover output or final cryptographic verifier
+- blockers:
+  - none at this tranche boundary
+- next:
+  - launch one worker on `TASK-CHAIN-019`
+
+## 2026-04-05 22:46 CST - Commander accepted proof/public-signal schema tranche and opened inner proof-data follow-up
+
+- thread: COMMANDER
+- scope:
+  - reviewed `TASK-CHAIN-019` output
+  - accepted the first proof/public-signal schema tranche
+  - opened the next inner `proofData` schema follow-up
+- changed:
+  - accepted:
+    - `internal/rollup/types.go`
+    - `internal/rollup/verifier_contract.go`
+    - `internal/rollup/verifier_contract_test.go`
+    - `contracts/src/FunnyRollupVerifier.sol`
+    - `contracts/test/FunnyRollupCore.t.sol`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md`
+    - `HANDSHAKE-CHAIN-019.md` status -> `completed`
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-020.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-020.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-020.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/rollup`
+  - `forge test --match-path contracts/test/FunnyRollupCore.t.sol`
+  - `git diff --check -- internal/rollup/types.go internal/rollup/verifier_contract.go internal/rollup/verifier_contract_test.go contracts/src/FunnyRollupVerifier.sol contracts/test/FunnyRollupCore.t.sol docs/architecture/mode-b-zk-rollup.md docs/sql/schema.md docs/harness/handshakes/HANDSHAKE-CHAIN-019.md docs/harness/worklogs/WORKLOG-CHAIN-019.md`
+  - the first verifier-facing outer schema is now explicit and stable:
+    - `VerifierArtifactBundle` exports fixed proof/public-signal schema
+      versions, field ordering, and verifier-facing bytes
+    - `FunnyRollupVerifier` decodes that outer schema directly instead of the
+      older two-word placeholder envelope
+    - Go and Foundry still agree on the fixed `shadow-batch-v1` artifact lane
+      without reopening `VerifierContext` or `verifierGateHash`
+- findings:
+  - no new P0/P1 at this tranche boundary
+  - residual limitation:
+    - the outer proof/public-signal schema is now fixed, but the inner
+      `proofData` payload is still only the placeholder
+      `abi.encode(proofTypeHash)` lane rather than a real prover-facing schema
+- blockers:
+  - none at this tranche boundary
+- next:
+  - launch one worker on `TASK-CHAIN-020`
+
+## 2026-04-05 23:30 CST - Commander accepted inner proof-data schema tranche and opened proving-system contract design follow-up
+
+- thread: COMMANDER
+- scope:
+  - reviewed `TASK-CHAIN-020` output
+  - accepted the first inner `proofData` schema tranche
+  - opened the next real proof-bytes / proving-system contract design follow-up
+- changed:
+  - accepted:
+    - `internal/rollup/types.go`
+    - `internal/rollup/verifier_contract.go`
+    - `internal/rollup/verifier_contract_test.go`
+    - `contracts/src/FunnyRollupVerifier.sol`
+    - `contracts/test/FunnyRollupCore.t.sol`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md`
+    - `HANDSHAKE-CHAIN-020.md` status -> `completed`
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-021.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-021.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-021.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/rollup`
+  - `forge test --match-path contracts/test/FunnyRollupCore.t.sol`
+  - `git diff --check -- internal/rollup/types.go internal/rollup/verifier_contract.go internal/rollup/verifier_contract_test.go contracts/src/FunnyRollupVerifier.sol contracts/test/FunnyRollupCore.t.sol docs/architecture/mode-b-zk-rollup.md docs/sql/schema.md docs/harness/handshakes/HANDSHAKE-CHAIN-020.md docs/harness/worklogs/WORKLOG-CHAIN-020.md`
+  - the verifier-facing inner lane is now explicit and stable:
+    - `proofData-v1` has one fixed ABI shape under the unchanged outer proof/public-signal envelope
+    - Go deterministically exports decoded inner fields, final `proofData`, and final `verifierProof`
+    - Solidity now checks inner/outer/context parity and rejects non-empty placeholder `proofBytes`
+- findings:
+  - no new P0/P1 at this tranche boundary
+  - residual limitation:
+    - `proofData-v1` is now stable, but it still carries only the placeholder
+      `proofBytes = bytes(\"\")` lane and does not yet define a real proving-system / circuit / verifier-key contract
+- blockers:
+  - none at this tranche boundary
+- next:
+  - launch one worker on `TASK-CHAIN-021`
+
+## 2026-04-05 23:45 CST - Commander accepted proving-system contract design and opened first Groth16 backend tranche
+
+- thread: COMMANDER
+- scope:
+  - reviewed `TASK-CHAIN-021` output
+  - accepted the first real proving-system / proof-bytes contract design
+  - opened the next real Groth16 backend implementation tranche
+- changed:
+  - accepted:
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-021.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-021.md`
+    - `internal/rollup/types.go`
+    - `internal/rollup/verifier_contract.go`
+    - `contracts/src/FunnyRollupVerifier.sol`
+    - `HANDSHAKE-CHAIN-021.md` status -> `completed`
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-022.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-022.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-022.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - `gofmt -w internal/rollup/types.go internal/rollup/verifier_contract.go`
+  - `forge fmt contracts/src/FunnyRollupVerifier.sol`
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/rollup`
+  - `forge test --match-path contracts/test/FunnyRollupCore.t.sol`
+  - `git diff --check -- docs/architecture/mode-b-zk-rollup.md docs/sql/schema.md docs/harness/handshakes/HANDSHAKE-CHAIN-021.md docs/harness/worklogs/WORKLOG-CHAIN-021.md internal/rollup/types.go internal/rollup/verifier_contract.go contracts/src/FunnyRollupVerifier.sol`
+  - the next real verifier lane is now explicit enough to implement without
+    reopening schema contracts:
+    - first real proof lane = fixed-vk `Groth16` on `BN254`
+    - `proofTypeHash` now identifies the full verifier-facing lane, not only a proving-family label
+    - real prover output can stay inside `proofData-v1.proofBytes`
+    - verifier-facing public signals still come from unchanged outer hashes via fixed `hi/lo uint128` lifting
+- findings:
+  - no new P0/P1 at this design tranche boundary
+  - residual limitation:
+    - the chosen Groth16 lane is still only documented/placeholder-wired; there is not yet a real cryptographic verifier backend or non-empty `proofBytes` path in repo truth
+- blockers:
+  - none at this tranche boundary
+- next:
+  - launch one worker on `TASK-CHAIN-022`
+
+## 2026-04-06 00:16 CST - Commander accepted first Groth16 backend tranche and opened batch-specific proof artifact follow-up
+
+- thread: COMMANDER
+- scope:
+  - reviewed `TASK-CHAIN-022` output
+  - accepted the first Foundry-only fixed-vk Groth16 backend tranche
+  - opened the next fixed-vk Groth16 prover artifact follow-up
+- changed:
+  - accepted:
+    - `internal/rollup/types.go`
+    - `internal/rollup/verifier_contract.go`
+    - `internal/rollup/verifier_contract_test.go`
+    - `contracts/src/FunnyRollupGroth16Backend.sol`
+    - `contracts/src/FunnyRollupVerifier.sol`
+    - `contracts/test/FunnyRollupCore.t.sol`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-022.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-022.md`
+    - `HANDSHAKE-CHAIN-022.md` status -> `completed`
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-023.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-023.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-023.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/rollup`
+  - `forge test --match-path contracts/test/FunnyRollupCore.t.sol`
+  - `git diff --check -- internal/rollup/types.go internal/rollup/verifier_contract.go internal/rollup/verifier_contract_test.go contracts/src/FunnyRollupGroth16Backend.sol contracts/src/FunnyRollupVerifier.sol contracts/test/FunnyRollupCore.t.sol docs/architecture/mode-b-zk-rollup.md docs/sql/schema.md docs/harness/handshakes/HANDSHAKE-CHAIN-022.md docs/harness/worklogs/WORKLOG-CHAIN-022.md`
+  - the first real backend boundary is now explicit and test-backed:
+    - `FunnyRollupVerifier` dispatches on the fixed Groth16 `proofTypeHash`
+    - `proofData-v1` now carries non-empty fixture `proofBytes`
+    - `FunnyRollupGroth16Backend` verifies one fixed-vk BN254 lane
+    - Go/Foundry parity now pins limb splitting, proof codec, and one shared `true` verdict fixture
+- findings:
+  - no new P0/P1 at this tranche boundary
+  - residual limitation:
+    - the repo still uses one shared fixture proof, not a batch-specific proof artifact pipeline from actual outer signals
+- blockers:
+  - none at this tranche boundary
+- next:
+  - launch one worker on `TASK-CHAIN-023`
+
+### 2026-04-06 00:51 CST
+
+- thread: COMMANDER
+- scope:
+  - reviewed `TASK-CHAIN-023` output
+  - accepted the batch-specific fixed-vk Groth16 artifact tranche
+  - reprioritized the next product worker toward market-expiry lifecycle
+    semantics instead of immediately opening another rollup implementation slice
+- changed:
+  - accepted:
+    - `internal/rollup/groth16_lane.go`
+    - `internal/rollup/cmd/fixedvk-artifacts/main.go`
+    - `internal/rollup/verifier_contract.go`
+    - `internal/rollup/verifier_contract_test.go`
+    - `contracts/src/FunnyRollupGroth16Backend.sol`
+    - `contracts/test/FunnyRollupCore.t.sol`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-023.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-023.md`
+    - `HANDSHAKE-CHAIN-023.md` status -> `completed`
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-024.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-024.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-024.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/rollup`
+  - `forge test --match-path contracts/test/FunnyRollupCore.t.sol`
+  - `git diff --check`
+  - `TASK-CHAIN-023` now has a deterministic batch-specific proving lane:
+    - Go emits batch-specific `proofBytes` from actual outer signals
+    - outer proof/public-signal envelope and `proofData-v1` stay frozen
+    - Go/Foundry parity covers limb splitting, proof codec, and multiple
+      batch-specific verifier verdict fixtures
+  - commander review reconfirmed one separate product/runtime gap remains:
+    - ordinary markets still have no truthful `close_at` hard stop
+    - only oracle markets currently auto-resolve from `resolve_at`
+- findings:
+  - no new P0/P1 at this tranche boundary
+  - residual limitation:
+    - the rollup lane is still repo-local, fixed-vk, and not production truth
+- blockers:
+  - none at this tranche boundary
+- next:
+  - launch one worker on `TASK-CHAIN-024`
+
+### 2026-04-06 01:10 CST
+
+- thread: COMMANDER
+- scope:
+  - reviewed `TASK-CHAIN-024` output
+  - accepted the market-expiry lifecycle hardening slice
+  - opened the next narrow repo-structure cleanup lane focused on `internal/api`
+- changed:
+  - accepted:
+    - `internal/api/handler/market_lifecycle.go`
+    - `internal/api/handler/market_lifecycle_test.go`
+    - `internal/api/handler/order_handler.go`
+    - `internal/api/handler/order_handler_test.go`
+    - `internal/api/handler/sql_store.go`
+    - `internal/matching/service/market_lifecycle.go`
+    - `internal/matching/service/market_lifecycle_test.go`
+    - `internal/matching/service/sql_store.go`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-024.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-024.md`
+    - `HANDSHAKE-CHAIN-024.md` status -> `completed`
+  - created:
+    - `docs/harness/tasks/TASK-API-006.md`
+    - `docs/harness/handshakes/HANDSHAKE-API-006.md`
+    - `docs/harness/worklogs/WORKLOG-API-006.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/api/handler ./internal/matching/service ./internal/oracle/service ./internal/settlement/service`
+  - `git diff --check`
+  - `TASK-CHAIN-024` now truthfully closes the runtime hole:
+    - order ingress rejects once `now >= close_at`
+    - matching restore no longer reloads expired resting orders as tradable
+    - read surfaces expose runtime `CLOSED` for expired unresolved markets
+    - oracle markets still auto-resolve only from `resolve_at`
+- findings:
+  - no new P0/P1 at this tranche boundary
+  - residual limitation:
+    - no background close job or proactive live matcher cancellation was added;
+      post-`close_at` orders are blocked and restored orders are skipped, but
+      already-loaded resting orders become inert rather than actively cancelled
+- blockers:
+  - none at this tranche boundary
+- next:
+  - launch one worker on `TASK-API-006`
+
+### 2026-04-06 01:16 CST
+
+- thread: COMMANDER
+- scope:
+  - paused the narrow API-structure cleanup at user request
+  - opened one product-priority lane for lifecycle closeout plus market detail
+    order visibility UX
+- changed:
+  - created:
+    - `docs/harness/tasks/TASK-OFFCHAIN-018.md`
+    - `docs/harness/handshakes/HANDSHAKE-OFFCHAIN-018.md`
+    - `docs/harness/worklogs/WORKLOG-OFFCHAIN-018.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - commander review confirmed the right next product bundle is:
+    - backend close-time order cancellation follow-up after `TASK-CHAIN-024`
+    - market detail connected-user order/fill visibility
+    - removal of duplicated left-side summary blocks
+  - commander review also recorded user intent that this tranche should be
+    pushed and verified on staging once local validation is green
+- blockers:
+  - none at the planning layer
+- next:
+  - implement `TASK-OFFCHAIN-018`
+
+- thread: COMMANDER
+- scope:
+  - reviewed and accepted `TASK-OFFCHAIN-018`
+  - confirmed the contract/rollup lane can stay paused at the current
+    checkpoint while lifecycle/detail UX moves forward
+- changed:
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+    - `docs/harness/handshakes/HANDSHAKE-OFFCHAIN-018.md`
+    - `docs/harness/worklogs/WORKLOG-OFFCHAIN-018.md`
+- validated:
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/matching/... ./internal/api/handler ./internal/oracle/service ./internal/settlement/service`
+  - `cd web && npm run build`
+  - `git diff --check`
+  - accepted the runtime contract:
+    - post-`close_at` active limit orders are proactively cancelled through the
+      matching/order-event lane, so balances and read surfaces no longer depend
+      on matcher restart to converge
+    - market detail now exposes connected-user order/fill state in-place and
+      removes the duplicated left-side summary block
+- blockers:
+  - none before staging deploy
+- next:
+  - push the accumulated tranche and verify the updated lifecycle/detail-page
+    behavior on staging

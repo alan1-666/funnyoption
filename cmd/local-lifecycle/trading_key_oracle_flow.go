@@ -171,7 +171,7 @@ func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cf
 		PassFailMatrix:   make([]flowStepResult, 0, 7),
 		BlindSpots: []string{
 			"trading-key wallet authorization is signed by local deterministic test EOAs, not a browser wallet popup or hardware wallet",
-			"truthful restore is verified through in-process metadata plus GET /api/v1/sessions readback, not real localStorage/IndexedDB/React hydration behavior",
+			"truthful restore is verified through in-process metadata plus GET /api/v1/trading-keys readback, not real localStorage/IndexedDB/React hydration behavior",
 			"oracle settlement uses a local fake Binance HTTP fixture, not the live external provider network path",
 			"the flow stops at payout/readback and does not cover end-user claim transaction submission or browser claim UX",
 		},
@@ -213,7 +213,7 @@ func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cf
 	summary.PassFailMatrix = append(summary.PassFailMatrix, flowStepResult{
 		Step:          "2. truthful restore",
 		Status:        "PASS",
-		SignatureMode: "no new signature; in-process metadata is reconciled against GET /api/v1/sessions readback",
+		SignatureMode: "no new signature; in-process metadata is reconciled against GET /api/v1/trading-keys readback",
 		Notes:         fmt.Sprintf("buyer_restore=%s maker_restore=%s", buyerRestore.SessionID, makerRestore.SessionID),
 	})
 	summary.Buyer.RestoreSessionID = buyerRestore.SessionID
@@ -540,7 +540,7 @@ func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cf
 	summary.Market.OracleDispatchAttempts = dispatchAttempts
 
 	summary.ReadbackCommands = []string{
-		fmt.Sprintf("curl -sS '%s/api/v1/sessions?wallet_address=%s&vault_address=%s&status=ACTIVE&limit=20'", opts.BaseURL, buyerSession.WalletAddress, buyerSession.VaultAddress),
+		fmt.Sprintf("curl -sS '%s/api/v1/trading-keys?wallet_address=%s&vault_address=%s&status=ACTIVE&limit=20'", opts.BaseURL, buyerSession.WalletAddress, buyerSession.VaultAddress),
 		fmt.Sprintf("curl -sS '%s/api/v1/deposits?user_id=%d&limit=20'", opts.BaseURL, buyerSession.UserID),
 		fmt.Sprintf("curl -sS '%s/api/v1/orders?user_id=%d&market_id=%d&limit=20'", opts.BaseURL, buyerSession.UserID, market.MarketID),
 		fmt.Sprintf("curl -sS '%s/api/v1/orders?user_id=%d&market_id=%d&limit=20'", opts.BaseURL, makerSession.UserID, market.MarketID),
@@ -642,7 +642,7 @@ func (c *apiClient) listRemoteSessions(ctx context.Context, walletAddress, vault
 	query.Set("limit", fmt.Sprintf("%d", limit))
 
 	var result collectionResponse[remoteSession]
-	err := c.doJSON(ctx, http.MethodGet, "/api/v1/sessions?"+query.Encode(), nil, &result)
+	err := c.doJSON(ctx, http.MethodGet, "/api/v1/trading-keys?"+query.Encode(), nil, &result)
 	return result.Items, err
 }
 

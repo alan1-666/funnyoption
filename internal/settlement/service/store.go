@@ -4,14 +4,22 @@ import (
 	"context"
 	"fmt"
 	"sync"
+
+	sharedkafka "funnyoption/internal/shared/kafka"
 )
 
 type PositionStore interface {
 	ApplyDelta(ctx context.Context, marketID, userID int64, outcome, positionAsset string, delta int64) error
-	ResolveMarket(ctx context.Context, marketID int64, outcome string) (bool, error)
+	ResolveMarket(ctx context.Context, input ResolveMarketInput) (bool, error)
 	CancelActiveOrders(ctx context.Context, marketID int64, reason string) ([]cancelledOrder, error)
 	WinningPositions(ctx context.Context, marketID int64, outcome string) ([]winningPosition, error)
-	MarkSettled(ctx context.Context, eventID string, marketID, userID int64, outcome string, quantity int64, payoutAsset string, payoutAmount int64) error
+	MarkSettled(ctx context.Context, event sharedkafka.SettlementCompletedEvent) error
+}
+
+type ResolveMarketInput struct {
+	MarketID         int64
+	ResolvedOutcome  string
+	OccurredAtMillis int64
 }
 
 type positionKey struct {
@@ -44,16 +52,16 @@ func (s *positionStore) ApplyDelta(_ context.Context, marketID, userID int64, ou
 	return nil
 }
 
-func (s *positionStore) ResolveMarket(_ context.Context, marketID int64, outcome string) (bool, error) {
+func (s *positionStore) ResolveMarket(_ context.Context, input ResolveMarketInput) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if existing, ok := s.resolved[marketID]; ok {
-		if existing == outcome {
+	if existing, ok := s.resolved[input.MarketID]; ok {
+		if existing == input.ResolvedOutcome {
 			return false, nil
 		}
-		return false, fmt.Errorf("market %d already resolved with outcome %s", marketID, existing)
+		return false, fmt.Errorf("market %d already resolved with outcome %s", input.MarketID, existing)
 	}
-	s.resolved[marketID] = outcome
+	s.resolved[input.MarketID] = input.ResolvedOutcome
 	return true, nil
 }
 
@@ -84,6 +92,7 @@ type cancelledOrder struct {
 	RemainingQuantity int64
 	Status            string
 	CancelReason      string
+	UpdatedAtMillis   int64
 }
 
 func (s *positionStore) WinningPositions(_ context.Context, marketID int64, outcome string) ([]winningPosition, error) {
@@ -112,9 +121,9 @@ func (s *positionStore) CancelActiveOrders(_ context.Context, _ int64, _ string)
 	return nil, nil
 }
 
-func (s *positionStore) MarkSettled(_ context.Context, _ string, marketID, userID int64, outcome string, _ int64, _ string, _ int64) error {
+func (s *positionStore) MarkSettled(_ context.Context, event sharedkafka.SettlementCompletedEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.settled[positionKey{MarketID: marketID, UserID: userID, Outcome: outcome}] = struct{}{}
+	s.settled[positionKey{MarketID: event.MarketID, UserID: event.UserID, Outcome: event.WinningOutcome}] = struct{}{}
 	return nil
 }

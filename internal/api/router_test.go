@@ -464,6 +464,42 @@ func TestEngineLegacySessionCreateRouteStillWorks(t *testing.T) {
 	}
 }
 
+func TestEngineTradingKeyListRouteStillWorks(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	engine := newEngine(Meta{Service: "api", Env: "test"}, handler.Dependencies{
+		Logger: slog.Default(),
+		QueryStore: &testQueryStore{
+			listSessionsResp: []dto.SessionResponse{
+				{
+					SessionID:        "tk_01",
+					UserID:           1001,
+					WalletAddress:    "0x00000000000000000000000000000000000000aa",
+					SessionPublicKey: "0x1111",
+					Scope:            "TRADE",
+					ChainID:          97,
+					VaultAddress:     "0x00000000000000000000000000000000000000bb",
+					Status:           "ACTIVE",
+				},
+			},
+		},
+	}, routerOptions{
+		rateLimiter: newRateLimiter(defaultRateLimitPolicies()),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/trading-keys?wallet_address=0x00000000000000000000000000000000000000aa&vault_address=0x00000000000000000000000000000000000000bb&status=ACTIVE&limit=10", nil)
+	w := httptest.NewRecorder()
+
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "\"session_id\":\"tk_01\"") {
+		t.Fatalf("expected trading key response body, got %s", w.Body.String())
+	}
+}
+
 func validTradingKeyChallengeBody() map[string]any {
 	return map[string]any{
 		"wallet_address": "0x00000000000000000000000000000000000000aa",
@@ -569,6 +605,7 @@ func (p *testPublisher) Close() error {
 
 type testQueryStore struct {
 	listMarketsResp               []dto.MarketResponse
+	listSessionsResp              []dto.SessionResponse
 	getSessionResp                dto.SessionResponse
 	getMarketResp                 dto.MarketResponse
 	createSessionResp             dto.SessionResponse
@@ -689,10 +726,9 @@ func (s *testQueryStore) GetLatestFreezeByRef(ctx context.Context, refType, refI
 	return s.getFreezeResp, nil
 }
 
-func (s *testQueryStore) AdvanceSessionNonce(ctx context.Context, sessionID string, nonce uint64) (dto.SessionResponse, error) {
+func (s *testQueryStore) AdvanceSessionNonce(ctx context.Context, req dto.AdvanceSessionNonceRequest) (dto.SessionResponse, error) {
 	_ = ctx
-	_ = sessionID
-	_ = nonce
+	_ = req
 	return dto.SessionResponse{}, nil
 }
 
@@ -717,7 +753,7 @@ func (s *testQueryStore) ListMarkets(ctx context.Context, req dto.ListMarketsReq
 func (s *testQueryStore) ListSessions(ctx context.Context, req dto.ListSessionsRequest) ([]dto.SessionResponse, error) {
 	_ = ctx
 	_ = req
-	return nil, nil
+	return s.listSessionsResp, nil
 }
 
 func (s *testQueryStore) ListDeposits(ctx context.Context, req dto.ListDepositsRequest) ([]dto.DepositResponse, error) {

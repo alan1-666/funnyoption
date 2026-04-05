@@ -17,6 +17,7 @@ V1 的 oracle-settled crypto market 先只支持：
 - `category_key = CRYPTO`
 - 交易选项仍然是二元 `YES / NO`
 - 结算规则是“某个价格是否满足一个阈值比较规则”
+- `markets.close_at` 是 trading cutoff，不是 settlement timestamp
 - 结算触发点仍然以 `markets.resolve_at` 为 canonical settlement timestamp
 - 自动结算由一个独立的 oracle worker 完成，不塞进 `chain-service` 或 `settlement`
 - 最终 settlement trigger 仍然复用现有 `market.event -> settlement` 主链路
@@ -321,6 +322,7 @@ first cut 约定：
    - `metadata.resolution.mode = ORACLE_PRICE`
 2. oracle worker 扫到到期 market
    - 条件是 `resolve_at <= now`
+   - 交易是否早已停止仍然看 `close_at`；这条 lane 不把 `resolve_at` 当成 trading boundary
    - market 尚未 `RESOLVED`
 3. worker 拉取外部价格
 4. worker 规范化 price，按 comparator 计算 `YES / NO`
@@ -343,6 +345,12 @@ first cut 约定：
    - 取消 active orders
    - 计算 payout
    - `market_resolutions.status` 被更新成 `RESOLVED`
+
+close / resolve 语义补充：
+
+- `close_at` 到达后，oracle market 也应先进入 runtime `CLOSED`
+- 在 `resolve_at` 之前，它只是停止交易，不代表已经结算
+- 到了 `resolve_at` 之后，oracle worker 才尝试 observation / publish / settlement
 
 ## 8. Idempotency Rules
 

@@ -163,3 +163,184 @@ func TestVerifyTradingKeyAuthorizationSignature(t *testing.T) {
 		t.Fatalf("unexpected recovered wallet: %s", recovered)
 	}
 }
+
+func TestBuildTradingKeyAuthorizationWitness(t *testing.T) {
+	authz := TradingKeyAuthorization{
+		WalletAddress:            "0x00000000000000000000000000000000000000aa",
+		TradingPublicKey:         "0x8f931f3d9d6a93f2b05a1e8ef8356d7408be0f2f5f63c2dbcbf6c227f5f1c5d2",
+		TradingKeyScheme:         DefaultTradingKeyScheme,
+		Scope:                    DefaultSessionScope,
+		Challenge:                "0x5fbe9af9d6ab53d4df3bcb43f9e6c5f26a4d9bc2a8f44a0ab2997f7dc2c5c94a",
+		ChallengeExpiresAtMillis: time.Now().Add(5 * time.Minute).UnixMilli(),
+		KeyExpiresAtMillis:       0,
+		ChainID:                  97,
+		VaultAddress:             "0x00000000000000000000000000000000000000bb",
+	}
+	key := AuthorizedTradingKey{
+		TradingKeyID:       authz.TradingKeyID(),
+		AccountID:          1001,
+		WalletAddress:      authz.WalletAddress,
+		TradingPublicKey:   authz.TradingPublicKey,
+		TradingKeyScheme:   authz.TradingKeyScheme,
+		Scope:              authz.Scope,
+		ChainID:            authz.ChainID,
+		VaultAddress:       authz.VaultAddress,
+		Status:             "ACTIVE",
+		AuthorizationNonce: authz.Challenge,
+	}
+
+	witness, err := BuildTradingKeyAuthorizationWitness(1001, authz, key, "0xdeadbeef", 1_775_886_400_000)
+	if err != nil {
+		t.Fatalf("BuildTradingKeyAuthorizationWitness returned error: %v", err)
+	}
+	if !witness.VerifierEligible {
+		t.Fatalf("expected verifier-eligible witness, got %+v", witness)
+	}
+	if witness.AuthorizationRef != key.AuthorizationRef() {
+		t.Fatalf("authorization_ref = %s, want %s", witness.AuthorizationRef, key.AuthorizationRef())
+	}
+	if witness.WalletTypedDataHash == "" {
+		t.Fatalf("expected non-empty typed data hash")
+	}
+}
+
+func TestVerifierBindingMatchesCanonicalTradingKeyAndOrderAuthorization(t *testing.T) {
+	authz := TradingKeyAuthorization{
+		WalletAddress:            "0x00000000000000000000000000000000000000aa",
+		TradingPublicKey:         "0x8f931f3d9d6a93f2b05a1e8ef8356d7408be0f2f5f63c2dbcbf6c227f5f1c5d2",
+		TradingKeyScheme:         DefaultTradingKeyScheme,
+		Scope:                    DefaultSessionScope,
+		Challenge:                "0x5fbe9af9d6ab53d4df3bcb43f9e6c5f26a4d9bc2a8f44a0ab2997f7dc2c5c94a",
+		ChallengeExpiresAtMillis: time.Now().Add(5 * time.Minute).UnixMilli(),
+		KeyExpiresAtMillis:       0,
+		ChainID:                  97,
+		VaultAddress:             "0x00000000000000000000000000000000000000bb",
+	}
+	key := AuthorizedTradingKey{
+		TradingKeyID:       authz.TradingKeyID(),
+		AccountID:          1001,
+		WalletAddress:      authz.WalletAddress,
+		TradingPublicKey:   authz.TradingPublicKey,
+		TradingKeyScheme:   authz.TradingKeyScheme,
+		Scope:              authz.Scope,
+		ChainID:            authz.ChainID,
+		VaultAddress:       authz.VaultAddress,
+		Status:             "ACTIVE",
+		AuthorizationNonce: authz.Challenge,
+	}
+	intent := OrderIntent{
+		SessionID:         key.TradingKeyID,
+		WalletAddress:     key.WalletAddress,
+		UserID:            1001,
+		MarketID:          88,
+		Outcome:           "YES",
+		Side:              "BUY",
+		OrderType:         "LIMIT",
+		TimeInForce:       "GTC",
+		Price:             10,
+		Quantity:          20,
+		ClientOrderID:     "cli-1",
+		Nonce:             7,
+		RequestedAtMillis: time.Now().UnixMilli(),
+	}
+
+	authWitness, err := BuildTradingKeyAuthorizationWitness(1001, authz, key, "0xdeadbeef", 1_775_886_400_000)
+	if err != nil {
+		t.Fatalf("BuildTradingKeyAuthorizationWitness returned error: %v", err)
+	}
+	orderWitness := BuildOrderAuthorizationWitness(1001, key, intent, "0xfeedface")
+
+	authBinding, err := authWitness.VerifierBinding()
+	if err != nil {
+		t.Fatalf("authWitness.VerifierBinding returned error: %v", err)
+	}
+	orderBinding, err := orderWitness.VerifierBinding()
+	if err != nil {
+		t.Fatalf("orderWitness.VerifierBinding returned error: %v", err)
+	}
+	if err := ValidateVerifierBindingMatch(authBinding, orderBinding); err != nil {
+		t.Fatalf("ValidateVerifierBindingMatch returned error: %v", err)
+	}
+	if authBinding.AuthorizationRef != key.AuthorizationRef() {
+		t.Fatalf("authorization_ref = %s, want %s", authBinding.AuthorizationRef, key.AuthorizationRef())
+	}
+}
+
+func TestBuildOrderAuthorizationWitnessMarksLegacyCompatIneligible(t *testing.T) {
+	key := AuthorizedTradingKey{
+		TradingKeyID:       "sess_legacy",
+		AccountID:          1001,
+		WalletAddress:      "0x00000000000000000000000000000000000000aa",
+		TradingPublicKey:   "0x8f931f3d9d6a93f2b05a1e8ef8356d7408be0f2f5f63c2dbcbf6c227f5f1c5d2",
+		TradingKeyScheme:   DefaultTradingKeyScheme,
+		Scope:              DefaultSessionScope,
+		ChainID:            97,
+		Status:             "ACTIVE",
+		ExpiresAtMillis:    0,
+		AuthorizationNonce: "sess_legacy_nonce",
+	}
+	intent := OrderIntent{
+		SessionID:         key.TradingKeyID,
+		WalletAddress:     key.WalletAddress,
+		UserID:            1001,
+		MarketID:          88,
+		Outcome:           "YES",
+		Side:              "BUY",
+		OrderType:         "LIMIT",
+		TimeInForce:       "GTC",
+		Price:             10,
+		Quantity:          20,
+		ClientOrderID:     "cli-1",
+		Nonce:             7,
+		RequestedAtMillis: time.Now().UnixMilli(),
+	}
+
+	witness := BuildOrderAuthorizationWitness(1001, key, intent, "0xfeedface")
+	if witness.VerifierEligible {
+		t.Fatalf("expected legacy session witness to stay ineligible")
+	}
+	if witness.AuthVersion != LegacySessionCompatAuthVersion {
+		t.Fatalf("auth_version = %s, want %s", witness.AuthVersion, LegacySessionCompatAuthVersion)
+	}
+	if !strings.Contains(witness.IneligibleReason, "/api/v1/sessions") {
+		t.Fatalf("unexpected ineligible reason: %s", witness.IneligibleReason)
+	}
+	if witness.Intent.MessageHash == "" {
+		t.Fatalf("expected non-empty order intent message hash")
+	}
+}
+
+func TestOrderAuthorizationVerifierBindingRejectsLegacyCompatWitness(t *testing.T) {
+	key := AuthorizedTradingKey{
+		TradingKeyID:       "sess_legacy",
+		AccountID:          1001,
+		WalletAddress:      "0x00000000000000000000000000000000000000aa",
+		TradingPublicKey:   "0x8f931f3d9d6a93f2b05a1e8ef8356d7408be0f2f5f63c2dbcbf6c227f5f1c5d2",
+		TradingKeyScheme:   DefaultTradingKeyScheme,
+		Scope:              DefaultSessionScope,
+		ChainID:            97,
+		Status:             "ACTIVE",
+		ExpiresAtMillis:    0,
+		AuthorizationNonce: "sess_legacy_nonce",
+	}
+	intent := OrderIntent{
+		SessionID:         key.TradingKeyID,
+		WalletAddress:     key.WalletAddress,
+		UserID:            key.AccountID,
+		MarketID:          88,
+		Outcome:           "YES",
+		Side:              "BUY",
+		OrderType:         "LIMIT",
+		TimeInForce:       "GTC",
+		Price:             10,
+		Quantity:          20,
+		ClientOrderID:     "cli-legacy",
+		Nonce:             7,
+		RequestedAtMillis: time.Now().UnixMilli(),
+	}
+
+	witness := BuildOrderAuthorizationWitness(key.AccountID, key, intent, "0xfeedface")
+	if _, err := witness.VerifierBinding(); err == nil {
+		t.Fatalf("expected legacy compatibility witness to stay out of verifier binding contract")
+	}
+}

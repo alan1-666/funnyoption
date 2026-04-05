@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	accountclient "funnyoption/internal/account/client"
+	"funnyoption/internal/rollup"
 	"funnyoption/internal/shared/config"
 	shareddb "funnyoption/internal/shared/db"
 	"funnyoption/internal/shared/grpcx"
@@ -29,7 +30,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	defer publisher.Close()
 
 	store := NewSQLStore(dbConn)
-	processor := NewProcessor(logger, store, accountRPC, publisher, cfg.KafkaTopics)
+	processor := NewProcessor(logger, store, accountRPC, publisher, cfg.KafkaTopics).WithRollup(rollup.NewStore(dbConn))
 
 	var rpcPool *rpcPool
 	if cfg.ChainRPCURL != "" {

@@ -62,7 +62,7 @@ versus what is still a harness substitute:
 | Step | Signature / actor truth |
 | --- | --- |
 | Trading-key registration | Real `EIP-712` payload shape, but signed by deterministic local test EOAs instead of a browser wallet popup |
-| Truthful restore | No signature; harness verifies local metadata against `GET /api/v1/sessions` |
+| Truthful restore | No signature; harness verifies local metadata against `GET /api/v1/trading-keys` |
 | Deposit | Real EVM `approve` and `deposit` transactions signed by the buyer test EOA on the persistent local chain |
 | Market create | Operator envelope signed by the deterministic local operator EOA |
 | First-liquidity | Operator envelope signed by the deterministic local operator EOA |
@@ -75,7 +75,7 @@ versus what is still a harness substitute:
 1. requests trading-key challenges for buyer and maker
 2. signs canonical `AuthorizeTradingKey` typed data with local test-wallet keys
 3. registers both trading keys through `/api/v1/trading-keys`
-4. verifies truthful restore via `/api/v1/sessions`
+4. verifies truthful restore via `/api/v1/trading-keys`
 5. submits a real buyer `approve + deposit` on the persistent local chain
 6. waits for `chain-service` to credit the deposit through normal readbacks
 7. starts a local fake Binance fixture plus the real oracle worker

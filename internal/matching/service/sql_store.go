@@ -3,20 +3,34 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"funnyoption/internal/matching/engine"
 	"funnyoption/internal/matching/model"
+	"funnyoption/internal/rollup"
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
 
 type SQLStore struct {
-	db *sql.DB
+	db     *sql.DB
+	rollup *rollup.Store
+}
+
+type ExpiredRestingOrder struct {
+	Command sharedkafka.OrderCommand
+	Order   *model.Order
 }
 
 func NewSQLStore(db *sql.DB) *SQLStore {
 	return &SQLStore{db: db}
+}
+
+func (s *SQLStore) WithRollup(store *rollup.Store) *SQLStore {
+	s.rollup = store
+	return s
 }
 
 func (s *SQLStore) MaxTradeSequence(ctx context.Context) (uint64, error) {
@@ -31,6 +45,7 @@ func (s *SQLStore) MaxTradeSequence(ctx context.Context) (uint64, error) {
 }
 
 func (s *SQLStore) LoadRestingOrders(ctx context.Context) ([]*model.Order, error) {
+	nowUnix := time.Now().Unix()
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT orders.order_id, orders.client_order_id, orders.user_id, orders.market_id, orders.outcome, orders.side,
 		       orders.order_type, orders.time_in_force, orders.price, orders.quantity, orders.filled_quantity,
@@ -41,8 +56,9 @@ func (s *SQLStore) LoadRestingOrders(ctx context.Context) ([]*model.Order, error
 		  AND orders.remaining_quantity > 0
 		  AND orders.order_type = 'LIMIT'
 		  AND COALESCE(markets.status, 'OPEN') = 'OPEN'
+		  AND (COALESCE(markets.close_at, 0) <= 0 OR markets.close_at > $1)
 		ORDER BY orders.created_at, orders.order_id
-	`)
+	`, nowUnix)
 	if err != nil {
 		return nil, err
 	}
@@ -94,18 +110,110 @@ func (s *SQLStore) LoadRestingOrders(ctx context.Context) ([]*model.Order, error
 	return orders, rows.Err()
 }
 
+func (s *SQLStore) LoadExpiredRestingOrders(ctx context.Context, nowUnix int64) ([]ExpiredRestingOrder, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT orders.order_id, orders.client_order_id, orders.command_id, orders.user_id, orders.market_id, orders.outcome, orders.side,
+		       orders.order_type, orders.time_in_force, orders.collateral_asset, orders.freeze_id, orders.freeze_asset, orders.freeze_amount,
+		       orders.price, orders.quantity, orders.filled_quantity, orders.status, orders.cancel_reason, orders.created_at, orders.updated_at
+		FROM orders
+		INNER JOIN markets ON markets.market_id = orders.market_id
+		WHERE orders.status IN ('NEW', 'PARTIALLY_FILLED')
+		  AND orders.remaining_quantity > 0
+		  AND orders.order_type = 'LIMIT'
+		  AND COALESCE(markets.status, 'OPEN') = 'OPEN'
+		  AND COALESCE(markets.close_at, 0) > 0
+		  AND markets.close_at <= $1
+		ORDER BY markets.close_at, orders.created_at, orders.order_id
+	`, nowUnix)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]ExpiredRestingOrder, 0)
+	for rows.Next() {
+		var (
+			order        model.Order
+			command      sharedkafka.OrderCommand
+			outcome      string
+			side         string
+			orderType    string
+			timeInForce  string
+			status       string
+			cancelReason string
+			createdAt    int64
+			updatedAt    int64
+		)
+		if err := rows.Scan(
+			&order.OrderID,
+			&order.ClientOrderID,
+			&command.CommandID,
+			&order.UserID,
+			&order.MarketID,
+			&outcome,
+			&side,
+			&orderType,
+			&timeInForce,
+			&command.CollateralAsset,
+			&command.FreezeID,
+			&command.FreezeAsset,
+			&command.FreezeAmount,
+			&order.Price,
+			&order.Quantity,
+			&order.FilledQuantity,
+			&status,
+			&cancelReason,
+			&createdAt,
+			&updatedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		order.Outcome = strings.ToUpper(strings.TrimSpace(outcome))
+		order.Side = model.OrderSide(strings.ToUpper(strings.TrimSpace(side)))
+		order.Type = model.OrderType(strings.ToUpper(strings.TrimSpace(orderType)))
+		order.TimeInForce = model.TimeInForce(strings.ToUpper(strings.TrimSpace(timeInForce)))
+		order.Status = model.OrderStatus(strings.ToUpper(strings.TrimSpace(status)))
+		order.CancelReason = model.CancelReason(strings.ToUpper(strings.TrimSpace(cancelReason)))
+		order.CreatedAtMillis = createdAt * 1000
+		order.UpdatedAtMillis = updatedAt * 1000
+
+		command.OrderID = order.OrderID
+		command.ClientOrderID = order.ClientOrderID
+		command.UserID = order.UserID
+		command.MarketID = order.MarketID
+		command.Outcome = order.Outcome
+		command.Side = string(order.Side)
+		command.Type = string(order.Type)
+		command.TimeInForce = string(order.TimeInForce)
+		command.Price = order.Price
+		command.Quantity = order.Quantity
+		command.RequestedAtMillis = order.UpdatedAtMillis
+
+		items = append(items, ExpiredRestingOrder{
+			Command: command,
+			Order:   &order,
+		})
+	}
+	return items, rows.Err()
+}
+
 func (s *SQLStore) MarketIsTradable(ctx context.Context, marketID int64) (bool, error) {
-	var status string
+	var (
+		status  string
+		closeAt int64
+	)
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT COALESCE((
-			SELECT status
-			FROM markets
-			WHERE market_id = $1
-		), 'OPEN')
-	`, marketID).Scan(&status); err != nil {
+		SELECT status, close_at
+		FROM markets
+		WHERE market_id = $1
+	`, marketID).Scan(&status, &closeAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return true, nil
+		}
 		return false, err
 	}
-	return strings.ToUpper(strings.TrimSpace(status)) == "OPEN", nil
+	return marketTradingOpen(status, closeAt, time.Now().Unix()), nil
 }
 
 func (s *SQLStore) PersistResult(ctx context.Context, command sharedkafka.OrderCommand, result engine.Result) error {
@@ -131,6 +239,12 @@ func (s *SQLStore) PersistResult(ctx context.Context, command sharedkafka.OrderC
 	}
 	for _, trade := range result.Trades {
 		if err := s.insertTrade(ctx, tx, command.CollateralAsset, trade); err != nil {
+			return err
+		}
+	}
+	if s.rollup != nil {
+		entries := buildRollupEntries(command, result)
+		if err := s.rollup.AppendEntriesTx(ctx, tx, entries); err != nil {
 			return err
 		}
 	}

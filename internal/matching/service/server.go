@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"funnyoption/internal/matching/engine"
+	"funnyoption/internal/rollup"
 	"funnyoption/internal/shared/config"
 	shareddb "funnyoption/internal/shared/db"
 	"funnyoption/internal/shared/grpcx"
@@ -18,7 +19,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	}
 	defer dbConn.Close()
 
-	store := NewSQLStore(dbConn)
+	store := NewSQLStore(dbConn).WithRollup(rollup.NewStore(dbConn))
 	matcher := engine.NewAsync(logger, 2048)
 	sequence, err := store.MaxTradeSequence(ctx)
 	if err != nil {
@@ -36,6 +37,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	defer publisher.Close()
 
 	processor := NewCommandProcessor(logger, matcher, publisher, cfg.KafkaTopics, store)
+	expirySweeper := newOrderExpirySweeper(logger, matcher, store, publisher, cfg.KafkaTopics)
+	expirySweeper.Start(ctx)
 	consumer := sharedkafka.NewJSONConsumer(
 		logger,
 		cfg.KafkaBrokers,

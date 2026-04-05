@@ -17,13 +17,34 @@ type Result struct {
 	Book     model.BookSnapshot
 }
 
+type CancelResult struct {
+	Orders []*model.Order
+	Books  []model.BookSnapshot
+}
+
 type placeOrderRequest struct {
 	order *model.Order
 	reply chan resultEnvelope
 }
 
+type cancelOrdersRequest struct {
+	orders []*model.Order
+	reason model.CancelReason
+	reply  chan cancelEnvelope
+}
+
+type asyncRequest struct {
+	place  *placeOrderRequest
+	cancel *cancelOrdersRequest
+}
+
 type resultEnvelope struct {
 	result Result
+	err    error
+}
+
+type cancelEnvelope struct {
+	result CancelResult
 	err    error
 }
 
@@ -35,7 +56,7 @@ type Engine struct {
 
 type AsyncEngine struct {
 	engine   *Engine
-	requests chan placeOrderRequest
+	requests chan asyncRequest
 }
 
 func New(logger *slog.Logger) *Engine {
@@ -51,7 +72,7 @@ func NewAsync(logger *slog.Logger, buffer int) *AsyncEngine {
 	}
 	return &AsyncEngine{
 		engine:   New(logger),
-		requests: make(chan placeOrderRequest, buffer),
+		requests: make(chan asyncRequest, buffer),
 	}
 }
 
@@ -74,8 +95,14 @@ func (e *AsyncEngine) Start(ctx context.Context) {
 				e.engine.logger.Info("matching event loop stopped")
 				return
 			case req := <-e.requests:
-				result, err := e.engine.PlaceOrder(req.order)
-				req.reply <- resultEnvelope{result: result, err: err}
+				switch {
+				case req.place != nil:
+					result, err := e.engine.PlaceOrder(req.place.order)
+					req.place.reply <- resultEnvelope{result: result, err: err}
+				case req.cancel != nil:
+					result, err := e.engine.CancelOrders(req.cancel.orders, req.cancel.reason)
+					req.cancel.reply <- cancelEnvelope{result: result, err: err}
+				}
 			}
 		}
 	}()
@@ -83,7 +110,7 @@ func (e *AsyncEngine) Start(ctx context.Context) {
 
 func (e *AsyncEngine) Submit(ctx context.Context, order *model.Order) (Result, error) {
 	reply := make(chan resultEnvelope, 1)
-	request := placeOrderRequest{order: order, reply: reply}
+	request := asyncRequest{place: &placeOrderRequest{order: order, reply: reply}}
 
 	select {
 	case <-ctx.Done():
@@ -94,6 +121,24 @@ func (e *AsyncEngine) Submit(ctx context.Context, order *model.Order) (Result, e
 	select {
 	case <-ctx.Done():
 		return Result{}, ctx.Err()
+	case resp := <-reply:
+		return resp.result, resp.err
+	}
+}
+
+func (e *AsyncEngine) CancelOrders(ctx context.Context, orders []*model.Order, reason model.CancelReason) (CancelResult, error) {
+	reply := make(chan cancelEnvelope, 1)
+	request := asyncRequest{cancel: &cancelOrdersRequest{orders: orders, reason: reason, reply: reply}}
+
+	select {
+	case <-ctx.Done():
+		return CancelResult{}, ctx.Err()
+	case e.requests <- request:
+	}
+
+	select {
+	case <-ctx.Done():
+		return CancelResult{}, ctx.Err()
 	case resp := <-reply:
 		return resp.result, resp.err
 	}
@@ -162,6 +207,61 @@ func (e *Engine) PlaceOrder(order *model.Order) (Result, error) {
 	result.Book = book.Snapshot(5)
 
 	return result, nil
+}
+
+func (e *Engine) CancelOrders(orders []*model.Order, reason model.CancelReason) (CancelResult, error) {
+	if len(orders) == 0 {
+		return CancelResult{}, nil
+	}
+	if reason == "" {
+		reason = model.CancelReasonMarketClosed
+	}
+
+	nowMillis := time.Now().UnixMilli()
+	cancelled := make([]*model.Order, 0, len(orders))
+	bookKeys := make([]string, 0, len(orders))
+	seenBooks := make(map[string]struct{}, len(orders))
+
+	for _, candidate := range orders {
+		if candidate == nil {
+			continue
+		}
+		book, ok := e.books[candidate.BookKey()]
+		if !ok {
+			continue
+		}
+		existing, ok := book.OrderMap[candidate.OrderID]
+		if !ok || existing.RemainingQuantity() <= 0 {
+			continue
+		}
+
+		existing.Cancel(reason)
+		existing.UpdatedAtMillis = nowMillis
+		book.RemoveOrder(existing)
+		cancelled = append(cancelled, cloneOrder(existing))
+
+		if _, already := seenBooks[book.Key]; !already {
+			seenBooks[book.Key] = struct{}{}
+			bookKeys = append(bookKeys, book.Key)
+		}
+	}
+
+	snapshots := make([]model.BookSnapshot, 0, len(bookKeys))
+	for _, key := range bookKeys {
+		book, ok := e.books[key]
+		if !ok {
+			continue
+		}
+		snapshots = append(snapshots, book.Snapshot(5))
+		if len(book.OrderMap) == 0 {
+			delete(e.books, key)
+		}
+	}
+
+	return CancelResult{
+		Orders: cancelled,
+		Books:  snapshots,
+	}, nil
 }
 
 func (e *Engine) processLimitOrder(order *model.Order, book *model.OrderBook) ([]model.Trade, []*model.Order) {

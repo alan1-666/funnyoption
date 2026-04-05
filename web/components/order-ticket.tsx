@@ -39,11 +39,23 @@ export function OrderTicket({ market }: { market: Market }) {
   const coverImage = readCoverImage(market);
   const displayTitle = presentMarketTitle(market);
   const freeze = useMemo(() => Math.max(price, 0) * Math.max(quantity, 0), [price, quantity]);
-  const displayedStatus = status || (wallet ? statusMessage || "钱包已连接，等待交易授权。" : "连接钱包后即可开始下单。");
+  const marketTradable = String(market.status).toUpperCase() === "OPEN";
+  const displayedStatus =
+    status ||
+    (!marketTradable
+      ? "当前市场已收盘，新的委托不会再进入撮合。"
+      : wallet
+        ? statusMessage || "钱包已连接，等待交易授权。"
+        : "连接钱包后即可开始下单。");
   const accessState = session ? "已开启" : wallet ? "等待授权" : "未连接";
 
   async function handleSubmit() {
     try {
+      if (!marketTradable) {
+        setStatus("当前市场已收盘，请等待结算结果。");
+        return;
+      }
+
       if (!wallet) {
         setStatus("连接钱包中...");
         await connect();
@@ -107,12 +119,23 @@ export function OrderTicket({ market }: { market: Market }) {
       await response.json();
       commitOrderNonce(orderPayload.orderNonce);
       setStatus("订单已提交。");
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("funnyoption:order-submitted", {
+            detail: {
+              marketId: market.market_id,
+              userId: orderPayload.userId,
+              clientOrderId
+            }
+          })
+        );
+      }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "下单失败");
     }
   }
 
-  const primaryLabel = session ? `买入${zhOutcome(outcome)}` : wallet ? "授权交易" : "连接钱包";
+  const primaryLabel = !marketTradable ? "市场已收盘" : session ? `买入${zhOutcome(outcome)}` : wallet ? "授权交易" : "连接钱包";
 
   return (
     <div className={`panel ${styles.ticket}`}>
@@ -251,7 +274,7 @@ export function OrderTicket({ market }: { market: Market }) {
         <strong>即将开放</strong>
       </div>
 
-      <button className={styles.primary} onClick={handleSubmit}>
+      <button className={styles.primary} onClick={handleSubmit} disabled={!marketTradable}>
         {primaryLabel}
       </button>
 

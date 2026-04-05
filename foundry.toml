@@ -1,5 +1,6 @@
 [profile.default]
 src = "contracts/src"
+test = "contracts/test"
 out = "contracts/out"
 script = "contracts/script"
 optimizer = true

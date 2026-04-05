@@ -1,0 +1,176 @@
+.panel {
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+  border-radius: 30px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.026), rgba(255, 255, 255, 0.01)),
+    rgba(13, 13, 14, 0.96);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.title {
+  margin: 10px 0 0;
+  font-size: 1.14rem;
+  line-height: 1.35;
+  letter-spacing: -0.04em;
+}
+
+.headerMeta {
+  display: grid;
+  gap: 4px;
+  text-align: right;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.78rem;
+}
+
+.headerMeta strong {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.section {
+  display: grid;
+  gap: 12px;
+}
+
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 0.84rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sectionHeader strong,
+.link {
+  color: #ffffff;
+  font-size: 0.88rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.link {
+  opacity: 0.78;
+  transition: opacity 0.2s ease;
+}
+
+.link:hover {
+  opacity: 1;
+}
+
+.list {
+  display: grid;
+  gap: 10px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 15px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.024);
+}
+
+.rowMain {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.rowTitle,
+.rowMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  align-items: center;
+}
+
+.rowTitle strong {
+  color: #ffffff;
+  font-size: 0.98rem;
+  line-height: 1.2;
+}
+
+.rowTitle span,
+.rowMeta span,
+.rowAside small {
+  color: rgba(255, 255, 255, 0.54);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.rowAside {
+  display: grid;
+  justify-items: end;
+  gap: 7px;
+}
+
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.statusOpen {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.statusPartial {
+  background: rgba(78, 194, 255, 0.12);
+  color: #b9efff;
+}
+
+.statusFilled {
+  background: rgba(35, 201, 123, 0.16);
+  color: #8cf4ba;
+}
+
+.statusCancelled {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.emptyState {
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.022);
+  color: rgba(255, 255, 255, 0.62);
+  line-height: 1.65;
+}
+
+@media (max-width: 640px) {
+  .header,
+  .row {
+    grid-template-columns: 1fr;
+  }
+
+  .rowAside {
+    justify-items: start;
+  }
+
+  .headerMeta {
+    text-align: left;
+  }
+}

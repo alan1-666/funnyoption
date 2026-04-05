@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	sharedauth "funnyoption/internal/shared/auth"
+
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -368,6 +370,12 @@ type SessionResponse struct {
 	RevokedAtMillis  int64  `json:"revoked_at"`
 	CreatedAt        int64  `json:"created_at"`
 	UpdatedAt        int64  `json:"updated_at"`
+}
+
+type AdvanceSessionNonceRequest struct {
+	SessionID            string
+	Nonce                uint64
+	AuthorizationWitness *sharedauth.OrderAuthorizationWitness
 }
 
 type ListSessionsRequest struct {

@@ -8,6 +8,7 @@ import (
 
 	accountclient "funnyoption/internal/account/client"
 	"funnyoption/internal/api/handler"
+	"funnyoption/internal/rollup"
 	"funnyoption/internal/shared/config"
 	shareddb "funnyoption/internal/shared/db"
 	sharedkafka "funnyoption/internal/shared/kafka"
@@ -43,7 +44,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 		KafkaPublisher:        publisher,
 		KafkaTopics:           cfg.KafkaTopics,
 		AccountClient:         accountRPC,
-		QueryStore:            handler.NewSQLStore(dbConn),
+		QueryStore:            handler.NewSQLStore(dbConn).WithRollup(rollup.NewStore(dbConn)),
 		OperatorWallets:       cfg.OperatorWallets,
 		DefaultOperatorUserID: cfg.DefaultOperatorUserID,
 		ExpectedChainID:       cfg.ChainID,

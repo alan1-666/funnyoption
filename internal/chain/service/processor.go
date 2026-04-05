@@ -11,6 +11,7 @@ import (
 
 	accountclient "funnyoption/internal/account/client"
 	chainmodel "funnyoption/internal/chain/model"
+	"funnyoption/internal/rollup"
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
 
@@ -20,6 +21,7 @@ type Processor struct {
 	account   accountclient.AccountClient
 	publisher sharedkafka.Publisher
 	topics    sharedkafka.Topics
+	rollup    *rollup.Store
 }
 
 func NewProcessor(logger *slog.Logger, store DepositStore, account accountclient.AccountClient, publisher sharedkafka.Publisher, topics sharedkafka.Topics) *Processor {
@@ -30,6 +32,11 @@ func NewProcessor(logger *slog.Logger, store DepositStore, account accountclient
 		publisher: publisher,
 		topics:    topics,
 	}
+}
+
+func (p *Processor) WithRollup(store *rollup.Store) *Processor {
+	p.rollup = store
+	return p
 }
 
 func (p *Processor) ApplyConfirmedDeposit(ctx context.Context, deposit chainmodel.Deposit) error {
@@ -82,6 +89,30 @@ func (p *Processor) ApplyConfirmedDeposit(ctx context.Context, deposit chainmode
 	}
 	if result.Applied {
 		if err := p.publisher.PublishJSON(ctx, p.topics.ChainDeposit, stored.DepositID, event); err != nil {
+			return err
+		}
+	}
+	if p.rollup != nil {
+		if err := p.rollup.AppendEntries(ctx, []rollup.JournalAppend{{
+			EntryType:        rollup.EntryTypeDepositCredited,
+			SourceType:       rollup.SourceTypeChainDeposit,
+			SourceRef:        stored.DepositID,
+			OccurredAtMillis: event.OccurredAtMillis,
+			Payload: rollup.DepositCreditedPayload{
+				DepositID:        stored.DepositID,
+				AccountID:        stored.UserID,
+				WalletAddress:    stored.WalletAddress,
+				VaultAddress:     stored.VaultAddress,
+				Asset:            stored.Asset,
+				Amount:           stored.Amount,
+				ChainName:        stored.ChainName,
+				NetworkName:      stored.NetworkName,
+				TxHash:           stored.TxHash,
+				LogIndex:         stored.LogIndex,
+				BlockNumber:      stored.BlockNumber,
+				OccurredAtMillis: event.OccurredAtMillis,
+			},
+		}}); err != nil {
 			return err
 		}
 	}
@@ -143,6 +174,32 @@ func (p *Processor) ApplyConfirmedWithdrawal(ctx context.Context, withdrawal cha
 	}
 	if result.Applied {
 		if err := p.publisher.PublishJSON(ctx, p.topics.ChainWithdraw, stored.WithdrawalID, event); err != nil {
+			return err
+		}
+	}
+	if p.rollup != nil {
+		if err := p.rollup.AppendEntries(ctx, []rollup.JournalAppend{{
+			EntryType:        rollup.EntryTypeWithdrawalRequested,
+			SourceType:       rollup.SourceTypeChainWithdraw,
+			SourceRef:        stored.WithdrawalID,
+			OccurredAtMillis: event.OccurredAtMillis,
+			Payload: rollup.WithdrawalRequestedPayload{
+				WithdrawalID:     stored.WithdrawalID,
+				AccountID:        stored.UserID,
+				WalletAddress:    stored.WalletAddress,
+				RecipientAddress: stored.RecipientAddress,
+				VaultAddress:     stored.VaultAddress,
+				Asset:            stored.Asset,
+				Amount:           stored.Amount,
+				Lane:             "SLOW",
+				ChainName:        stored.ChainName,
+				NetworkName:      stored.NetworkName,
+				TxHash:           stored.TxHash,
+				LogIndex:         stored.LogIndex,
+				BlockNumber:      stored.BlockNumber,
+				OccurredAtMillis: event.OccurredAtMillis,
+			},
+		}}); err != nil {
 			return err
 		}
 	}

@@ -1,9 +1,8 @@
-import Link from "next/link";
-
 import { LiveMarketPanel } from "@/components/live-market-panel";
+import { MarketOrderActivity } from "@/components/market-order-activity";
 import { OrderTicket } from "@/components/order-ticket";
 import { ShellTopBar } from "@/components/shell-top-bar";
-import { formatAssetAmount, formatTimestamp } from "@/lib/format";
+import { formatTimestamp } from "@/lib/format";
 import { getMarketRead, getTradesRead } from "@/lib/api";
 import { presentMarketCategory, presentMarketDescription, presentMarketTitle } from "@/lib/market-display";
 import { zhMarketStatus, zhOutcome } from "@/lib/locale";
@@ -60,14 +59,8 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ m
   const tradesUnavailable = tradesResult.state === "unavailable";
 
   const metadata = market.metadata ?? {};
-  const yesOdds = Math.round(Number(metadata.yesOdds ?? (market.runtime.last_price_yes ? market.runtime.last_price_yes / 100 : 0.5)) * 100);
-  const noOdds = Math.round(Number(metadata.noOdds ?? (market.runtime.last_price_no ? market.runtime.last_price_no / 100 : 0.5)) * 100);
-  const matchedNotional = market.runtime.matched_notional;
   const category = presentMarketCategory(market);
   const displayTitle = presentMarketTitle(market);
-  const optionSummary = (market.options ?? [])
-    .filter((option) => option.is_active !== false)
-    .sort((left, right) => left.sort_order - right.sort_order || left.key.localeCompare(right.key));
   const coverImageUrl = String(metadata.coverImage ?? metadata.coverImageUrl ?? metadata.cover_image_url ?? "");
   const coverSourceName = String(metadata.sourceName ?? metadata.coverSourceName ?? metadata.cover_source_name ?? "");
   const sourceLabel = coverSourceName || category;
@@ -90,46 +83,6 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ m
               <div className={styles.heroHeading}>
                 <h1 className={styles.title}>{displayTitle}</h1>
                 <p className={styles.copy}>{presentMarketDescription(market)}</p>
-              </div>
-
-              {optionSummary.length > 0 ? (
-                <div className={styles.heroTags}>
-                  {optionSummary.map((option) => (
-                    <span key={option.key} className={styles.optionChip}>
-                      <span>{option.short_label ?? option.label}</span>
-                      {market.status === "RESOLVED" && market.resolved_outcome?.toUpperCase() === option.key.toUpperCase() ? (
-                        <strong>{zhOutcome(option.key)}</strong>
-                      ) : null}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-
-              <div className={styles.statsGrid}>
-                <div className={styles.statCard}>
-                  <span className={styles.label}>当前买是</span>
-                  <strong>{yesOdds}¢</strong>
-                </div>
-                <div className={styles.statCard}>
-                  <span className={styles.label}>当前买否</span>
-                  <strong>{noOdds}¢</strong>
-                </div>
-                <div className={styles.statCard}>
-                  <span className={styles.label}>累计成交额</span>
-                  <strong>{formatAssetAmount(matchedNotional, "USDT")} USDT</strong>
-                </div>
-                <div className={styles.statCard}>
-                  <span className={styles.label}>成交笔数</span>
-                  <strong>{market.runtime.trade_count}</strong>
-                </div>
-                <div className={styles.statCard}>
-                  <span className={styles.label}>挂单数量</span>
-                  <strong>{market.runtime.active_order_count}</strong>
-                </div>
-                <div className={styles.statCard}>
-                  <span className={styles.label}>最近更新</span>
-                  <strong>{formatTimestamp(market.updated_at)}</strong>
-                </div>
               </div>
             </div>
 
@@ -177,6 +130,7 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ m
 
         <aside className={`${styles.sidebar} float-in float-in-delay-2`}>
           <OrderTicket market={market} />
+          <MarketOrderActivity marketId={market.market_id} />
           <section className={`panel ${styles.sidePanel}`}>
             <div className={styles.sidePanelHeader}>
               <span className="eyebrow">时间与状态</span>

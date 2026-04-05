@@ -73,8 +73,8 @@ func (s *cancelOrderStore) ApplyDelta(_ context.Context, _, _ int64, _, _ string
 	return nil
 }
 
-func (s *cancelOrderStore) ResolveMarket(_ context.Context, marketID int64, _ string) (bool, error) {
-	s.resolved = append(s.resolved, marketID)
+func (s *cancelOrderStore) ResolveMarket(_ context.Context, input ResolveMarketInput) (bool, error) {
+	s.resolved = append(s.resolved, input.MarketID)
 	return true, nil
 }
 
@@ -86,7 +86,7 @@ func (s *cancelOrderStore) WinningPositions(_ context.Context, _ int64, _ string
 	return nil, nil
 }
 
-func (s *cancelOrderStore) MarkSettled(_ context.Context, _ string, _, _ int64, _ string, _ int64, _ string, _ int64) error {
+func (s *cancelOrderStore) MarkSettled(_ context.Context, _ sharedkafka.SettlementCompletedEvent) error {
 	return nil
 }
 

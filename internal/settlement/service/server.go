@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 
+	"funnyoption/internal/rollup"
 	"funnyoption/internal/shared/config"
 	shareddb "funnyoption/internal/shared/db"
 	"funnyoption/internal/shared/grpcx"
@@ -17,7 +18,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	}
 	defer dbConn.Close()
 
-	store := NewSQLStore(dbConn)
+	store := NewSQLStore(dbConn).WithRollup(rollup.NewStore(dbConn))
 	publisher := sharedkafka.NewJSONPublisher(logger, cfg.KafkaBrokers)
 	defer publisher.Close()
 

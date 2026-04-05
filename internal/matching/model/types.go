@@ -42,6 +42,7 @@ const (
 	CancelReasonNone              CancelReason = "NONE"
 	CancelReasonIOCNoLiquidity    CancelReason = "IOC_NO_LIQUIDITY"
 	CancelReasonIOCPartialFill    CancelReason = "IOC_PARTIAL_FILL"
+	CancelReasonMarketClosed      CancelReason = "MARKET_CLOSED"
 	CancelReasonMarketNoLiquidity CancelReason = "MARKET_NO_LIQUIDITY"
 	CancelReasonMarketNotTradable CancelReason = "MARKET_NOT_TRADABLE"
 	CancelReasonMarketResolved    CancelReason = "MARKET_RESOLVED"

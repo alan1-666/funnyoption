@@ -187,6 +187,7 @@ type fakeQueryStore struct {
 	getSessionErr                 error
 	revokeSessionResp             dto.SessionResponse
 	revokeSessionErr              error
+	advanceSessionReq             dto.AdvanceSessionNonceRequest
 	advanceSessionResp            dto.SessionResponse
 	advanceSessionErr             error
 	getMarketResp                 dto.MarketResponse
@@ -496,10 +497,9 @@ func (f *fakeQueryStore) GetLatestFreezeByRef(ctx context.Context, refType, refI
 	return f.getFreezeResp, f.getFreezeErr
 }
 
-func (f *fakeQueryStore) AdvanceSessionNonce(ctx context.Context, sessionID string, nonce uint64) (dto.SessionResponse, error) {
+func (f *fakeQueryStore) AdvanceSessionNonce(ctx context.Context, req dto.AdvanceSessionNonceRequest) (dto.SessionResponse, error) {
 	_ = ctx
-	_ = sessionID
-	_ = nonce
+	f.advanceSessionReq = req
 	if f.advanceSessionResp.SessionID == "" {
 		return f.getSessionResp, f.advanceSessionErr
 	}
@@ -1202,12 +1202,14 @@ func TestCreateOrderWithSessionSignaturePublishesCommand(t *testing.T) {
 	}
 	store := &fakeQueryStore{
 		getSessionResp: dto.SessionResponse{
-			SessionID:        "sess_live",
+			SessionID:        "tk_live",
 			UserID:           1001,
 			WalletAddress:    "0x00000000000000000000000000000000000000aa",
 			SessionPublicKey: hexutil.Encode(sessionPub),
 			Scope:            "TRADE",
 			ChainID:          97,
+			VaultAddress:     "0x00000000000000000000000000000000000000bb",
+			SessionNonce:     "0x5fbe9af9d6ab53d4df3bcb43f9e6c5f26a4d9bc2a8f44a0ab2997f7dc2c5c94a",
 			Status:           "ACTIVE",
 			IssuedAtMillis:   time.Now().Add(-time.Minute).UnixMilli(),
 			ExpiresAtMillis:  time.Now().Add(time.Hour).UnixMilli(),
@@ -1223,7 +1225,7 @@ func TestCreateOrderWithSessionSignaturePublishesCommand(t *testing.T) {
 	})
 
 	intent := sharedauth.OrderIntent{
-		SessionID:         "sess_live",
+		SessionID:         "tk_live",
 		WalletAddress:     "0x00000000000000000000000000000000000000aa",
 		UserID:            1001,
 		MarketID:          88,
@@ -1274,6 +1276,21 @@ func TestCreateOrderWithSessionSignaturePublishesCommand(t *testing.T) {
 	}
 	if command.RequestedAtMillis != intent.RequestedAtMillis {
 		t.Fatalf("unexpected requested_at: %d", command.RequestedAtMillis)
+	}
+	if store.advanceSessionReq.SessionID != intent.SessionID {
+		t.Fatalf("unexpected nonce advance session_id: %s", store.advanceSessionReq.SessionID)
+	}
+	if store.advanceSessionReq.AuthorizationWitness == nil {
+		t.Fatalf("expected nonce advance auth witness")
+	}
+	if !store.advanceSessionReq.AuthorizationWitness.VerifierEligible {
+		t.Fatalf("expected verifier-eligible auth witness, got %+v", store.advanceSessionReq.AuthorizationWitness)
+	}
+	if store.advanceSessionReq.AuthorizationWitness.AuthorizationRef != "tk_live:0x5fbe9af9d6ab53d4df3bcb43f9e6c5f26a4d9bc2a8f44a0ab2997f7dc2c5c94a" {
+		t.Fatalf("unexpected authorization_ref: %s", store.advanceSessionReq.AuthorizationWitness.AuthorizationRef)
+	}
+	if store.advanceSessionReq.AuthorizationWitness.Intent.MessageHash == "" {
+		t.Fatalf("expected order intent message hash in auth witness")
 	}
 }
 
@@ -1455,6 +1472,61 @@ func TestCreateOrderRejectsResolvedMarketBeforeFreeze(t *testing.T) {
 	}
 	if account.preFreezeCalled {
 		t.Fatalf("expected no pre-freeze attempt for resolved market")
+	}
+}
+
+func TestCreateOrderRejectsPastCloseAtMarketBeforeFreeze(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	account := &fakeAccountClient{
+		freezeResp: accountclient.FreezeRecord{
+			FreezeID: "frz_should_not_exist",
+			UserID:   1001,
+			Asset:    "USDT",
+			RefType:  "ORDER",
+			RefID:    "ord_x",
+			Amount:   200,
+		},
+	}
+	reqBody := dto.CreateOrderRequest{
+		UserID:      1001,
+		MarketID:    88,
+		Outcome:     "yes",
+		Side:        "sell",
+		Type:        "limit",
+		TimeInForce: "gtc",
+		Price:       10,
+		Quantity:    20,
+	}
+	wallet := attachSignedBootstrapOrderOperator(t, &reqBody)
+	handler := NewOrderHandler(Dependencies{
+		Logger:        slog.Default(),
+		KafkaTopics:   kafka.NewTopics("funnyoption."),
+		AccountClient: account,
+		QueryStore: &fakeQueryStore{
+			getMarketResp: dto.MarketResponse{
+				MarketID: 88,
+				Status:   "OPEN",
+				CloseAt:  time.Now().Unix() - 1,
+			},
+		},
+		OperatorWallets: []string{wallet},
+	})
+
+	raw, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = req
+
+	handler.CreateOrder(ctx)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	if account.preFreezeCalled {
+		t.Fatalf("expected no pre-freeze attempt for post-close market")
 	}
 }
 
@@ -1936,6 +2008,51 @@ func TestCreateFirstLiquidityRollsBackWhenPublishFails(t *testing.T) {
 	}
 }
 
+func TestCreateFirstLiquidityRejectsPastCloseAtMarket(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	account := &fakeAccountClient{}
+	reqBody := dto.CreateFirstLiquidityRequest{
+		UserID:   1002,
+		Quantity: 40,
+		Outcome:  "YES",
+		Price:    55,
+	}
+	wallet := attachSignedFirstLiquidityOperator(t, 88, &reqBody)
+	handler := NewOrderHandler(Dependencies{
+		Logger:         slog.Default(),
+		KafkaPublisher: &fakePublisher{},
+		KafkaTopics:    kafka.NewTopics("funnyoption."),
+		AccountClient:  account,
+		QueryStore: &fakeQueryStore{
+			getMarketResp: dto.MarketResponse{
+				MarketID:        88,
+				CollateralAsset: "USDT",
+				Status:          "OPEN",
+				CloseAt:         time.Now().Unix() - 1,
+			},
+		},
+		OperatorWallets: []string{wallet},
+	})
+
+	raw, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/markets/88/first-liquidity", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Params = gin.Params{{Key: "market_id", Value: "88"}}
+	ctx.Request = req
+
+	handler.CreateFirstLiquidity(ctx)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	if len(account.debits) != 0 || len(account.credits) != 0 || account.preFreezeCalled {
+		t.Fatalf("expected post-close first-liquidity request to stop before balance mutation, got debits=%+v credits=%+v preFreezeCalled=%v", account.debits, account.credits, account.preFreezeCalled)
+	}
+}
+
 func TestCreateFirstLiquidityRejectsMissingOperatorProof(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1991,6 +2108,43 @@ func TestResolveMarketRejectsMissingOperatorProof(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestResolveMarketRejectsAlreadyResolvedMarket(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	publisher := &fakePublisher{}
+	reqBody := dto.ResolveMarketRequest{Outcome: "YES"}
+	wallet := attachSignedResolveOperator(t, 88, &reqBody)
+	handler := NewOrderHandler(Dependencies{
+		Logger:         slog.Default(),
+		KafkaPublisher: publisher,
+		KafkaTopics:    kafka.NewTopics("funnyoption."),
+		QueryStore: &fakeQueryStore{
+			getMarketResp: dto.MarketResponse{
+				MarketID: 88,
+				Status:   "RESOLVED",
+			},
+		},
+		OperatorWallets: []string{wallet},
+	})
+
+	raw, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/markets/88/resolve", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Params = gin.Params{{Key: "market_id", Value: "88"}}
+	ctx.Request = req
+
+	handler.ResolveMarket(ctx)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	if len(publisher.calls) != 0 {
+		t.Fatalf("expected resolved market to stop before publish, got %+v", publisher.calls)
 	}
 }
 

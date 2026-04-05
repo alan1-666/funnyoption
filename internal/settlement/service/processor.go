@@ -48,7 +48,11 @@ func (p *Processor) HandleMarketEvent(ctx context.Context, msg sharedkafka.Messa
 		return nil
 	}
 
-	freshResolve, err := p.store.ResolveMarket(ctx, event.MarketID, resolvedOutcome)
+	freshResolve, err := p.store.ResolveMarket(ctx, ResolveMarketInput{
+		MarketID:         event.MarketID,
+		ResolvedOutcome:  resolvedOutcome,
+		OccurredAtMillis: event.OccurredAtMillis,
+	})
 	if err != nil {
 		return err
 	}
@@ -111,7 +115,7 @@ func (p *Processor) HandleMarketEvent(ctx context.Context, msg sharedkafka.Messa
 		if err := p.publisher.PublishJSON(ctx, p.topics.SettlementDone, settlementKey(position.MarketID, position.UserID), settlement); err != nil {
 			return err
 		}
-		if err := p.store.MarkSettled(ctx, settlement.EventID, position.MarketID, position.UserID, position.Outcome, position.Quantity, settlement.PayoutAsset, settlement.PayoutAmount); err != nil {
+		if err := p.store.MarkSettled(ctx, settlement); err != nil {
 			return err
 		}
 	}

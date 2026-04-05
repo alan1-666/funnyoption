@@ -57,6 +57,20 @@ Matching is not responsible for:
 - `matching` also emits maker-side order updates so `account` can release or close older resting freezes
 - position-leg accounting is deferred to the next iteration
 
+## Market Lifecycle Boundary
+
+- `close_at` is the runtime trading cutoff:
+  - order ingress must reject new orders once `now >= close_at`
+  - matching restore must not reload resting orders for a market once `now >= close_at`
+  - matching also sweeps already-loaded resting `LIMIT` orders after `close_at`, marks them `CANCELLED` with `MARKET_CLOSED`, and republishes order/depth updates so balances and read surfaces converge without waiting for a restart
+- a market is only runtime-tradable when its effective status is `OPEN`:
+  - stored `status = OPEN`
+  - and `close_at` is unset or still in the future
+- once `close_at` is reached, unresolved markets are runtime `CLOSED`, not `RESOLVED`
+- `resolve_at` is not the trading cutoff:
+  - oracle markets still use `resolve_at` as the canonical auto-resolution timestamp
+  - non-oracle markets stay `CLOSED` and await manual resolution after trading stops
+
 ## Ordering strategy
 
 - one book key is `market_id:outcome`

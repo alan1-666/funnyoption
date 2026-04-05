@@ -16,6 +16,7 @@ func registerSessionRoutes(api *gin.RouterGroup, orderHandler *handler.OrderHand
 	sessions.POST("/:session_id/revoke", markAuthLane(authLaneWalletSession), limiter.Middleware(rateLimitSessionWrite), orderHandler.RevokeSession)
 
 	tradingKeys := api.Group("/trading-keys")
+	tradingKeys.GET("", orderHandler.ListTradingKeys)
 	tradingKeys.POST("/challenge", markAuthLane(authLaneWalletSession), limiter.Middleware(rateLimitSessionCreate), orderHandler.CreateTradingKeyChallenge)
 	tradingKeys.POST("", markAuthLane(authLaneWalletSession), limiter.Middleware(rateLimitSessionWrite), orderHandler.RegisterTradingKey)
 

@@ -491,13 +491,24 @@ Current landed truth:
 Temporary compatibility rule for repo proof tooling:
 
 - `POST /api/v1/sessions` remains available as a deprecated compatibility route
-  for repo-local lifecycle and staging proof tooling
+  for legacy compatibility only
 - that route preserves the legacy session-grant contract and should not be used
   as the V2 browser auth baseline
 - rows created through that route continue to carry blank `vault_address`
 - the canonical V2 browser flow remains
 - `POST /api/v1/trading-keys/challenge` issues the one-time V2 auth challenge
 - `POST /api/v1/trading-keys` registers the wallet-authorized trading key
+- `GET /api/v1/trading-keys` is the canonical proof-tool / restore readback
+  route for verifier-eligible V2 paths
+- verifier-eligible proof tooling should treat blank-vault `/api/v1/sessions`
+  rows as compatibility-only and migrate to the `trading-keys` routes above
+- verifier-prep auth/proof contract is now anchored on the canonical
+  `authorization_ref` join between:
+  - `TRADING_KEY_AUTHORIZED`
+  - `NONCE_ADVANCED.payload.order_authorization`
+- verifier-eligible runbooks should therefore describe truthful restore /
+  readback through `GET /api/v1/trading-keys`, not deprecated
+  `/api/v1/sessions`
 
 ### Phase 3: durable wallet binding for chain attribution
 

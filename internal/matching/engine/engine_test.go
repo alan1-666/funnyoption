@@ -188,3 +188,57 @@ func TestAsyncEngineRestoreSeedsSequenceAndRestingBook(t *testing.T) {
 		t.Fatalf("expected restored maker to match, got %s", result.Trades[0].MakerOrderID)
 	}
 }
+
+func TestAsyncEngineCancelOrdersRemovesRestingLiquidity(t *testing.T) {
+	async := NewAsync(slog.New(slog.NewTextHandler(io.Discard, nil)), 8)
+	if err := async.Restore(3, []*model.Order{
+		{
+			OrderID:         "resting-yes",
+			UserID:          1001,
+			MarketID:        21,
+			Outcome:         "YES",
+			Side:            model.OrderSideBuy,
+			Type:            model.OrderTypeLimit,
+			TimeInForce:     model.TimeInForceGTC,
+			Price:           52,
+			Quantity:        15,
+			Status:          model.OrderStatusNew,
+			CreatedAtMillis: 1000,
+			UpdatedAtMillis: 1000,
+		},
+	}); err != nil {
+		t.Fatalf("restore state: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	async.Start(ctx)
+
+	cancelled, err := async.CancelOrders(ctx, []*model.Order{{
+		OrderID:  "resting-yes",
+		MarketID: 21,
+		Outcome:  "YES",
+		Side:     model.OrderSideBuy,
+	}}, model.CancelReasonMarketClosed)
+	if err != nil {
+		t.Fatalf("cancel orders: %v", err)
+	}
+	if len(cancelled.Orders) != 1 {
+		t.Fatalf("expected one cancelled order, got %d", len(cancelled.Orders))
+	}
+	if cancelled.Orders[0].Status != model.OrderStatusCancelled {
+		t.Fatalf("expected cancelled status, got %s", cancelled.Orders[0].Status)
+	}
+	if cancelled.Orders[0].CancelReason != model.CancelReasonMarketClosed {
+		t.Fatalf("unexpected cancel reason: %s", cancelled.Orders[0].CancelReason)
+	}
+	if len(cancelled.Books) != 1 {
+		t.Fatalf("expected one book snapshot, got %d", len(cancelled.Books))
+	}
+	if len(cancelled.Books[0].Bids) != 0 || len(cancelled.Books[0].Asks) != 0 {
+		t.Fatalf("expected empty book snapshot after cancellation, got %+v", cancelled.Books[0])
+	}
+	if async.BookCount() != 0 {
+		t.Fatalf("expected empty matcher after cancellation, got %d books", async.BookCount())
+	}
+}

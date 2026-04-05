@@ -6,10 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
+
+	"funnyoption/internal/rollup"
+	sharedkafka "funnyoption/internal/shared/kafka"
 )
 
 type SQLStore struct {
-	db *sql.DB
+	db     *sql.DB
+	rollup *rollup.Store
 }
 
 type resolutionRecord struct {
@@ -22,6 +27,11 @@ type resolutionRecord struct {
 
 func NewSQLStore(db *sql.DB) *SQLStore {
 	return &SQLStore{db: db}
+}
+
+func (s *SQLStore) WithRollup(store *rollup.Store) *SQLStore {
+	s.rollup = store
+	return s
 }
 
 func (s *SQLStore) ApplyDelta(ctx context.Context, marketID, userID int64, outcome, positionAsset string, delta int64) error {
@@ -41,8 +51,8 @@ func (s *SQLStore) ApplyDelta(ctx context.Context, marketID, userID int64, outco
 	return err
 }
 
-func (s *SQLStore) ResolveMarket(ctx context.Context, marketID int64, outcome string) (bool, error) {
-	if err := s.ensureMarket(ctx, marketID); err != nil {
+func (s *SQLStore) ResolveMarket(ctx context.Context, input ResolveMarketInput) (bool, error) {
+	if err := s.ensureMarket(ctx, input.MarketID); err != nil {
 		return false, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -60,7 +70,7 @@ func (s *SQLStore) ResolveMarket(ctx context.Context, marketID int64, outcome st
 			updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
 		WHERE market_id = $1
 		  AND status <> 'RESOLVED'
-	`, marketID, outcome)
+	`, input.MarketID, input.ResolvedOutcome)
 	if err != nil {
 		return false, err
 	}
@@ -75,25 +85,25 @@ func (s *SQLStore) ResolveMarket(ctx context.Context, marketID int64, outcome st
 			SELECT status, resolved_outcome
 			FROM markets
 			WHERE market_id = $1
-		`, marketID)
+		`, input.MarketID)
 		if err := row.Scan(&currentStatus, &currentOutcome); err != nil {
 			return false, err
 		}
 		if strings.ToUpper(strings.TrimSpace(currentStatus)) == "RESOLVED" &&
-			strings.ToUpper(strings.TrimSpace(currentOutcome)) == strings.ToUpper(strings.TrimSpace(outcome)) {
+			strings.ToUpper(strings.TrimSpace(currentOutcome)) == strings.ToUpper(strings.TrimSpace(input.ResolvedOutcome)) {
 			if err := tx.Commit(); err != nil {
 				return false, err
 			}
 			return false, nil
 		}
-		return false, fmt.Errorf("market %d already resolved with outcome %s", marketID, currentOutcome)
+		return false, fmt.Errorf("market %d already resolved with outcome %s", input.MarketID, currentOutcome)
 	}
 
-	current, err := loadResolutionRecordTx(ctx, tx, marketID)
+	current, err := loadResolutionRecordTx(ctx, tx, input.MarketID)
 	if err != nil {
 		return false, err
 	}
-	finalRecord := finalizeResolutionRecord(current, outcome)
+	finalRecord := finalizeResolutionRecord(current, input.ResolvedOutcome)
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO market_resolutions (
@@ -107,8 +117,14 @@ func (s *SQLStore) ResolveMarket(ctx context.Context, marketID int64, outcome st
 			resolver_ref = EXCLUDED.resolver_ref,
 			evidence = EXCLUDED.evidence,
 			updated_at = EXCLUDED.updated_at
-	`, marketID, outcome, finalRecord.ResolverType, finalRecord.ResolverRef, normalizeResolutionEvidence(finalRecord.Evidence)); err != nil {
+	`, input.MarketID, input.ResolvedOutcome, finalRecord.ResolverType, finalRecord.ResolverRef, normalizeResolutionEvidence(finalRecord.Evidence)); err != nil {
 		return false, err
+	}
+	if s.rollup != nil {
+		entry := buildMarketResolvedEntry(normalizeResolveMarketInput(input), finalRecord)
+		if err := s.rollup.AppendEntriesTx(ctx, tx, []rollup.JournalAppend{entry}); err != nil {
+			return false, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return false, err
@@ -169,7 +185,13 @@ func normalizeResolutionEvidence(raw json.RawMessage) []byte {
 }
 
 func (s *SQLStore) CancelActiveOrders(ctx context.Context, marketID int64, reason string) ([]cancelledOrder, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx, `
 		UPDATE orders
 		SET status = 'CANCELLED',
 			cancel_reason = $2,
@@ -179,7 +201,7 @@ func (s *SQLStore) CancelActiveOrders(ctx context.Context, marketID int64, reaso
 		  AND remaining_quantity > 0
 		RETURNING order_id, command_id, client_order_id, user_id, market_id, outcome, side, order_type, time_in_force,
 		          collateral_asset, freeze_id, freeze_asset, freeze_amount, price, quantity, filled_quantity, remaining_quantity,
-		          status, cancel_reason
+		          status, cancel_reason, updated_at
 	`, marketID, strings.ToUpper(strings.TrimSpace(reason)))
 	if err != nil {
 		return nil, err
@@ -209,12 +231,25 @@ func (s *SQLStore) CancelActiveOrders(ctx context.Context, marketID int64, reaso
 			&item.RemainingQuantity,
 			&item.Status,
 			&item.CancelReason,
+			&item.UpdatedAtMillis,
 		); err != nil {
 			return nil, err
 		}
+		item.UpdatedAtMillis *= 1000
 		cancelled = append(cancelled, item)
 	}
-	return cancelled, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if s.rollup != nil {
+		if err := s.rollup.AppendEntriesTx(ctx, tx, buildSettlementCancellationEntries(cancelled)); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return cancelled, nil
 }
 
 func (s *SQLStore) WinningPositions(ctx context.Context, marketID int64, outcome string) ([]winningPosition, error) {
@@ -242,33 +277,48 @@ func (s *SQLStore) WinningPositions(ctx context.Context, marketID int64, outcome
 	return positions, rows.Err()
 }
 
-func (s *SQLStore) MarkSettled(ctx context.Context, eventID string, marketID, userID int64, outcome string, quantity int64, payoutAsset string, payoutAmount int64) error {
+func (s *SQLStore) MarkSettled(ctx context.Context, event sharedkafka.SettlementCompletedEvent) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	positionAsset := fmt.Sprintf("POSITION:%d:%s", marketID, outcome)
-	_, err = tx.ExecContext(ctx, `
+	positionAsset := strings.ToUpper(strings.TrimSpace(event.PositionAsset))
+	if positionAsset == "" {
+		positionAsset = fmt.Sprintf("POSITION:%d:%s", event.MarketID, strings.ToUpper(strings.TrimSpace(event.WinningOutcome)))
+	}
+	result, err := tx.ExecContext(ctx, `
 		INSERT INTO settlement_payouts (
 			event_id, market_id, user_id, winning_outcome, position_asset,
 			settled_quantity, payout_asset, payout_amount, status, created_at, updated_at
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'COMPLETED', EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT)
 		ON CONFLICT (event_id) DO NOTHING
-	`, eventID, marketID, userID, outcome, positionAsset, quantity, payoutAsset, payoutAmount)
+	`, strings.TrimSpace(event.EventID), event.MarketID, event.UserID, strings.ToUpper(strings.TrimSpace(event.WinningOutcome)), positionAsset, event.SettledQuantity, strings.ToUpper(strings.TrimSpace(event.PayoutAsset)), event.PayoutAmount)
 	if err != nil {
 		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return tx.Commit()
 	}
 	_, err = tx.ExecContext(ctx, `
 		UPDATE positions
 		SET settled_quantity = settled_quantity + $4,
 			updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
 		WHERE market_id = $1 AND user_id = $2 AND outcome = $3
-	`, marketID, userID, outcome, quantity)
+	`, event.MarketID, event.UserID, strings.ToUpper(strings.TrimSpace(event.WinningOutcome)), event.SettledQuantity)
 	if err != nil {
 		return err
+	}
+	if s.rollup != nil {
+		if err := s.rollup.AppendEntriesTx(ctx, tx, []rollup.JournalAppend{buildSettlementPayoutEntry(normalizeSettlementEvent(event, positionAsset))}); err != nil {
+			return err
+		}
 	}
 
 	return tx.Commit()
@@ -284,4 +334,26 @@ func (s *SQLStore) ensureMarket(ctx context.Context, marketID int64) error {
 		ON CONFLICT (market_id) DO NOTHING
 	`, marketID, fmt.Sprintf("Market %d", marketID))
 	return err
+}
+
+func normalizeResolveMarketInput(input ResolveMarketInput) ResolveMarketInput {
+	input.ResolvedOutcome = strings.ToUpper(strings.TrimSpace(input.ResolvedOutcome))
+	if input.OccurredAtMillis <= 0 {
+		input.OccurredAtMillis = time.Now().UnixMilli()
+	}
+	return input
+}
+
+func normalizeSettlementEvent(event sharedkafka.SettlementCompletedEvent, positionAsset string) sharedkafka.SettlementCompletedEvent {
+	event.EventID = strings.TrimSpace(event.EventID)
+	event.WinningOutcome = strings.ToUpper(strings.TrimSpace(event.WinningOutcome))
+	event.PositionAsset = positionAsset
+	event.PayoutAsset = strings.ToUpper(strings.TrimSpace(event.PayoutAsset))
+	if event.PayoutAsset == "" {
+		event.PayoutAsset = "USDT"
+	}
+	if event.OccurredAtMillis <= 0 {
+		event.OccurredAtMillis = time.Now().UnixMilli()
+	}
+	return event
 }

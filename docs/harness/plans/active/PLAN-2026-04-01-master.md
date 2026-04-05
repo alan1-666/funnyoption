@@ -53,13 +53,32 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
 | TASK-OFFCHAIN-014 | completed | worker-design | TASK-STAGING-001 | define the Stark-style wallet-linked trading-key architecture so users sign once with MetaMask, derive or register one off-chain trading key, and sign subsequent orders without repeated wallet prompts |
 | TASK-OFFCHAIN-015 | completed | worker | TASK-OFFCHAIN-014 | implement the first V2 trading-key runtime slice: challenge issuance, `EIP-712` wallet authorization of a browser-local trading key, compatibility storage in `wallet_sessions`, and truthful local restore semantics |
 | TASK-OFFCHAIN-016 | completed | worker | TASK-OFFCHAIN-015 | make active trading-key scope durably truthful to `wallet + chain + vault` by persisting vault scope server-side and stopping cross-vault rotation / lookup collapse |
+| TASK-OFFCHAIN-018 | completed | worker | TASK-CHAIN-024 | finish the current main product lane by proactively cancelling post-`close_at` active orders on the backend and adding connected-user order/fill visibility plus duplicate-summary cleanup on the market detail page |
 | TASK-CICD-001 | completed | worker-platform | TASK-API-004 | add GitHub push-to-deploy CI/CD for the current server deployment without committing plaintext secrets |
 | TASK-CICD-002 | completed | worker-platform | TASK-CICD-001 | optimize staging CI/CD so only services affected by a push are validated, rebuilt, and redeployed, while docs-only pushes skip service deployment |
 | TASK-CICD-003 | completed | worker-platform | TASK-CICD-002 | make selective deploy self-bootstrap-safe when the server checkout still has an older `scripts/deploy-staging.sh` that does not recognize new workflow-passed flags |
 | TASK-CICD-004 | completed | worker-platform | TASK-CICD-003 | simplify staging CI/CD so GitHub Actions becomes a thin trigger that calls one fixed server-side deploy entrypoint, while the server entrypoint fetches the exact target SHA and delegates selective rebuild/restart planning to the repo deploy script |
+| TASK-API-006 | paused | worker | TASK-CHAIN-024 | narrow the repo-structure cleanup to `internal/api` by splitting routes/handlers/store concerns into clearer module-owned packages without changing current runtime behavior or widening into a full repo migration |
 | TASK-CHAIN-005 | completed | worker-design | TASK-STAGING-001 | define the oracle-settled crypto market contract and first implementation cut so crypto markets can auto-resolve from an external price source with auditable evidence and a safe manual override |
 | TASK-CHAIN-006 | completed | worker | TASK-CHAIN-005 | implement the first oracle-settled crypto market runtime slice with one-provider metadata validation, a dedicated oracle worker, manual resolve conflict guards, and truthful resolution-record ownership for manual fallback |
 | TASK-CHAIN-007 | completed | worker | TASK-CHAIN-006 | add an explicit retry-safe dispatch contract for oracle observations so `OBSERVED` rows whose publish step failed can be retried without duplicate settlement/account side effects |
+| TASK-CHAIN-008 | completed | worker-design | TASK-OFFCHAIN-017, TASK-CHAIN-007 | define the target Mode B architecture as a `ZK-Rollup` exchange with proof-verified state transitions, slow / fast / forced withdrawals, and a migration boundary from the current centralized ledger |
+| TASK-CHAIN-009 | completed | worker | TASK-CHAIN-008 | implement the first shadow-rollup tranche with append-only sequencer journal storage, durable batch input, and deterministic shadow-root derivation while keeping current SQL/Kafka settlement as production truth |
+| TASK-CHAIN-010 | completed | worker | TASK-CHAIN-009 | extend the shadow-rollup lane into settlement-phase inputs, make the `shadow-batch-v1` witness/public-input contract explicit, and add the smallest L1 batch-metadata surface needed before prover work |
+| TASK-CHAIN-011 | completed | worker | TASK-CHAIN-010 | lift API/auth nonce advances into durable shadow batch inputs, replace the `orders_root.nonce_root` zero placeholder with truthful shadow state, and lock the prover-facing public-input lane before verifier-gated acceptance |
+| TASK-CHAIN-012 | completed | worker-design | TASK-CHAIN-011 | decide the first proof-lane nonce/auth contract, bind prover/verifier acceptance to the stabilized `shadow-batch-v1` surface, and define the narrow verifier-gated `FunnyRollupCore` acceptance boundary before implementation |
+| TASK-CHAIN-013 | completed | worker | TASK-CHAIN-012 | add one narrow canonical V2 trading-key auth witness lane that binds `NONCE_ADVANCED` to verifier-eligible order authorization and migrate repo proof tooling away from deprecated `/api/v1/sessions` before verifier-gated batches |
+| TASK-CHAIN-014 | completed | worker | TASK-CHAIN-013 | consume canonical auth witness material in the first verifier-gated auth/proof tranche, keep the public-input shape stable, and prepare `FunnyRollupCore` state-root acceptance without widening into production withdrawal rewrite |
+| TASK-CHAIN-015 | completed | worker | TASK-CHAIN-014 | add the smallest Foundry-only verifier/state-root acceptance hook on `FunnyRollupCore` that consumes the stable verifier-gated batch contract and rejects non-`JOINED` auth proof rows without widening into full prover/runtime rewrite |
+| TASK-CHAIN-016 | completed | worker | TASK-CHAIN-015 | stabilize the verifier-facing artifact/export boundary and require accepted batches to anchor against previously recorded batch metadata before `FunnyRollupCore` advances accepted state roots |
+| TASK-CHAIN-017 | completed | worker | TASK-CHAIN-016 | consume the stable `solidity_export` boundary in the first prover/verifier artifact tranche, replace the current verifier stub with a real verifier-facing interface contract, and prove Go/Solidity verifier-gate digest parity without widening into production withdrawal rewrite |
+| TASK-CHAIN-018 | completed | worker | TASK-CHAIN-017 | implement the first real verifier contract boundary that consumes `VerifierArtifactBundle`, recomputes/verifies `verifierGateHash` onchain, and preserves the stable public-input/auth-status contract without widening into production withdrawal rewrite |
+| TASK-CHAIN-019 | completed | worker | TASK-CHAIN-018 | stabilize the first proof/public-signal schema on top of `VerifierArtifactBundle`, keep Go/Solidity proof artifact parity explicit, and prepare the path for later real prover output without widening into production withdrawal rewrite |
+| TASK-CHAIN-020 | completed | worker | TASK-CHAIN-019 | stabilize the first inner `proofData` schema beneath the fixed outer proof/public-signal envelope so a later prover can emit deterministic verifier-consumable bytes without widening into production withdrawal rewrite |
+| TASK-CHAIN-021 | completed | worker-design | TASK-CHAIN-020 | define the first real proof-bytes / proving-system contract under the fixed outer proof/public-signal envelope and `proofData-v1`, including whether a later real prover can stay on `proofData-v1` or needs an explicit `proofData-v2` before cryptographic verification |
+| TASK-CHAIN-022 | completed | worker | TASK-CHAIN-021 | implement the first Foundry-only real Groth16 backend under the fixed outer proof/public-signal envelope and `proofData-v1`, including non-empty `proofBytes`, BN254 limb lifting, and Go/Foundry parity fixtures without widening into production withdrawal rewrite |
+| TASK-CHAIN-023 | completed | worker | TASK-CHAIN-022 | implement the fixed-vk Groth16 prover artifact pipeline so Go emits batch-specific proof artifacts from actual outer signals instead of one shared fixture while keeping the outer envelope, `proofData-v1`, and production truth unchanged |
+| TASK-CHAIN-024 | completed | worker | TASK-CHAIN-007 | harden market-expiry lifecycle semantics so `close_at` stops new trading even if a market row still says `OPEN`, oracle markets continue auto-resolving at `resolve_at`, and non-oracle markets become truthfully closed-awaiting-resolution instead of pretending time alone settles them |
 
 ## Risks
 
@@ -76,6 +95,18 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
 - removing `POST /api/v1/sessions` before the repo's lifecycle / concurrency proof tooling migrates would still break internal verification flows; the route now remains as an explicit deprecated compat path until those tools move
 - oracle dispatch retry is now guarded by a latest-row checkpoint in `market_resolutions.evidence.dispatch`, but it is still not an append-only dispatch-attempt log or full outbox
 - deprecated `/api/v1/sessions` compatibility rows still intentionally keep blank `vault_address`, so future auth cleanup must migrate proof tooling before retiring that legacy carrier
+- the Mode B lane now explicitly prefers `ZK-Rollup` data availability for the strongest exit guarantees, which materially raises L1 calldata / state-diff cost and contract-surface complexity relative to the current BSC-vault product
+- the Mode B lane now explicitly requires three withdrawal paths:
+  - slow batch-confirmed withdrawal
+  - fast LP-backed withdrawal
+  - forced withdrawal / freeze / escape hatch
+- the first implementation tranche after the Mode B design is intentionally shadow-only:
+  - append-only sequencer journal
+  - durable batch input
+  - deterministic shadow roots
+  - no premature prover / verifier / production claim rewrite
+- the first shadow-rollup slice is now complete, but one residual replay gap is explicit:
+  - `orders_root` still uses deterministic `ZeroNonceRoot()` until a later slice either shadows nonce truthfully or freezes that limitation in the witness contract
 
 ## Decision log
 
@@ -254,6 +285,30 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
   - define the metadata contract for oracle-settled crypto markets
   - define where oracle fetch / evidence persistence / auto-resolution lives
   - preserve the current admin manual resolve path as the fallback and override lane
+- `TASK-CHAIN-008` is now the architecture lane for the user's target Mode B
+  exchange:
+  - design first, no premature prover or verifier implementation
+  - `ZK-Rollup` DA only in the target contract
+  - withdrawals must be modeled explicitly as `slow`, `fast`, and `forced`
+  - the lane must state which current FunnyOption truths can remain
+    operator-run and which must be replaced before the product can honestly
+    claim proof-verified settlement
+- `TASK-CHAIN-008` is now complete:
+  - canonical design doc: `docs/architecture/mode-b-zk-rollup.md`
+  - current FunnyOption is explicitly documented as not yet Mode B
+  - the recommended first implementation tranche is `shadow journal + durable batch input + deterministic shadow roots`
+- `TASK-CHAIN-009` is now the next implementation lane:
+  - make the replay contract and shadow-root artifacts real before any proof-system work
+  - keep current SQL/Kafka settlement as production truth during this slice
+- `TASK-CHAIN-009` is now complete:
+  - append-only shadow journal storage exists
+  - durable batch input exists
+  - deterministic shadow roots exist for the trading phase
+  - production settlement truth remains unchanged
+- `TASK-CHAIN-010` is now the next follow-up lane:
+  - extend shadow replay into market-resolution / settlement-payout inputs
+  - make `shadow-batch-v1` witness/public-input explicit
+  - define the smallest L1 batch-metadata contract surface before prover work
 - `TASK-API-005` is now complete at code/test level: duplicate same-terms bootstrap requests are rejected in the one-shot core first-liquidity handler before maker mutation, first-liquidity collateral debit uses `assets.WinningPayoutAmount(req.Quantity)`, the admin route no longer submits a second bootstrap `/api/v1/orders` call, and commander re-ran `go test ./internal/api/...` plus `admin && npm run build`
 - one runtime validation gap remains for `TASK-API-005`: the worker could not run a full local lifecycle replay because the dev stack was down, so the next `TASK-STAGING-001` rerun should explicitly recheck duplicate bootstrap side effects and maker collateral debit on the deployed environment
 - `TASK-OFFCHAIN-011` is now complete at code/test level: `/portfolio` SSR no longer fetches private collections with default user `1001`, `PortfolioShell` waits for `session.userId` then refreshes balances/positions/orders/payouts/profile for that user, disconnected/not-authorized states are explicit, and commander re-ran `web && npm run build`

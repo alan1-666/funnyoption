@@ -2,8 +2,14 @@ export function zhMarketStatus(status: string) {
   switch (String(status).toUpperCase()) {
     case "OPEN":
       return "交易中";
+    case "CLOSED":
+      return "已收盘";
+    case "PAUSED":
+      return "已暂停";
     case "RESOLVED":
       return "已结算";
+    case "DRAFT":
+      return "待发布";
     default:
       return status || "未知";
   }
@@ -27,6 +33,8 @@ export function zhGenericStatus(status: string) {
       return "失败";
     case "CANCELLED":
       return "已取消";
+    case "REJECTED":
+      return "已拒绝";
     case "FILLED":
       return "已成交";
     case "PARTIALLY_FILLED":

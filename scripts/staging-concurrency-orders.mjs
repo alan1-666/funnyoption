@@ -344,17 +344,38 @@ requested_at: ${Math.floor(requestedAt)}
 `;
 }
 
-function buildSessionGrantMessage(input) {
-  return `FunnyOption Session Authorization
-
-wallet: ${normalizeAddress(input.walletAddress)}
-session_public_key: ${normalizeAddress(input.sessionPublicKey)}
-scope: ${cleanText(input.scope).toUpperCase() || "TRADE"}
-chain_id: ${Math.floor(Number(input.chainId || 0))}
-issued_at: ${Math.floor(Number(input.issuedAt || 0))}
-expires_at: ${Math.floor(Number(input.expiresAt || 0))}
-nonce: ${String(input.nonce ?? "").trim()}
-`;
+function buildTradingKeyAuthorizationTypedData(input) {
+  return {
+    domain: {
+      name: "FunnyOption Trading Authorization",
+      version: "2",
+      chainId: Math.floor(Number(input.chainId || 0)),
+      verifyingContract: normalizeAddress(input.vaultAddress)
+    },
+    types: {
+      AuthorizeTradingKey: [
+        { name: "action", type: "string" },
+        { name: "wallet", type: "address" },
+        { name: "tradingPublicKey", type: "bytes32" },
+        { name: "tradingKeyScheme", type: "string" },
+        { name: "scope", type: "string" },
+        { name: "challenge", type: "bytes32" },
+        { name: "challengeExpiresAt", type: "uint64" },
+        { name: "keyExpiresAt", type: "uint64" }
+      ]
+    },
+    primaryType: "AuthorizeTradingKey",
+    message: {
+      action: "AUTHORIZE_TRADING_KEY",
+      wallet: normalizeAddress(input.walletAddress),
+      tradingPublicKey: normalizeAddress(input.tradingPublicKey),
+      tradingKeyScheme: cleanText(input.tradingKeyScheme).toUpperCase() || "ED25519",
+      scope: cleanText(input.scope).toUpperCase() || "TRADE",
+      challenge: normalizeAddress(input.challenge),
+      challengeExpiresAt: BigInt(Math.floor(Number(input.challengeExpiresAt || 0))),
+      keyExpiresAt: BigInt(Math.floor(Number(input.keyExpiresAt || 0)))
+    }
+  };
 }
 
 function buildOrderIntentMessage(input) {
@@ -744,38 +765,55 @@ async function signOperatorAction(operatorAccount, message, requestedAt) {
   };
 }
 
+async function createTradingKeyChallenge(config, userAccount) {
+  return postJsonOrThrow(
+    config,
+    `${config.apiBase}/api/v1/trading-keys/challenge`,
+    {
+      wallet_address: userAccount.address,
+      chain_id: bscTestnet.id,
+      vault_address: config.vaultAddress
+    },
+    `create trading key challenge wallet=${userAccount.address}`,
+    [200, 201]
+  );
+}
+
 async function createSession(config, userAccount, userId) {
   const sessionPrivateKey = ed.utils.randomPrivateKey();
   const sessionPublicKey = toHex(await ed.getPublicKeyAsync(sessionPrivateKey));
-  const issuedAt = Date.now();
-  const expiresAt = issuedAt + 24 * 60 * 60 * 1000;
-  const nonce = `sess_${issuedAt}_${userId}_${Math.random().toString(16).slice(2, 10)}`;
-  const message = buildSessionGrantMessage({
+  const challenge = await createTradingKeyChallenge(config, userAccount);
+  const typedData = buildTradingKeyAuthorizationTypedData({
     walletAddress: userAccount.address,
-    sessionPublicKey,
+    tradingPublicKey: sessionPublicKey,
+    tradingKeyScheme: "ED25519",
     scope: "TRADE",
     chainId: bscTestnet.id,
-    issuedAt,
-    expiresAt,
-    nonce
+    vaultAddress: config.vaultAddress,
+    challenge: challenge.challenge,
+    challengeExpiresAt: challenge.challenge_expires_at,
+    keyExpiresAt: 0
   });
-  const walletSignature = await userAccount.signMessage({ message });
+  const walletSignature = await userAccount.signTypedData(typedData);
 
   const payload = await postJsonOrThrow(
     config,
-    `${config.apiBase}/api/v1/sessions`,
+    `${config.apiBase}/api/v1/trading-keys`,
     {
-      user_id: userId,
       wallet_address: userAccount.address,
-      session_public_key: sessionPublicKey,
-      scope: "TRADE",
       chain_id: bscTestnet.id,
-      nonce,
-      issued_at: issuedAt,
-      expires_at: expiresAt,
+      vault_address: config.vaultAddress,
+      challenge_id: challenge.challenge_id,
+      challenge: challenge.challenge,
+      challenge_expires_at: challenge.challenge_expires_at,
+      trading_public_key: sessionPublicKey,
+      trading_key_scheme: "ED25519",
+      scope: "TRADE",
+      key_expires_at: 0,
+      wallet_signature_standard: "EIP712_V4",
       wallet_signature: walletSignature
     },
-    `create session user=${userId}`,
+    `register trading key user=${userId}`,
     [200, 201]
   );
 

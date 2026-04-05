@@ -198,7 +198,6 @@ export function OrderTicket({ market }: { market: Market }) {
             <span />
           </div>
         </div>
-        <div className={styles.cardFoot}>当前仅开放 1x 预测仓位，后续再扩展更复杂的风险模式。</div>
       </section>
 
       <section className={styles.controlCard}>

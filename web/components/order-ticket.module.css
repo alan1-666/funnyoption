@@ -161,12 +161,6 @@
   background: rgba(255, 255, 255, 0.16);
 }
 
-.cardFoot {
-  color: rgba(255, 255, 255, 0.44);
-  font-size: 0.82rem;
-  line-height: 1.55;
-}
-
 .inputRow {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

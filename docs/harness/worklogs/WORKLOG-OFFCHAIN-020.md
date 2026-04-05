@@ -45,3 +45,15 @@
   - none locally
 - next:
   - push to staging and verify the cleaned-up detail page copy in the browser
+
+### 2026-04-06 03:24 CST
+
+- changed:
+  - `web/components/order-ticket.tsx`
+  - `web/components/order-ticket.module.css`
+- implemented:
+  - removed the remaining leverage helper sentence that still leaked
+    implementation/roadmap-style wording into the trade rail
+- validated:
+  - `cd web && npm run build`
+  - `git diff --check`

@@ -274,7 +274,13 @@ export function LiveMarketPanel({ market, trades }: { market: Market; trades: Tr
   }));
   const [events, setEvents] = useState<MarketEnvelope[]>([]);
   const [status, setStatus] = useState(
-    market.status === "RESOLVED" ? "市场已结算，等待终态事件" : "等待实时行情"
+    market.status === "RESOLVED"
+      ? "市场已结算，等待终态事件"
+      : market.status === "WAITING_RESOLUTION"
+        ? "市场等待裁决，实时行情已停止更新"
+        : market.status === "CLOSED"
+          ? "市场已收盘，等待结算结果"
+          : "等待实时行情"
   );
 
   const streams = useMemo(

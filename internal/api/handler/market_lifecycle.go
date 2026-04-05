@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"encoding/json"
 	"strings"
 
 	"funnyoption/internal/api/dto"
+	oracleservice "funnyoption/internal/oracle/service"
 )
 
 func normalizeLifecycleMarketStatus(status string) string {
@@ -11,28 +13,41 @@ func normalizeLifecycleMarketStatus(status string) string {
 	switch normalized {
 	case "", "OPEN":
 		return "OPEN"
-	case "DRAFT", "PAUSED", "CLOSED", "RESOLVED":
+	case "DRAFT", "PAUSED", "CLOSED", "WAITING_RESOLUTION", "RESOLVED":
 		return normalized
 	default:
 		return "OPEN"
 	}
 }
 
-func effectiveMarketStatusAt(status string, closeAt, nowUnix int64) string {
+func effectiveMarketStatusAt(status string, closeAt, resolveAt, nowUnix int64, metadata json.RawMessage) string {
 	normalized := normalizeLifecycleMarketStatus(status)
-	if normalized == "OPEN" && closeAt > 0 && nowUnix >= closeAt {
+	if normalized != "OPEN" {
+		return normalized
+	}
+	if closeAt <= 0 || nowUnix < closeAt {
+		return "OPEN"
+	}
+	if marketUsesOracleResolution(metadata) {
 		return "CLOSED"
 	}
-	return normalized
+	if resolveAt <= 0 || nowUnix >= resolveAt {
+		return "WAITING_RESOLUTION"
+	}
+	return "CLOSED"
+}
+
+func marketUsesOracleResolution(metadata json.RawMessage) bool {
+	return oracleservice.HasOracleResolutionMode(metadata)
 }
 
 func marketIsOpenForTrading(market dto.MarketResponse, nowUnix int64) bool {
-	return effectiveMarketStatusAt(market.Status, market.CloseAt, nowUnix) == "OPEN"
+	return effectiveMarketStatusAt(market.Status, market.CloseAt, market.ResolveAt, nowUnix, market.Metadata) == "OPEN"
 }
 
 func applyEffectiveMarketStatus(market *dto.MarketResponse, nowUnix int64) {
 	if market == nil {
 		return
 	}
-	market.Status = effectiveMarketStatusAt(market.Status, market.CloseAt, nowUnix)
+	market.Status = effectiveMarketStatusAt(market.Status, market.CloseAt, market.ResolveAt, nowUnix, market.Metadata)
 }

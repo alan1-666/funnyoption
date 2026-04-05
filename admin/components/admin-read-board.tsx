@@ -9,7 +9,7 @@ import styles from "@/components/admin-read-board.module.css";
 
 type TradeSideFilter = "ALL" | "BUY" | "SELL";
 type TradeOutcomeFilter = "ALL" | "YES" | "NO";
-type MarketStatusFilter = "ALL" | "OPEN" | "RESOLVED";
+type MarketStatusFilter = "ALL" | "OPEN" | "CLOSED" | "WAITING_RESOLUTION" | "RESOLVED";
 
 export function AdminReadBoard({ markets, trades }: { markets: Market[]; trades: Trade[] }) {
   const [tradeQuery, setTradeQuery] = useState("");
@@ -143,6 +143,8 @@ export function AdminReadBoard({ markets, trades }: { markets: Market[]; trades:
           <select className={styles.select} value={marketStatus} onChange={(event) => setMarketStatus(event.target.value as MarketStatusFilter)}>
             <option value="ALL">全部状态</option>
             <option value="OPEN">交易中</option>
+            <option value="CLOSED">已收盘</option>
+            <option value="WAITING_RESOLUTION">等待裁决</option>
             <option value="RESOLVED">已结算</option>
           </select>
         </div>

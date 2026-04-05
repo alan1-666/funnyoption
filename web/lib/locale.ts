@@ -4,6 +4,8 @@ export function zhMarketStatus(status: string) {
       return "交易中";
     case "CLOSED":
       return "已收盘";
+    case "WAITING_RESOLUTION":
+      return "等待裁决";
     case "PAUSED":
       return "已暂停";
     case "RESOLVED":

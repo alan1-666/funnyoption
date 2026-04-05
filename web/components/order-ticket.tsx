@@ -39,11 +39,16 @@ export function OrderTicket({ market }: { market: Market }) {
   const coverImage = readCoverImage(market);
   const displayTitle = presentMarketTitle(market);
   const freeze = useMemo(() => Math.max(price, 0) * Math.max(quantity, 0), [price, quantity]);
-  const marketTradable = String(market.status).toUpperCase() === "OPEN";
+  const normalizedMarketStatus = String(market.status).toUpperCase();
+  const marketTradable = normalizedMarketStatus === "OPEN";
+  const marketClosedMessage =
+    normalizedMarketStatus === "WAITING_RESOLUTION"
+      ? "当前市场已进入等待裁决，新的委托不会再进入撮合。"
+      : "当前市场已收盘，新的委托不会再进入撮合。";
   const displayedStatus =
     status ||
     (!marketTradable
-      ? "当前市场已收盘，新的委托不会再进入撮合。"
+      ? marketClosedMessage
       : wallet
         ? statusMessage || "钱包已连接，等待交易授权。"
         : "连接钱包后即可开始下单。");
@@ -52,7 +57,11 @@ export function OrderTicket({ market }: { market: Market }) {
   async function handleSubmit() {
     try {
       if (!marketTradable) {
-        setStatus("当前市场已收盘，请等待结算结果。");
+        setStatus(
+          normalizedMarketStatus === "WAITING_RESOLUTION"
+            ? "当前市场正在等待裁决，请等待后台判定结果。"
+            : "当前市场已收盘，请等待结算结果。"
+        );
         return;
       }
 
@@ -135,7 +144,7 @@ export function OrderTicket({ market }: { market: Market }) {
     }
   }
 
-  const primaryLabel = !marketTradable ? "市场已收盘" : session ? `买入${zhOutcome(outcome)}` : wallet ? "授权交易" : "连接钱包";
+  const primaryLabel = !marketTradable ? (normalizedMarketStatus === "WAITING_RESOLUTION" ? "等待裁决" : "市场已收盘") : session ? `买入${zhOutcome(outcome)}` : wallet ? "授权交易" : "连接钱包";
 
   return (
     <div className={`panel ${styles.ticket}`}>

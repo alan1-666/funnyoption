@@ -45,13 +45,16 @@
   - `market_resolutions.status`
 - runtime-effective market status is:
   - `OPEN` only when stored `markets.status = OPEN` and `close_at` is unset or still in the future
-  - `CLOSED` when stored `markets.status = CLOSED`, or when stored `markets.status = OPEN` but `now >= close_at`
+  - `CLOSED` when stored `markets.status = CLOSED`, or when stored `markets.status = OPEN` but trading has stopped and the market is not yet in a manual adjudication window
+  - `WAITING_RESOLUTION` when stored `markets.status = OPEN`, `now >= close_at`, the market is not oracle-driven, and `resolve_at` is unset or already reached
   - `RESOLVED` only after settlement flips `markets.status = RESOLVED`
 - practical consequence:
   - `close_at` is the real trading boundary for ingress and matching runtime
   - once `now >= close_at`, still-resting `LIMIT` orders on that market are proactively cancelled through the matching/order-event lane rather than remaining only as inert in-memory book state
   - `resolve_at` remains the canonical auto-resolution timestamp only for oracle markets
-  - non-oracle markets past `close_at` stay truthfully `CLOSED` and await manual resolution
+  - non-oracle markets stay runtime `CLOSED` between `close_at` and `resolve_at`, then become runtime `WAITING_RESOLUTION`
+  - ordinary operator resolve must only accept runtime `WAITING_RESOLUTION` markets
+  - oracle markets remain runtime `CLOSED` after `close_at` until the oracle lane lands a real `RESOLVED` event
 - this contract is derived from existing durable columns; no extra migration is required for the first truthful runtime slice
 
 ## Account domain

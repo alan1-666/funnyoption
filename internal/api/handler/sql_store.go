@@ -641,6 +641,7 @@ func (s *SQLStore) ListMarkets(ctx context.Context, req dto.ListMarketsRequest) 
 		filters []string
 	)
 	nowUnix := time.Now().Unix()
+	oracleResolutionFilter := "UPPER(COALESCE(metadata->'resolution'->>'mode', '')) = 'ORACLE_PRICE'"
 	query := `
 		SELECT market_id, title, description, collateral_asset, status, open_at, close_at, resolve_at,
 		       resolved_outcome, created_by, metadata, created_at, updated_at
@@ -648,14 +649,37 @@ func (s *SQLStore) ListMarkets(ctx context.Context, req dto.ListMarketsRequest) 
 	`
 
 	if status := normalizeOptional(req.Status); status != "" {
+		args = append(args, nowUnix)
+		nowPlaceholder := len(args)
 		switch status {
 		case "OPEN":
-			args = append(args, nowUnix)
-			filters = append(filters, fmt.Sprintf("status = 'OPEN' AND (close_at <= 0 OR close_at > $%d)", len(args)))
+			filters = append(filters, fmt.Sprintf("status = 'OPEN' AND (close_at <= 0 OR close_at > $%d)", nowPlaceholder))
 		case "CLOSED":
-			args = append(args, nowUnix)
-			filters = append(filters, fmt.Sprintf("(status = 'CLOSED' OR (status = 'OPEN' AND close_at > 0 AND close_at <= $%d))", len(args)))
+			filters = append(filters, fmt.Sprintf(`(
+				status = 'CLOSED'
+				OR (
+					status = 'OPEN'
+					AND close_at > 0
+					AND close_at <= $%d
+					AND (
+						%s
+						OR (resolve_at > 0 AND resolve_at > $%d)
+					)
+				)
+			)`, nowPlaceholder, oracleResolutionFilter, nowPlaceholder))
+		case "WAITING_RESOLUTION":
+			filters = append(filters, fmt.Sprintf(`(
+				status = 'WAITING_RESOLUTION'
+				OR (
+					status = 'OPEN'
+					AND close_at > 0
+					AND close_at <= $%d
+					AND NOT (%s)
+					AND (resolve_at <= 0 OR resolve_at <= $%d)
+				)
+			)`, nowPlaceholder, oracleResolutionFilter, nowPlaceholder))
 		default:
+			args = args[:len(args)-1]
 			args = append(args, status)
 			filters = append(filters, fmt.Sprintf("status = $%d", len(args)))
 		}

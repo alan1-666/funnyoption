@@ -41,6 +41,7 @@ Detailed execution lives in `docs/harness/plans/active/`.
 - Mode B first real Groth16 backend tranche task: [`docs/harness/tasks/TASK-CHAIN-022.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-022.md)
 - Mode B fixed-vk Groth16 prover artifact tranche task: [`docs/harness/tasks/TASK-CHAIN-023.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-023.md)
 - Market expiry and resolution lifecycle hardening task: [`docs/harness/tasks/TASK-CHAIN-024.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-024.md)
+- Manual-vs-oracle post-close lifecycle task: [`docs/harness/tasks/TASK-CHAIN-025.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-025.md)
 
 ## Strategic lanes
 
@@ -183,6 +184,11 @@ Detailed execution lives in `docs/harness/plans/active/`.
     derived from stored `status + close_at`, so `OPEN` markets become
     truthfully `CLOSED` at the trading boundary across ingress/matching/read
     surfaces, while oracle markets still auto-resolve only from `resolve_at`
+  - `TASK-CHAIN-025` is complete: unresolved non-oracle markets now become
+    runtime `WAITING_RESOLUTION` only once they reach their adjudication
+    window, ordinary operator resolve is restricted to that state, and oracle
+    markets stay on the automatic oracle lane instead of sharing the manual
+    resolve surface
   - `TASK-API-006` is paused: narrow the repo-structure cleanup to
     `internal/api`, splitting routes/handlers/store concerns into clearer
     module-owned packages without widening into a full repo directory

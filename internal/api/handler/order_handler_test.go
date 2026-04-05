@@ -2152,10 +2152,13 @@ func TestResolveMarketPublishesEventForAuthorizedOperator(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	publisher := &fakePublisher{}
+	nowUnix := time.Now().Unix()
 	store := &fakeQueryStore{
 		getMarketResp: dto.MarketResponse{
-			MarketID: 88,
-			Status:   "OPEN",
+			MarketID:  88,
+			Status:    "OPEN",
+			CloseAt:   nowUnix - 120,
+			ResolveAt: nowUnix - 60,
 		},
 	}
 	reqBody := dto.ResolveMarketRequest{
@@ -2195,27 +2198,67 @@ func TestResolveMarketPublishesEventForAuthorizedOperator(t *testing.T) {
 	}
 }
 
-func TestResolveMarketRejectsOracleMarketAfterObservation(t *testing.T) {
+func TestResolveMarketRejectsBeforeWaitingResolution(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	publisher := &fakePublisher{}
+	nowUnix := time.Now().Unix()
 	store := &fakeQueryStore{
 		getMarketResp: dto.MarketResponse{
 			MarketID:  88,
 			Status:    "OPEN",
+			CloseAt:   nowUnix - 120,
+			ResolveAt: nowUnix + 600,
+		},
+	}
+	reqBody := dto.ResolveMarketRequest{Outcome: "YES"}
+	wallet := attachSignedResolveOperator(t, 88, &reqBody)
+	handler := NewOrderHandler(Dependencies{
+		Logger:          slog.Default(),
+		KafkaPublisher:  publisher,
+		KafkaTopics:     kafka.NewTopics("funnyoption."),
+		QueryStore:      store,
+		OperatorWallets: []string{wallet},
+	})
+
+	raw, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/markets/88/resolve", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Params = gin.Params{{Key: "market_id", Value: "88"}}
+	ctx.Request = req
+
+	handler.ResolveMarket(ctx)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "market is not waiting for resolution") {
+		t.Fatalf("expected waiting-resolution conflict, got %s", w.Body.String())
+	}
+	if len(publisher.calls) != 0 {
+		t.Fatalf("expected no market event publish before adjudication window, got %+v", publisher.calls)
+	}
+}
+
+func TestResolveMarketRejectsOracleMarketFromManualLane(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	publisher := &fakePublisher{}
+	nowUnix := time.Now().Unix()
+	store := &fakeQueryStore{
+		getMarketResp: dto.MarketResponse{
+			MarketID:  88,
+			Status:    "OPEN",
+			CloseAt:   nowUnix - 120,
+			ResolveAt: nowUnix - 60,
 			Metadata:  validOracleResolutionMetadata(),
 			Options:   dto.DefaultBinaryMarketOptions(),
-			ResolveAt: 1775886400,
 			Category: &dto.MarketCategory{
 				CategoryKey: "CRYPTO",
 			},
 		},
-		getMarketResolution: MarketResolutionState{
-			Status:       "OBSERVED",
-			ResolverType: "ORACLE_PRICE",
-			ResolverRef:  "oracle_price:BINANCE:BTCUSDT:1775886400",
-		},
-		hasMarketResolution: true,
 	}
 	reqBody := dto.ResolveMarketRequest{
 		Outcome: "YES",
@@ -2242,8 +2285,11 @@ func TestResolveMarketRejectsOracleMarketAfterObservation(t *testing.T) {
 	if w.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d body=%s", w.Code, w.Body.String())
 	}
+	if !strings.Contains(w.Body.String(), "oracle market must resolve through oracle worker") {
+		t.Fatalf("expected oracle-lane conflict, got %s", w.Body.String())
+	}
 	if len(publisher.calls) != 0 {
-		t.Fatalf("expected no market event publish after OBSERVED, got %+v", publisher.calls)
+		t.Fatalf("expected no market event publish for oracle market, got %+v", publisher.calls)
 	}
 }
 

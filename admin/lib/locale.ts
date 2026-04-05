@@ -2,6 +2,10 @@ export function zhMarketStatus(status: string) {
   switch (String(status).toUpperCase()) {
     case "OPEN":
       return "交易中";
+    case "CLOSED":
+      return "已收盘";
+    case "WAITING_RESOLUTION":
+      return "等待裁决";
     case "RESOLVED":
       return "已结算";
     default:

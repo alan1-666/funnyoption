@@ -16,12 +16,12 @@ interface AdminMarketOpsProps {
 export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
   const router = useRouter();
   const { wallet, busy: operatorBusy, signResolveMarket } = useOperatorAccess();
-  const [status, setStatus] = useState("结算通道待命");
+  const [status, setStatus] = useState("裁决通道待命");
   const [busyMarketId, setBusyMarketId] = useState<number | null>(null);
   const [outcomes, setOutcomes] = useState<Record<number, "YES" | "NO">>({});
 
-  const openMarkets = useMemo(
-    () => markets.filter((market) => market.status === "OPEN").sort((left, right) => right.updated_at - left.updated_at),
+  const waitingResolutionMarkets = useMemo(
+    () => markets.filter((market) => market.status === "WAITING_RESOLUTION").sort((left, right) => right.updated_at - left.updated_at),
     [markets]
   );
   const recentResolved = useMemo(
@@ -35,7 +35,7 @@ export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
 
   async function handleResolve(marketId: number) {
     setBusyMarketId(marketId);
-    setStatus(`等待市场 #${marketId} 的结算签名...`);
+    setStatus(`等待市场 #${marketId} 的裁决签名...`);
     try {
       const market = {
         marketId,
@@ -62,10 +62,10 @@ export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
       if (!response.ok) {
         throw new Error(payload?.error ?? `HTTP ${response.status}`);
       }
-      setStatus(`市场 #${marketId} 已提交结算，结果 ${zhOutcome(payload?.resolved_outcome ?? selectedOutcome(marketId))}，签名钱包 ${shortenAddress(payload?.operator_wallet_address ?? operator.walletAddress)}。`);
+      setStatus(`市场 #${marketId} 已提交裁决，结果 ${zhOutcome(payload?.resolved_outcome ?? selectedOutcome(marketId))}，签名钱包 ${shortenAddress(payload?.operator_wallet_address ?? operator.walletAddress)}。`);
       startTransition(() => router.refresh());
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "结算失败");
+      setStatus(error instanceof Error ? error.message : "裁决失败");
     } finally {
       setBusyMarketId(null);
     }
@@ -75,22 +75,22 @@ export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
     <section className={`panel ${styles.panel}`}>
       <div className={styles.header}>
         <div>
-          <span className="eyebrow">市场结算</span>
-          <h2 className={styles.title}>在后台结算交易中的市场。</h2>
-          <p className={styles.copy}>提交结算后，清簿、赔付生成和账务入账仍由共享服务继续完成，后台只负责发起动作和核对结果。</p>
+          <span className="eyebrow">市场裁决</span>
+          <h2 className={styles.title}>只处理已经进入等待裁决的市场。</h2>
+          <p className={styles.copy}>后台只负责对等待裁决的市场给出最终结果。提交后，清簿、赔付生成和账务入账仍由共享服务继续完成。</p>
         </div>
         <div className={styles.badges}>
-          <span className="pill">交易中 {openMarkets.length}</span>
+          <span className="pill">等待裁决 {waitingResolutionMarkets.length}</span>
           <span className="pill">{wallet ? shortenAddress(wallet.walletAddress) : "需要连接钱包"}</span>
         </div>
       </div>
 
-      <div className={styles.gateNote}>只有白名单运营钱包可以提交结算；非白名单钱包即使已连接，也只能查看读面。</div>
+      <div className={styles.gateNote}>只有白名单运营钱包可以提交裁决；非白名单钱包即使已连接，也只能查看读面。交易中的市场和 oracle 市场都不会出现在这里。</div>
 
       <div className={styles.grid}>
         <div className={styles.list}>
-          {openMarkets.length > 0 ? (
-            openMarkets.map((market) => (
+          {waitingResolutionMarkets.length > 0 ? (
+            waitingResolutionMarkets.map((market) => (
               <article key={market.market_id} className={styles.marketRow}>
                 <div className={styles.marketMain}>
                   <div className={styles.marketTitleRow}>
@@ -100,7 +100,7 @@ export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
                   <div className={styles.marketMeta}>
                     <span>{market.category?.display_name ?? market.metadata?.category ?? "未分类"}</span>
                     <span>停止交易 {formatTimestamp(market.close_at)}</span>
-                    <span>结算时间 {formatTimestamp(market.resolve_at)}</span>
+                    <span>裁决时间 {formatTimestamp(market.resolve_at)}</span>
                     <span>{market.runtime.trade_count} 笔成交</span>
                     <span>成交额 {formatAssetAmount(market.runtime.matched_notional, "USDT")} USDT</span>
                   </div>
@@ -125,20 +125,20 @@ export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
                     disabled={busyMarketId === market.market_id || operatorBusy === "connect" || operatorBusy === "sign"}
                     onClick={() => handleResolve(market.market_id)}
                   >
-                    {busyMarketId === market.market_id ? "提交中..." : "执行结算"}
+                    {busyMarketId === market.market_id ? "提交中..." : "提交裁决"}
                   </button>
                 </div>
               </article>
             ))
           ) : (
-            <div className={styles.empty}>当前没有可结算的交易中市场。</div>
+            <div className={styles.empty}>当前没有进入等待裁决的市场。</div>
           )}
         </div>
 
         <aside className={styles.side}>
           <div className={styles.sideCard}>
             <span className="eyebrow">说明</span>
-            <p className={styles.sideCopy}>这里负责发起结算动作。后续的清簿、赔付和余额入账仍由共享服务自动完成。</p>
+            <p className={styles.sideCopy}>这里负责发起最终裁决。只有等待裁决的人工市场会进入这个队列；oracle 市场仍由预言机自动判定。</p>
           </div>
           {recentResolved.length > 0 ? (
             <div className={styles.sideCard}>

@@ -1440,24 +1440,19 @@ func (h *OrderHandler) ResolveMarket(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadGateway, gin.H{"error": "load market failed"})
 		return
 	}
-	if effectiveMarketStatusAt(market.Status, market.CloseAt, time.Now().Unix()) == "RESOLVED" {
+	nowUnix := time.Now().Unix()
+	effectiveStatus := effectiveMarketStatusAt(market.Status, market.CloseAt, market.ResolveAt, nowUnix, market.Metadata)
+	if effectiveStatus == "RESOLVED" {
 		ctx.JSON(http.StatusConflict, gin.H{"error": "market is already resolved"})
 		return
 	}
-	if oracleservice.HasOracleResolutionMode(market.Metadata) {
-		state, exists, err := h.store.GetMarketResolution(ctx, marketID)
-		if err != nil {
-			h.logger.Error("load market resolution before resolve failed", "market_id", marketID, "err", err)
-			ctx.JSON(http.StatusBadGateway, gin.H{"error": "load market resolution failed"})
-			return
-		}
-		if exists {
-			switch normalizeUpper(state.Status) {
-			case "OBSERVED", "RESOLVED":
-				ctx.JSON(http.StatusConflict, gin.H{"error": "oracle market resolution is already observed or resolved"})
-				return
-			}
-		}
+	if marketUsesOracleResolution(market.Metadata) {
+		ctx.JSON(http.StatusConflict, gin.H{"error": "oracle market must resolve through oracle worker"})
+		return
+	}
+	if effectiveStatus != "WAITING_RESOLUTION" {
+		ctx.JSON(http.StatusConflict, gin.H{"error": "market is not waiting for resolution"})
+		return
 	}
 
 	event := sharedkafka.MarketEvent{

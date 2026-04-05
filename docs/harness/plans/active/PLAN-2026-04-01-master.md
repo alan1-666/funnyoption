@@ -79,6 +79,7 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
 | TASK-CHAIN-022 | completed | worker | TASK-CHAIN-021 | implement the first Foundry-only real Groth16 backend under the fixed outer proof/public-signal envelope and `proofData-v1`, including non-empty `proofBytes`, BN254 limb lifting, and Go/Foundry parity fixtures without widening into production withdrawal rewrite |
 | TASK-CHAIN-023 | completed | worker | TASK-CHAIN-022 | implement the fixed-vk Groth16 prover artifact pipeline so Go emits batch-specific proof artifacts from actual outer signals instead of one shared fixture while keeping the outer envelope, `proofData-v1`, and production truth unchanged |
 | TASK-CHAIN-024 | completed | worker | TASK-CHAIN-007 | harden market-expiry lifecycle semantics so `close_at` stops new trading even if a market row still says `OPEN`, oracle markets continue auto-resolving at `resolve_at`, and non-oracle markets become truthfully closed-awaiting-resolution instead of pretending time alone settles them |
+| TASK-CHAIN-025 | completed | worker | TASK-CHAIN-024 | distinguish manual post-close markets from oracle post-close markets with one runtime-effective `WAITING_RESOLUTION` state, and restrict ordinary operator resolve to that adjudication window |
 
 ## Risks
 

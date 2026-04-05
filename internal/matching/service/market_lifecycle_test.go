@@ -14,4 +14,7 @@ func TestMarketTradingOpenRespectsCloseAtBoundary(t *testing.T) {
 	if marketTradingOpen("RESOLVED", 0, 10) {
 		t.Fatalf("expected resolved market to remain non-tradable")
 	}
+	if marketTradingOpen("WAITING_RESOLUTION", 0, 10) {
+		t.Fatalf("expected waiting-resolution market to remain non-tradable")
+	}
 }

@@ -22,7 +22,7 @@ V1 的 oracle-settled crypto market 先只支持：
 - 自动结算由一个独立的 oracle worker 完成，不塞进 `chain-service` 或 `settlement`
 - 最终 settlement trigger 仍然复用现有 `market.event -> settlement` 主链路
 - `market_resolutions` 继续作为 resolution checkpoint 和 evidence 容器
-- 现有手动 operator resolve 保留为 fallback，但只能在自动 lane 还没有进入 `OBSERVED / RESOLVED` 时介入
+- 普通 operator resolve 不再作为 oracle market 的 fallback；crypto/oracle 市场只能通过 oracle lane 进入 `RESOLVED`
 
 这意味着：
 
@@ -351,6 +351,7 @@ close / resolve 语义补充：
 - `close_at` 到达后，oracle market 也应先进入 runtime `CLOSED`
 - 在 `resolve_at` 之前，它只是停止交易，不代表已经结算
 - 到了 `resolve_at` 之后，oracle worker 才尝试 observation / publish / settlement
+- `WAITING_RESOLUTION` 只属于人工裁决市场，不属于 oracle market runtime
 
 ## 8. Idempotency Rules
 
@@ -374,14 +375,13 @@ close / resolve 语义补充：
 
 ### 8.2 Manual fallback safety
 
-手动 operator resolve 继续保留，但安全边界要收紧成：
+普通 operator resolve 不再作为 oracle fallback：
 
-- 如果 `market.status = RESOLVED`，拒绝手动 resolve
-- 如果 `market_resolutions.status = OBSERVED`，拒绝手动 resolve
-- 只有在 `PENDING / RETRYABLE_ERROR / TERMINAL_ERROR` 时，才允许 operator 走人工 fallback
+- oracle market 的 ordinary resolve path 直接拒绝
+- oracle lane 仍只接受 `resolve_at` 到期后的 observation / publish / settlement
 
-这条规则的核心目的，是避免同一个 market 先后发出两个不同 outcome 的
-`market.event`，从而触发双边 payout 或结算翻转。
+这条规则的核心目的，是避免把“等待 oracle observation”的 `CLOSED`
+市场错误暴露成一个可人工裁决的入口。
 
 ### 8.3 Important limit
 

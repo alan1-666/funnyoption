@@ -69,7 +69,9 @@ Matching is not responsible for:
 - once `close_at` is reached, unresolved markets are runtime `CLOSED`, not `RESOLVED`
 - `resolve_at` is not the trading cutoff:
   - oracle markets still use `resolve_at` as the canonical auto-resolution timestamp
-  - non-oracle markets stay `CLOSED` and await manual resolution after trading stops
+  - non-oracle markets stay `CLOSED` between `close_at` and `resolve_at`
+  - once `resolve_at` is reached, unresolved non-oracle markets become runtime `WAITING_RESOLUTION`
+  - only runtime `WAITING_RESOLUTION` markets may enter the ordinary operator resolve path
 
 ## Ordering strategy
 

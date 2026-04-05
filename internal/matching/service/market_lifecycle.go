@@ -7,7 +7,7 @@ func effectiveMarketStatusAt(status string, closeAt, nowUnix int64) string {
 	switch normalized {
 	case "", "OPEN":
 		normalized = "OPEN"
-	case "DRAFT", "PAUSED", "CLOSED", "RESOLVED":
+	case "DRAFT", "PAUSED", "CLOSED", "WAITING_RESOLUTION", "RESOLVED":
 	default:
 		normalized = "OPEN"
 	}

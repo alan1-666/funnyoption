@@ -2129,3 +2129,36 @@
 - next:
   - push the accumulated tranche and verify the updated lifecycle/detail-page
     behavior on staging
+
+### 2026-04-06 15:42 CST
+
+- thread: COMMANDER
+- scope:
+  - reviewed and accepted `TASK-CHAIN-025`
+  - moved the main product lifecycle lane from generic post-close `CLOSED`
+    markets to one truthful adjudication window for manual markets
+- changed:
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-025.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-025.md`
+    - `docs/architecture/order-flow.md`
+    - `docs/architecture/oracle-settled-crypto-markets.md`
+    - `docs/sql/schema.md`
+- validated:
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/api/handler ./internal/matching/service ./internal/oracle/service ./internal/settlement/service`
+  - `cd web && npm run build`
+  - `cd admin && npm run build`
+  - `git diff --check`
+  - accepted the runtime contract:
+    - `close_at` remains the trading cutoff
+    - unresolved markets stay runtime `CLOSED` between `close_at` and `resolve_at`
+    - unresolved non-oracle markets become runtime `WAITING_RESOLUTION` only at/after `resolve_at`
+    - ordinary operator resolve is restricted to `WAITING_RESOLUTION`
+    - oracle markets stay on the automatic oracle lane and do not share the ordinary manual resolve path
+- blockers:
+  - none before staging deploy
+- next:
+  - push this lifecycle tranche and verify the new `WAITING_RESOLUTION`
+    behavior on staging

@@ -71,6 +71,7 @@ const funnyRollupCoreReadABIJSON = `[
       {"name":"positionsFundingRoot","type":"bytes32"},
       {"name":"withdrawalsRoot","type":"bytes32"},
       {"name":"nextStateRoot","type":"bytes32"},
+      {"name":"conservationHash","type":"bytes32"},
       {"name":"authProofHash","type":"bytes32"},
       {"name":"verifierGateHash","type":"bytes32"}
     ]
@@ -362,11 +363,12 @@ func (p *RollupSubmissionProcessor) loadAcceptedBatchState(
 	if err != nil {
 		return rollupCoreAcceptedBatchState{}, err
 	}
-	authProofHash, err := decodeABIBytes32Value(acceptedBatchValues[10], "acceptedBatches.authProofHash")
+	// index 10 is conservationHash (not used in reconciliation)
+	authProofHash, err := decodeABIBytes32Value(acceptedBatchValues[11], "acceptedBatches.authProofHash")
 	if err != nil {
 		return rollupCoreAcceptedBatchState{}, err
 	}
-	verifierGateHash, err := decodeABIBytes32Value(acceptedBatchValues[11], "acceptedBatches.verifierGateHash")
+	verifierGateHash, err := decodeABIBytes32Value(acceptedBatchValues[12], "acceptedBatches.verifierGateHash")
 	if err != nil {
 		return rollupCoreAcceptedBatchState{}, err
 	}

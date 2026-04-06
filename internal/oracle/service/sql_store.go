@@ -75,6 +75,23 @@ func (s *SQLStore) ListEligibleMarkets(ctx context.Context, now int64, limit int
 	return markets, nil
 }
 
+func (s *SQLStore) RollupFrozen(ctx context.Context) (bool, error) {
+	var frozen bool
+	err := s.db.QueryRowContext(ctx, `
+		SELECT frozen
+		FROM rollup_freeze_state
+		ORDER BY id DESC
+		LIMIT 1
+	`).Scan(&frozen)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	return frozen, nil
+}
+
 func (s *SQLStore) UpsertResolution(ctx context.Context, update ResolutionUpdate) error {
 	evidence := normalizeResolutionEvidence(update.Evidence)
 	_, err := s.db.ExecContext(ctx, `

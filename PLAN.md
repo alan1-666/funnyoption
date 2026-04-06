@@ -49,6 +49,7 @@ Detailed execution lives in `docs/harness/plans/active/`.
 - Forced-withdrawal and freeze foundation task: [`docs/harness/tasks/TASK-CHAIN-032.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-032.md)
 - Forced-withdrawal satisfaction runtime task: [`docs/harness/tasks/TASK-CHAIN-033.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-033.md)
 - Frozen-mode trading gate task: [`docs/harness/tasks/TASK-CHAIN-034.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-034.md)
+- Broader frozen-mode mutable-truth guard task: [`docs/harness/tasks/TASK-CHAIN-035.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-035.md)
 
 ## Strategic lanes
 
@@ -232,6 +233,10 @@ Detailed execution lives in `docs/harness/plans/active/`.
   - `TASK-CHAIN-034` is complete: API ingress and matching runtime now stop
     treating frozen mode as tradable, so restart/runtime truth no longer says
     trading is possible after rollup freeze
+  - `TASK-CHAIN-035` is complete: frozen mode now also halts privileged API
+    writes, oracle/settlement/account mutable processing, and rollup submitter
+    broadcasting, so the repo's legacy SQL/Kafka truth stops advancing much
+    more honestly after freeze
   - `TASK-API-006` is paused: narrow the repo-structure cleanup to
     `internal/api`, splitting routes/handlers/store concerns into clearer
     module-owned packages without widening into a full repo directory

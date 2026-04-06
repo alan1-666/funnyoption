@@ -8,6 +8,7 @@ import (
 type MarketStore interface {
 	ListEligibleMarkets(ctx context.Context, now int64, limit int) ([]EligibleMarket, error)
 	UpsertResolution(ctx context.Context, update ResolutionUpdate) error
+	RollupFrozen(ctx context.Context) (bool, error)
 }
 
 type EligibleMarket struct {

@@ -807,6 +807,23 @@ worker 不必重新决定：
     - 这仍然只是 first-cut frozen truth：
       - deposits / mutable backend writes are not globally switched yet
       - escape-hatch proof claims are still follow-up work
+  - `TASK-CHAIN-035` 继续把 frozen-mode runtime truth widen 到更诚实的
+    mutable-backend boundary：
+    - privileged API write lanes 现在也会直接拒绝：
+      - create market
+      - first liquidity
+      - claim payout
+      - resolve market
+    - oracle worker / settlement processor / account service 在 frozen 时都
+      不再继续推进 legacy SQL/Kafka mutable truth
+    - rollup submitter 也会在 mirrored freeze state 下直接 idle，而不是继续
+      广播会被链上 `RollupIsFrozen` revert 的 batch tx
+    - 但这仍然不是 full production-truth switching：
+      - escape-hatch proof claims still do not exist
+      - mutable backend read models are not universally replaced in every
+        service
+      - accepted state is still the only truthful lane, not every old SQL
+        table
 
 因此边界明确分成三层：
 

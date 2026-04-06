@@ -27,6 +27,7 @@ type fakeRollupSubmissionStore struct {
 	materialized         []rollup.AcceptedSubmissionMaterialization
 	materializeErr       error
 	materializedByIDCall []string
+	frozen               bool
 }
 
 func (f *fakeRollupSubmissionStore) ListSubmissions(ctx context.Context) ([]rollup.StoredSubmission, error) {
@@ -75,6 +76,11 @@ func (f *fakeRollupSubmissionStore) MaterializeAcceptedSubmission(ctx context.Co
 	}
 	f.materialized = append(f.materialized, item)
 	return item, nil
+}
+
+func (f *fakeRollupSubmissionStore) RollupFrozen(ctx context.Context) (bool, error) {
+	_ = ctx
+	return f.frozen, nil
 }
 
 func (f *fakeRollupSubmissionStore) MarkSubmissionRecordSubmitted(ctx context.Context, submissionID, txHash string) (rollup.StoredSubmission, error) {
@@ -255,6 +261,35 @@ func TestRollupSubmissionProcessorPollOnceSubmitsRecord(t *testing.T) {
 	}
 	if got := common.Bytes2Hex(sender.sentTxs[0].Data()); got != "1111" {
 		t.Fatalf("record calldata = %s, want 1111", got)
+	}
+}
+
+func TestRollupSubmissionProcessorPollOnceSkipsWhenFrozen(t *testing.T) {
+	key := mustGenerateKey(t)
+	store := &fakeRollupSubmissionStore{
+		frozen: true,
+		submissions: []rollup.StoredSubmission{
+			mustTestStoredSubmission(t, "rsub_frozen", 1, rollup.SubmissionStatusReady),
+		},
+	}
+	sender := &fakeRollupTxSender{
+		nonce:    7,
+		chainID:  big.NewInt(97),
+		gasPrice: big.NewInt(1_000_000_000),
+		estimate: 120000,
+		receipts: map[string]*types.Receipt{},
+	}
+	processor := newTestRollupSubmissionProcessor(t, key, store, sender)
+
+	progress, err := processor.PollOnce(context.Background())
+	if err != nil {
+		t.Fatalf("PollOnce returned error: %v", err)
+	}
+	if progress.Action != RollupSubmissionActionFrozen {
+		t.Fatalf("action = %s, want %s", progress.Action, RollupSubmissionActionFrozen)
+	}
+	if len(sender.sentTxs) != 0 {
+		t.Fatalf("expected no txs to be sent while frozen, got %d", len(sender.sentTxs))
 	}
 }
 

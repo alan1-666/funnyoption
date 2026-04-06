@@ -16,6 +16,7 @@ import (
 type captureStore struct {
 	markets []EligibleMarket
 	updates []ResolutionUpdate
+	frozen  bool
 }
 
 func (s *captureStore) ListEligibleMarkets(ctx context.Context, now int64, limit int) ([]EligibleMarket, error) {
@@ -39,6 +40,11 @@ func (s *captureStore) UpsertResolution(ctx context.Context, update ResolutionUp
 		s.markets[index].Evidence = update.Evidence
 	}
 	return nil
+}
+
+func (s *captureStore) RollupFrozen(ctx context.Context) (bool, error) {
+	_ = ctx
+	return s.frozen, nil
 }
 
 type capturePublisher struct {
@@ -219,6 +225,37 @@ func TestWorkerPollOnceSkipsDuplicateEmitWhileObservedDispatched(t *testing.T) {
 	}
 	if len(publisher.events) != 0 {
 		t.Fatalf("expected no duplicate market.event publish while OBSERVED, got %+v", publisher.events)
+	}
+}
+
+func TestWorkerPollOnceSkipsAllResolutionWorkWhileFrozen(t *testing.T) {
+	now := time.Now().Unix()
+	resolveAt := now - 1
+
+	store := &captureStore{
+		frozen: true,
+		markets: []EligibleMarket{
+			{
+				MarketID:     190,
+				ResolveAt:    resolveAt,
+				MarketStatus: "OPEN",
+				CategoryKey:  "CRYPTO",
+				Metadata:     supportedOracleMetadata("BTCUSDT", "85000.00000000"),
+				OptionSchema: json.RawMessage(`[{"key":"YES"},{"key":"NO"}]`),
+			},
+		},
+	}
+	publisher := &capturePublisher{}
+	worker := NewWorker(nil, store, nil, publisher, sharedkafka.NewTopics("funnyoption."), time.Second)
+
+	if err := worker.pollOnce(context.Background()); err != nil {
+		t.Fatalf("pollOnce returned error: %v", err)
+	}
+	if len(store.updates) != 0 {
+		t.Fatalf("expected no resolution writes while frozen, got %+v", store.updates)
+	}
+	if len(publisher.events) != 0 {
+		t.Fatalf("expected no market events while frozen, got %+v", publisher.events)
 	}
 }
 

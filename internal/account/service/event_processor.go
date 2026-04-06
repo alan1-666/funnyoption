@@ -15,17 +15,39 @@ import (
 type EventProcessor struct {
 	book     *BalanceBook
 	registry *OrderRegistry
+	freeze   freezeStateReader
 }
 
-func NewEventProcessor(book *BalanceBook, registry *OrderRegistry) *EventProcessor {
-	return &EventProcessor{
+type freezeStateReader interface {
+	RollupFrozen(ctx context.Context) (bool, error)
+}
+
+func NewEventProcessor(book *BalanceBook, registry *OrderRegistry, freezeReaders ...freezeStateReader) *EventProcessor {
+	processor := &EventProcessor{
 		book:     book,
 		registry: registry,
 	}
+	if len(freezeReaders) > 0 {
+		processor.freeze = freezeReaders[0]
+	}
+	return processor
+}
+
+func (p *EventProcessor) rollupFrozen(ctx context.Context) (bool, error) {
+	if p.freeze == nil {
+		return false, nil
+	}
+	return p.freeze.RollupFrozen(ctx)
 }
 
 func (p *EventProcessor) HandleOrderEvent(ctx context.Context, msg sharedkafka.Message) error {
-	_ = ctx
+	frozen, err := p.rollupFrozen(ctx)
+	if err != nil {
+		return err
+	}
+	if frozen {
+		return nil
+	}
 
 	var event sharedkafka.OrderEvent
 	if err := json.Unmarshal(msg.Value, &event); err != nil {
@@ -78,7 +100,13 @@ func (p *EventProcessor) HandleOrderEvent(ctx context.Context, msg sharedkafka.M
 }
 
 func (p *EventProcessor) HandleTradeMatched(ctx context.Context, msg sharedkafka.Message) error {
-	_ = ctx
+	frozen, err := p.rollupFrozen(ctx)
+	if err != nil {
+		return err
+	}
+	if frozen {
+		return nil
+	}
 
 	var event sharedkafka.TradeMatchedEvent
 	if err := json.Unmarshal(msg.Value, &event); err != nil {
@@ -128,7 +156,13 @@ func (p *EventProcessor) HandleTradeMatched(ctx context.Context, msg sharedkafka
 }
 
 func (p *EventProcessor) HandleSettlementCompleted(ctx context.Context, msg sharedkafka.Message) error {
-	_ = ctx
+	frozen, err := p.rollupFrozen(ctx)
+	if err != nil {
+		return err
+	}
+	if frozen {
+		return nil
+	}
 
 	var event sharedkafka.SettlementCompletedEvent
 	if err := json.Unmarshal(msg.Value, &event); err != nil {

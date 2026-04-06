@@ -14,6 +14,7 @@ type PositionStore interface {
 	CancelActiveOrders(ctx context.Context, marketID int64, reason string) ([]cancelledOrder, error)
 	WinningPositions(ctx context.Context, marketID int64, outcome string) ([]winningPosition, error)
 	MarkSettled(ctx context.Context, event sharedkafka.SettlementCompletedEvent) error
+	RollupFrozen(ctx context.Context) (bool, error)
 }
 
 type ResolveMarketInput struct {
@@ -126,4 +127,8 @@ func (s *positionStore) MarkSettled(_ context.Context, event sharedkafka.Settlem
 	defer s.mu.Unlock()
 	s.settled[positionKey{MarketID: event.MarketID, UserID: event.UserID, Outcome: event.WinningOutcome}] = struct{}{}
 	return nil
+}
+
+func (s *positionStore) RollupFrozen(_ context.Context) (bool, error) {
+	return false, nil
 }

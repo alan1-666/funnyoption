@@ -27,6 +27,15 @@ func NewProcessor(store PositionStore, publisher sharedkafka.Publisher, topics s
 }
 
 func (p *Processor) HandlePositionChanged(ctx context.Context, msg sharedkafka.Message) error {
+	if p.store != nil {
+		frozen, err := p.store.RollupFrozen(ctx)
+		if err != nil {
+			return err
+		}
+		if frozen {
+			return nil
+		}
+	}
 	var event sharedkafka.PositionChangedEvent
 	if err := json.Unmarshal(msg.Value, &event); err != nil {
 		return err
@@ -35,6 +44,15 @@ func (p *Processor) HandlePositionChanged(ctx context.Context, msg sharedkafka.M
 }
 
 func (p *Processor) HandleMarketEvent(ctx context.Context, msg sharedkafka.Message) error {
+	if p.store != nil {
+		frozen, err := p.store.RollupFrozen(ctx)
+		if err != nil {
+			return err
+		}
+		if frozen {
+			return nil
+		}
+	}
 	var event sharedkafka.MarketEvent
 	if err := json.Unmarshal(msg.Value, &event); err != nil {
 		return err

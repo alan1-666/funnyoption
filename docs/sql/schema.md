@@ -560,6 +560,17 @@ First proof-lane storage / migration consequence:
     - `rollup_forced_withdrawal_requests`
     - `rollup_freeze_state`
   - this still does **not** mean escape-hatch claims are implemented
+- `TASK-CHAIN-035` widens frozen-mode runtime truth without changing schema:
+  - `rollup_freeze_state` is now consumed by:
+    - privileged API write gates
+    - oracle worker
+    - settlement processor
+    - account service event processor
+    - rollup submitter
+  - that makes `rollup_freeze_state` the current repo-local stop signal for
+    legacy SQL/Kafka mutable-truth advancement after freeze
+  - this still does **not** mean full escape-hatch proof claims or global
+    production-truth switching are complete
 - deprecated blank-vault `/api/v1/sessions` rows should remain shadow /
   compatibility-only; proof tooling should migrate to V2 trading-key rows
   before those batches are treated as verifier-eligible

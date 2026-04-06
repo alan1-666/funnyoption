@@ -255,6 +255,31 @@
 - next:
   - launch or resume the `TASK-STAGING-001` worker with the new concurrency-script requirement
 
+### 2026-04-07 02:10 Asia/Shanghai
+
+- read:
+  - `TASK-CHAIN-034.md`
+  - `HANDSHAKE-CHAIN-034.md`
+  - `WORKLOG-CHAIN-034.md`
+  - `docs/architecture/mode-b-zk-rollup.md`
+  - `docs/sql/schema.md`
+- changed:
+  - marked `TASK-CHAIN-035` completed in `PLAN.md` and the active master plan
+  - created `TASK-CHAIN-035`, `HANDSHAKE-CHAIN-035`, and `WORKLOG-CHAIN-035`
+    for one broader frozen-mode mutable-truth guard tranche
+  - recorded widened frozen runtime boundaries in architecture/schema docs
+- validated:
+  - `go test ./internal/account/service ./internal/api ./internal/api/handler ./internal/matching/service ./internal/oracle/service ./internal/settlement/service ./internal/chain/service ./internal/rollup ./cmd/rollup`
+  - `forge test --offline --match-path contracts/test/FunnyRollupCore.t.sol`
+  - `git diff --check`
+- blockers:
+  - full escape-hatch proof claims still do not exist
+  - full production-truth switching across every legacy read/write lane is
+    still follow-up work
+- next:
+  - continue from widened frozen runtime toward escape-hatch collateral claims
+    and fuller production-truth switching
+
 ### 2026-04-04 17:24 Asia/Shanghai
 
 - read:

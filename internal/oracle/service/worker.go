@@ -62,6 +62,13 @@ func (w *Worker) pollOnce(ctx context.Context) error {
 	if w.store == nil {
 		return fmt.Errorf("oracle market store is required")
 	}
+	frozen, err := w.store.RollupFrozen(ctx)
+	if err != nil {
+		return err
+	}
+	if frozen {
+		return nil
+	}
 	now := time.Now().Unix()
 	markets, err := w.store.ListEligibleMarkets(ctx, now, w.batchSize)
 	if err != nil {

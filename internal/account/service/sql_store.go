@@ -38,6 +38,23 @@ func (s *SQLStore) LoadBalances(ctx context.Context) ([]model.Balance, error) {
 	return balances, rows.Err()
 }
 
+func (s *SQLStore) RollupFrozen(ctx context.Context) (bool, error) {
+	var frozen bool
+	err := s.db.QueryRowContext(ctx, `
+		SELECT frozen
+		FROM rollup_freeze_state
+		ORDER BY id DESC
+		LIMIT 1
+	`).Scan(&frozen)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return frozen, nil
+}
+
 func (s *SQLStore) LoadFreezes(ctx context.Context) ([]model.FreezeRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT freeze_id, user_id, asset, ref_type, ref_id, original_amount, remaining_amount, status

@@ -109,6 +109,9 @@ func (h *OrderHandler) CreateMarket(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
 		return
 	}
+	if !h.requireRollupNotFrozen(ctx) {
+		return
+	}
 	req.CreatedBy = h.privilegedOperatorUserID()
 	if strings.TrimSpace(req.Title) == "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "title is required"})
@@ -276,6 +279,9 @@ func (h *OrderHandler) CreateFirstLiquidity(ctx *gin.Context) {
 	}
 	if h.store == nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
+		return
+	}
+	if !h.requireRollupNotFrozen(ctx) {
 		return
 	}
 	if h.account == nil {
@@ -1025,6 +1031,9 @@ func (h *OrderHandler) CreateClaimPayout(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
 		return
 	}
+	if !h.requireRollupNotFrozen(ctx) {
+		return
+	}
 
 	var req dto.CreateClaimPayoutRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -1234,14 +1243,7 @@ func (h *OrderHandler) CreateOrder(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
 		return
 	}
-	frozen, err := h.rollupTradingFrozen(ctx)
-	if err != nil {
-		h.logger.Error("get rollup freeze state failed", "err", err)
-		ctx.JSON(http.StatusBadGateway, gin.H{"error": "get rollup freeze state failed"})
-		return
-	}
-	if frozen {
-		ctx.JSON(http.StatusConflict, gin.H{"error": "rollup is frozen"})
+	if !h.requireRollupNotFrozen(ctx) {
 		return
 	}
 
@@ -1340,6 +1342,20 @@ func (h *OrderHandler) rollupTradingFrozen(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return item.Frozen, nil
+}
+
+func (h *OrderHandler) requireRollupNotFrozen(ctx *gin.Context) bool {
+	frozen, err := h.rollupTradingFrozen(ctx)
+	if err != nil {
+		h.logger.Error("get rollup freeze state failed", "err", err)
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "get rollup freeze state failed"})
+		return false
+	}
+	if frozen {
+		ctx.JSON(http.StatusConflict, gin.H{"error": "rollup is frozen"})
+		return false
+	}
+	return true
 }
 
 func calculateFreeze(side, orderType string, marketID int64, outcome string, price, quantity int64) (string, int64, error) {
@@ -1491,6 +1507,9 @@ func (h *OrderHandler) ResolveMarket(ctx *gin.Context) {
 	}
 	if h.store == nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
+		return
+	}
+	if !h.requireRollupNotFrozen(ctx) {
 		return
 	}
 	market, err := h.store.GetMarket(ctx, marketID)

@@ -1385,6 +1385,43 @@ func TestCreateClaimPayoutRejectsMalformedWalletAddress(t *testing.T) {
 	}
 }
 
+func TestCreateClaimPayoutRejectsFrozenRollup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := &fakeQueryStore{
+		getRollupFreezeResp: dto.RollupFreezeStateResponse{Frozen: true},
+	}
+	handler := NewOrderHandler(Dependencies{
+		Logger:     slog.Default(),
+		QueryStore: store,
+	})
+
+	body := map[string]any{
+		"user_id":           1001,
+		"wallet_address":    "0x1111111111111111111111111111111111111111",
+		"recipient_address": "0x1111111111111111111111111111111111111111",
+	}
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/payouts/evt_1/claim", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Params = gin.Params{{Key: "event_id", Value: "evt_1"}}
+	ctx.Request = req
+
+	handler.CreateClaimPayout(ctx)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "rollup is frozen") {
+		t.Fatalf("expected frozen rollup error, got %s", w.Body.String())
+	}
+	if store.createClaimCalled {
+		t.Fatalf("expected no claim request creation while frozen")
+	}
+}
+
 func TestCreateOrderReleasesFreezeWhenPublishFails(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1639,6 +1676,43 @@ func TestCreateMarketReturnsCreatedMarket(t *testing.T) {
 	}
 	if store.createMarketReq.CreatedBy != 42 {
 		t.Fatalf("expected create market to use configured operator user id, got %d", store.createMarketReq.CreatedBy)
+	}
+}
+
+func TestCreateMarketRejectsFrozenRollup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := &fakeQueryStore{
+		getRollupFreezeResp: dto.RollupFreezeStateResponse{Frozen: true},
+	}
+	reqBody := dto.CreateMarketRequest{
+		Title: "BTC Above 100k",
+	}
+	wallet := attachSignedCreateMarketOperator(t, &reqBody)
+	handler := NewOrderHandler(Dependencies{
+		Logger:                slog.Default(),
+		QueryStore:            store,
+		OperatorWallets:       []string{wallet},
+		DefaultOperatorUserID: 42,
+	})
+
+	raw, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/markets", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = req
+
+	handler.CreateMarket(ctx)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "rollup is frozen") {
+		t.Fatalf("expected frozen rollup error, got %s", w.Body.String())
+	}
+	if store.createMarketReq.Title != "" {
+		t.Fatalf("expected no market creation write while frozen, got %+v", store.createMarketReq)
 	}
 }
 
@@ -2122,6 +2196,49 @@ func TestCreateFirstLiquidityRejectsPastCloseAtMarket(t *testing.T) {
 	}
 }
 
+func TestCreateFirstLiquidityRejectsFrozenRollup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	account := &fakeAccountClient{}
+	reqBody := dto.CreateFirstLiquidityRequest{
+		UserID:   1002,
+		Quantity: 40,
+		Outcome:  "YES",
+		Price:    55,
+	}
+	wallet := attachSignedFirstLiquidityOperator(t, 88, &reqBody)
+	handler := NewOrderHandler(Dependencies{
+		Logger:         slog.Default(),
+		KafkaPublisher: &fakePublisher{},
+		KafkaTopics:    kafka.NewTopics("funnyoption."),
+		AccountClient:  account,
+		QueryStore: &fakeQueryStore{
+			getRollupFreezeResp: dto.RollupFreezeStateResponse{Frozen: true},
+		},
+		OperatorWallets: []string{wallet},
+	})
+
+	raw, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/markets/88/first-liquidity", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Params = gin.Params{{Key: "market_id", Value: "88"}}
+	ctx.Request = req
+
+	handler.CreateFirstLiquidity(ctx)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "rollup is frozen") {
+		t.Fatalf("expected frozen rollup error, got %s", w.Body.String())
+	}
+	if len(account.debits) != 0 || len(account.credits) != 0 || account.preFreezeCalled {
+		t.Fatalf("expected frozen first-liquidity request to stop before balance mutation, got debits=%+v credits=%+v preFreezeCalled=%v", account.debits, account.credits, account.preFreezeCalled)
+	}
+}
+
 func TestCreateFirstLiquidityRejectsMissingOperatorProof(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -2214,6 +2331,43 @@ func TestResolveMarketRejectsAlreadyResolvedMarket(t *testing.T) {
 	}
 	if len(publisher.calls) != 0 {
 		t.Fatalf("expected resolved market to stop before publish, got %+v", publisher.calls)
+	}
+}
+
+func TestResolveMarketRejectsFrozenRollup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	publisher := &fakePublisher{}
+	reqBody := dto.ResolveMarketRequest{Outcome: "YES"}
+	wallet := attachSignedResolveOperator(t, 88, &reqBody)
+	handler := NewOrderHandler(Dependencies{
+		Logger:         slog.Default(),
+		KafkaPublisher: publisher,
+		KafkaTopics:    kafka.NewTopics("funnyoption."),
+		QueryStore: &fakeQueryStore{
+			getRollupFreezeResp: dto.RollupFreezeStateResponse{Frozen: true},
+		},
+		OperatorWallets: []string{wallet},
+	})
+
+	raw, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/markets/88/resolve", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Params = gin.Params{{Key: "market_id", Value: "88"}}
+	ctx.Request = req
+
+	handler.ResolveMarket(ctx)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "rollup is frozen") {
+		t.Fatalf("expected frozen rollup error, got %s", w.Body.String())
+	}
+	if len(publisher.calls) != 0 {
+		t.Fatalf("expected frozen resolve to publish nothing, got %+v", publisher.calls)
 	}
 }
 

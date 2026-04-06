@@ -67,9 +67,12 @@ func TestProcessorResolveMarket(t *testing.T) {
 type cancelOrderStore struct {
 	cancelled []cancelledOrder
 	resolved  []int64
+	frozen    bool
+	deltas    int
 }
 
 func (s *cancelOrderStore) ApplyDelta(_ context.Context, _, _ int64, _, _ string, _ int64) error {
+	s.deltas++
 	return nil
 }
 
@@ -88,6 +91,10 @@ func (s *cancelOrderStore) WinningPositions(_ context.Context, _ int64, _ string
 
 func (s *cancelOrderStore) MarkSettled(_ context.Context, _ sharedkafka.SettlementCompletedEvent) error {
 	return nil
+}
+
+func (s *cancelOrderStore) RollupFrozen(_ context.Context) (bool, error) {
+	return s.frozen, nil
 }
 
 func TestProcessorResolveMarketCancelsActiveOrders(t *testing.T) {
@@ -171,5 +178,68 @@ func TestProcessorResolveMarketSkipsDuplicateResolvedEvent(t *testing.T) {
 
 	if len(publisher.settlements) != 1 {
 		t.Fatalf("expected duplicate resolved event to publish 1 settlement, got %d", len(publisher.settlements))
+	}
+}
+
+func TestProcessorSkipsResolutionSideEffectsWhileFrozen(t *testing.T) {
+	store := &cancelOrderStore{
+		frozen: true,
+		cancelled: []cancelledOrder{
+			{
+				OrderID:      "ord_resting_1",
+				MarketID:     88,
+				Status:       "CANCELLED",
+				CancelReason: "MARKET_RESOLVED",
+			},
+		},
+	}
+	publisher := &fakePublisher{}
+	processor := NewProcessor(store, publisher, sharedkafka.NewTopics("funnyoption."))
+
+	marketPayload, _ := json.Marshal(sharedkafka.MarketEvent{
+		EventID:         "mkt_frozen_1",
+		TraceID:         "trace_frozen_1",
+		MarketID:        88,
+		Status:          "RESOLVED",
+		ResolvedOutcome: "YES",
+	})
+	if err := processor.HandleMarketEvent(context.Background(), sharedkafka.Message{Value: marketPayload}); err != nil {
+		t.Fatalf("HandleMarketEvent returned error: %v", err)
+	}
+
+	if len(store.resolved) != 0 {
+		t.Fatalf("expected frozen settlement lane to skip resolve writes, got %+v", store.resolved)
+	}
+	if store.deltas != 0 {
+		t.Fatalf("expected frozen settlement lane to skip position deltas, got %d", store.deltas)
+	}
+	if len(publisher.orders) != 0 || len(publisher.settlements) != 0 {
+		t.Fatalf("expected no settlement publishes while frozen, got orders=%+v settlements=%+v", publisher.orders, publisher.settlements)
+	}
+}
+
+func TestProcessorSkipsPositionDeltaWhileFrozen(t *testing.T) {
+	store := &cancelOrderStore{frozen: true}
+	publisher := &fakePublisher{}
+	processor := NewProcessor(store, publisher, sharedkafka.NewTopics("funnyoption."))
+
+	posPayload, _ := json.Marshal(sharedkafka.PositionChangedEvent{
+		EventID:       "pos_frozen_1",
+		SourceTradeID: "trade_frozen_1",
+		UserID:        1001,
+		MarketID:      88,
+		Outcome:       "YES",
+		PositionAsset: "POSITION:88:YES",
+		DeltaQuantity: 25,
+	})
+	if err := processor.HandlePositionChanged(context.Background(), sharedkafka.Message{Value: posPayload}); err != nil {
+		t.Fatalf("HandlePositionChanged returned error: %v", err)
+	}
+
+	if store.deltas != 0 {
+		t.Fatalf("expected frozen position lane to skip deltas, got %d", store.deltas)
+	}
+	if len(publisher.orders) != 0 || len(publisher.settlements) != 0 {
+		t.Fatalf("expected no publishes while frozen, got orders=%+v settlements=%+v", publisher.orders, publisher.settlements)
 	}
 }

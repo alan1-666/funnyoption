@@ -51,6 +51,23 @@ func (s *SQLStore) ApplyDelta(ctx context.Context, marketID, userID int64, outco
 	return err
 }
 
+func (s *SQLStore) RollupFrozen(ctx context.Context) (bool, error) {
+	var frozen bool
+	err := s.db.QueryRowContext(ctx, `
+		SELECT frozen
+		FROM rollup_freeze_state
+		ORDER BY id DESC
+		LIMIT 1
+	`).Scan(&frozen)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	return frozen, nil
+}
+
 func (s *SQLStore) ResolveMarket(ctx context.Context, input ResolveMarketInput) (bool, error) {
 	if err := s.ensureMarket(ctx, input.MarketID); err != nil {
 		return false, err

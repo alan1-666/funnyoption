@@ -319,6 +319,26 @@ func (s *Store) ListSubmissions(ctx context.Context) ([]StoredSubmission, error)
 	return submissions, rows.Err()
 }
 
+func (s *Store) RollupFrozen(ctx context.Context) (bool, error) {
+	if s == nil {
+		return false, nil
+	}
+	var frozen bool
+	err := s.db.QueryRowContext(ctx, `
+		SELECT frozen
+		FROM rollup_freeze_state
+		ORDER BY id DESC
+		LIMIT 1
+	`).Scan(&frozen)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	return frozen, nil
+}
+
 func (s *Store) MaterializeAcceptedSubmissions(ctx context.Context) ([]AcceptedSubmissionMaterialization, error) {
 	if s == nil {
 		return nil, fmt.Errorf("rollup store is not configured")

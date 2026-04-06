@@ -31,7 +31,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	}
 	seedDemoBalances(cfg.Env, book)
 	registry := NewPersistentOrderRegistry(store)
-	processor := NewEventProcessor(book, registry)
+	processor := NewEventProcessor(book, registry, store)
 
 	orderConsumer := sharedkafka.NewJSONConsumer(
 		logger,

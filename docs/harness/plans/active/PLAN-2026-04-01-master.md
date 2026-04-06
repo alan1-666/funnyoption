@@ -91,6 +91,7 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
 | TASK-CHAIN-032 | completed | commander+worker | TASK-CHAIN-031 | land forced-withdrawal request storage, freeze gating, and local SQL mirrors so exit-runtime foundations exist before later escape-hatch claim work |
 | TASK-CHAIN-033 | completed | commander+worker | TASK-CHAIN-032 | auto-satisfy unambiguous forced-withdrawal requests from canonical claimed withdrawals, persist satisfaction tx state, and expose truthful forced-withdraw / freeze read surfaces without pretending full escape-hatch runtime is done |
 | TASK-CHAIN-034 | completed | commander+worker | TASK-CHAIN-033 | stop API/matching from treating frozen mode as tradable by deriving one truthful frozen-mode trading gate from `rollup_freeze_state` without pretending full escape-hatch or full production-truth switching is finished |
+| TASK-CHAIN-035 | completed | commander+worker | TASK-CHAIN-034 | widen frozen-mode runtime truth into privileged API writes, oracle/settlement/account mutable processors, and rollup submitter idling so legacy SQL/Kafka truth stops advancing after freeze without pretending full escape-hatch runtime is finished |
 
 ## Risks
 

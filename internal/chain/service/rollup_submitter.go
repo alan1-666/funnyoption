@@ -22,6 +22,7 @@ import (
 
 const (
 	RollupSubmissionActionNoop            = "NOOP"
+	RollupSubmissionActionFrozen          = "FROZEN"
 	RollupSubmissionActionBlockedAuth     = "BLOCKED_AUTH"
 	RollupSubmissionActionFailedBlocked   = "FAILED_BLOCKED"
 	RollupSubmissionActionRecordSubmitted = "RECORD_SUBMITTED"
@@ -36,6 +37,7 @@ type rollupSubmissionStore interface {
 	ListSubmissions(ctx context.Context) ([]rollup.StoredSubmission, error)
 	MaterializeAcceptedSubmissions(ctx context.Context) ([]rollup.AcceptedSubmissionMaterialization, error)
 	MaterializeAcceptedSubmission(ctx context.Context, submissionID string) (rollup.AcceptedSubmissionMaterialization, error)
+	RollupFrozen(ctx context.Context) (bool, error)
 	PrepareNextSubmission(ctx context.Context, limit int) (rollup.PreparedShadowSubmission, error)
 	MarkSubmissionRecordSubmitted(ctx context.Context, submissionID, txHash string) (rollup.StoredSubmission, error)
 	MarkSubmissionAcceptSubmitted(ctx context.Context, submissionID, txHash string) (rollup.StoredSubmission, error)
@@ -207,6 +209,7 @@ func (p *RollupSubmissionProcessor) RunUntilIdle(ctx context.Context) (RollupSub
 		run.Steps = append(run.Steps, progress)
 		switch progress.Action {
 		case RollupSubmissionActionNoop,
+			RollupSubmissionActionFrozen,
 			RollupSubmissionActionBlockedAuth,
 			RollupSubmissionActionFailedBlocked,
 			RollupSubmissionActionFailed:
@@ -229,6 +232,16 @@ func (p *RollupSubmissionProcessor) RunUntilIdle(ctx context.Context) (RollupSub
 func (p *RollupSubmissionProcessor) PollOnce(ctx context.Context) (RollupSubmissionProgress, error) {
 	if _, err := p.store.MaterializeAcceptedSubmissions(ctx); err != nil {
 		return RollupSubmissionProgress{}, err
+	}
+	frozen, err := p.store.RollupFrozen(ctx)
+	if err != nil {
+		return RollupSubmissionProgress{}, err
+	}
+	if frozen {
+		return RollupSubmissionProgress{
+			Action: RollupSubmissionActionFrozen,
+			Note:   "rollup core is frozen; submission runtime is idle",
+		}, nil
 	}
 	submission, prepared, err := p.nextSubmission(ctx)
 	if err != nil {

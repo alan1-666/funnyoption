@@ -30,7 +30,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	defer publisher.Close()
 
 	store := NewSQLStore(dbConn)
-	processor := NewProcessor(logger, store, accountRPC, publisher, cfg.KafkaTopics).WithRollup(rollup.NewStore(dbConn))
+	rollupStore := rollup.NewStore(dbConn)
+	processor := NewProcessor(logger, store, accountRPC, publisher, cfg.KafkaTopics).WithRollup(rollupStore)
 
 	var rpcPool *rpcPool
 	if cfg.ChainRPCURL != "" {
@@ -63,6 +64,17 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 		logger.Info("skip claim processor bootstrap", "reason", "rpc, vault address, or operator private key is empty")
 	}
 
+	var rollupSubmissionProcessor *RollupSubmissionProcessor
+	if rpcPool != nil && strings.TrimSpace(cfg.RollupCoreAddress) != "" && strings.TrimSpace(cfg.ChainOperatorPrivateKey) != "" {
+		rollupSubmissionProcessor, err = NewRollupSubmissionProcessor(logger, cfg, rollupStore, rpcPool)
+		if err != nil {
+			return err
+		}
+		go rollupSubmissionProcessor.Start(ctx)
+	} else {
+		logger.Info("skip rollup submission processor bootstrap", "reason", "rpc, rollup core address, or operator private key is empty")
+	}
+
 	logger.Info(
 		"chain service bootstrapped",
 		"service", cfg.Name,
@@ -80,6 +92,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 		"chain_withdraw_topic", cfg.KafkaTopics.ChainWithdraw,
 		"deposit_listener_ready", listener != nil,
 		"claim_processor_ready", claimProcessor != nil,
+		"rollup_submission_ready", rollupSubmissionProcessor != nil,
 		"processor_ready", processor != nil,
 	)
 	return grpcx.Run(ctx, logger, cfg.Name, cfg.GRPCAddr, nil)

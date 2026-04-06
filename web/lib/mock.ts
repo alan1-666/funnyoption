@@ -181,6 +181,11 @@ export const mockWithdrawals: Withdrawal[] = [
     log_index: 1,
     block_number: 48221118,
     status: "DEBITED",
+    claim_status: "",
+    claim_tx_hash: "",
+    claim_submitted_at: 0,
+    claimed_at: 0,
+    last_error: "",
     debited_at: 1743477800,
     created_at: 1743477790,
     updated_at: 1743477800

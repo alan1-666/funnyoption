@@ -44,6 +44,7 @@ Detailed execution lives in `docs/harness/plans/active/`.
 - Mode B fixed-vk Groth16 prover artifact tranche task: [`docs/harness/tasks/TASK-CHAIN-023.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-023.md)
 - Market expiry and resolution lifecycle hardening task: [`docs/harness/tasks/TASK-CHAIN-024.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-024.md)
 - Manual-vs-oracle post-close lifecycle task: [`docs/harness/tasks/TASK-CHAIN-025.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-025.md)
+- Shadow batch onchain-submission pipeline task: [`docs/harness/tasks/TASK-CHAIN-026.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-026.md)
 
 ## Strategic lanes
 
@@ -191,6 +192,27 @@ Detailed execution lives in `docs/harness/plans/active/`.
     window, ordinary operator resolve is restricted to that state, and oracle
     markets stay on the automatic oracle lane instead of sharing the manual
     resolve surface
+  - `TASK-CHAIN-026` is complete: stored shadow batches can now be promoted
+    into persisted deterministic `recordBatchMetadata(...)` /
+    `acceptVerifiedBatch(...)` submission bundles, giving the repo one
+    truthful offchain-to-onchain acceptance pipeline without changing current
+    production truth
+  - `TASK-CHAIN-027` is complete: persisted `rollup_shadow_submissions` now
+    have one restart-safe live onchain submission runtime with durable
+    metadata/acceptance tx tracking, optional chain-service bootstrap, and a
+    `cmd/rollup -mode=submit-next` entrypoint, while current production truth
+    remains unchanged
+  - `TASK-CHAIN-028` is complete: the live submission runtime now reconciles
+    persisted submissions against visible `FunnyRollupCore` metadata/accepted
+    state before promotion, and local/dev can drive the lane with
+    `cmd/rollup -mode=submit-until-idle`
+  - `TASK-CHAIN-029` is complete: accepted submissions now materialize into
+    durable accepted-batch / accepted-withdrawal mirrors, canonical
+    `WITHDRAWAL_CLAIM` queue items are only emitted from accepted withdrawal
+    leaves, local API withdrawals now surface accepted-claim truth
+    (`CLAIMABLE` / `CLAIM_SUBMITTED` / `CLAIMED` / `CLAIM_FAILED`), and the
+    current local lane has been proven end-to-end with real batch broadcasts,
+    accepted roots, and one confirmed withdrawal claim
   - `TASK-API-006` is paused: narrow the repo-structure cleanup to
     `internal/api`, splitting routes/handlers/store concerns into clearer
     module-owned packages without widening into a full repo directory

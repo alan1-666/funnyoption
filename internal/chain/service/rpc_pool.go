@@ -19,8 +19,10 @@ type txClient interface {
 	PendingNonceAt(ctx context.Context, account common.Address) (uint64, error)
 	SuggestGasPrice(ctx context.Context) (*big.Int, error)
 	EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64, error)
+	CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
 	SendTransaction(ctx context.Context, tx *types.Transaction) error
 	ChainID(ctx context.Context) (*big.Int, error)
+	TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
 }
 
 type rpcPool struct {
@@ -141,6 +143,19 @@ func (p *rpcPool) EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint6
 	return gas, err
 }
 
+func (p *rpcPool) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+	var result []byte
+	err := p.withClient(func(client txClient) error {
+		value, err := client.CallContract(ctx, call, blockNumber)
+		if err != nil {
+			return err
+		}
+		result = value
+		return nil
+	})
+	return result, err
+}
+
 func (p *rpcPool) SendTransaction(ctx context.Context, tx *types.Transaction) error {
 	return p.withClient(func(client txClient) error {
 		return client.SendTransaction(ctx, tx)
@@ -158,6 +173,19 @@ func (p *rpcPool) ChainID(ctx context.Context) (*big.Int, error) {
 		return nil
 	})
 	return chainID, err
+}
+
+func (p *rpcPool) TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
+	var receipt *types.Receipt
+	err := p.withClient(func(client txClient) error {
+		value, err := client.TransactionReceipt(ctx, txHash)
+		if err != nil {
+			return err
+		}
+		receipt = value
+		return nil
+	})
+	return receipt, err
 }
 
 type ethRPCClient struct {
@@ -184,12 +212,20 @@ func (c *ethRPCClient) EstimateGas(ctx context.Context, call ethereum.CallMsg) (
 	return c.client.EstimateGas(ctx, call)
 }
 
+func (c *ethRPCClient) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+	return c.client.CallContract(ctx, call, blockNumber)
+}
+
 func (c *ethRPCClient) SendTransaction(ctx context.Context, tx *types.Transaction) error {
 	return c.client.SendTransaction(ctx, tx)
 }
 
 func (c *ethRPCClient) ChainID(ctx context.Context) (*big.Int, error) {
 	return c.client.ChainID(ctx)
+}
+
+func (c *ethRPCClient) TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
+	return c.client.TransactionReceipt(ctx, txHash)
 }
 
 func (c *ethRPCClient) Close() {

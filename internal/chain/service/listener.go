@@ -23,6 +23,7 @@ const maxVaultScanSpan uint64 = 500
 
 var depositEventTopic = crypto.Keccak256Hash([]byte("Deposited(address,uint256)"))
 var withdrawalEventTopic = crypto.Keccak256Hash([]byte("WithdrawalQueued(bytes32,address,uint256,address)"))
+var claimProcessedEventTopic = crypto.Keccak256Hash([]byte("ClaimProcessed(bytes32,address,uint256,address)"))
 
 type logReader interface {
 	BlockNumber(ctx context.Context) (uint64, error)
@@ -126,7 +127,7 @@ func (l *DepositListener) pollOnce(ctx context.Context) error {
 		FromBlock: new(big.Int).SetUint64(l.nextBlock),
 		ToBlock:   new(big.Int).SetUint64(toBlock),
 		Addresses: []common.Address{l.vaultAddress},
-		Topics:    [][]common.Hash{{depositEventTopic, withdrawalEventTopic}},
+		Topics:    [][]common.Hash{{depositEventTopic, withdrawalEventTopic, claimProcessedEventTopic}},
 	})
 	if err != nil {
 		if isPrunedHistoryError(err) {
@@ -178,7 +179,17 @@ func (l *DepositListener) ensureScanCursor(ctx context.Context, safeHead uint64)
 	if err != nil {
 		return err
 	}
-	if ok && checkpoint > nextBlock {
+	if ok && checkpoint > safeHead+1 {
+		l.logger.Warn(
+			"vault scan cursor ahead of safe head; resetting from configured start block",
+			"checkpoint_next_block", checkpoint,
+			"safe_head", safeHead,
+			"configured_start_block", l.startBlock,
+			"vault_address", normalizeVaultAddress(l.vaultAddress.Hex()),
+			"chain_name", normalizeChainName(l.cfg.ChainName),
+			"network_name", normalizeNetworkName(l.cfg.NetworkName),
+		)
+	} else if ok && checkpoint > nextBlock {
 		nextBlock = checkpoint
 	}
 	if nextBlock == 0 {
@@ -215,6 +226,8 @@ func (l *DepositListener) handleVaultLog(ctx context.Context, logEntry types.Log
 		return l.handleDepositLog(ctx, logEntry)
 	case withdrawalEventTopic:
 		return l.handleWithdrawalLog(ctx, logEntry)
+	case claimProcessedEventTopic:
+		return l.handleClaimProcessedLog(ctx, logEntry)
 	default:
 		return fmt.Errorf("unsupported vault topic: %s", logEntry.Topics[0].Hex())
 	}
@@ -275,7 +288,7 @@ func (l *DepositListener) handleWithdrawalLog(ctx context.Context, logEntry type
 		return fmt.Errorf("withdrawal log payload is too short")
 	}
 
-	withdrawalID := strings.ToLower(logEntry.Topics[1].Hex())
+	withdrawalID := normalizeChainTxHash(logEntry.Topics[1].Hex())
 	walletAddress := strings.ToLower(common.BytesToAddress(logEntry.Topics[2].Bytes()).Hex())
 	amount := new(big.Int).SetBytes(logEntry.Data[:32])
 	if amount.Sign() <= 0 {
@@ -318,6 +331,16 @@ func (l *DepositListener) handleWithdrawalLog(ctx context.Context, logEntry type
 		Status:           "QUEUED",
 	}
 	return l.processor.ApplyConfirmedWithdrawal(ctx, withdrawal)
+}
+
+func (l *DepositListener) handleClaimProcessedLog(ctx context.Context, logEntry types.Log) error {
+	if len(logEntry.Topics) < 3 {
+		return fmt.Errorf("claim processed log missing indexed topics")
+	}
+	if len(logEntry.Data) < 64 {
+		return fmt.Errorf("claim processed log payload is too short")
+	}
+	return l.store.MarkClaimConfirmedByTxHash(ctx, normalizeChainTxHash(logEntry.TxHash.Hex()))
 }
 
 func confirmedHead(head uint64, confirmations uint64) (uint64, bool) {

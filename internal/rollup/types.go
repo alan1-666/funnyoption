@@ -26,11 +26,19 @@ const (
 	SourceTypeSettlementOrder  = "SETTLEMENT_ORDER"
 	SourceTypeSettlementPayout = "SETTLEMENT_PAYOUT"
 
-	BatchEncodingVersion = "shadow-batch-v1"
+	BatchEncodingVersion      = "shadow-batch-v1"
+	SubmissionEncodingVersion = "shadow-submit-v1"
 
 	VerifierAuthJoinSatisfied  = "JOINED"
 	VerifierAuthJoinMissing    = "MISSING_TRADING_KEY_AUTHORIZED"
 	VerifierAuthJoinIneligible = "NON_VERIFIER_ELIGIBLE"
+
+	SubmissionStatusReady           = "READY"
+	SubmissionStatusBlockedAuth     = "BLOCKED_AUTH"
+	SubmissionStatusRecordSubmitted = "RECORD_SUBMITTED"
+	SubmissionStatusAcceptSubmitted = "ACCEPT_SUBMITTED"
+	SubmissionStatusAccepted        = "ACCEPTED"
+	SubmissionStatusFailed          = "FAILED"
 
 	FunnyRollupCoreContractName              = "FunnyRollupCore"
 	FunnyRollupCoreContractPath              = "contracts/src/FunnyRollupCore.sol"
@@ -96,6 +104,122 @@ type StoredBatch struct {
 	WithdrawalsRoot      string
 	StateRoot            string
 	CreatedAt            int64
+}
+
+type StoredSubmission struct {
+	SubmissionID      string
+	BatchID           int64
+	EncodingVersion   string
+	Status            string
+	BatchDataHash     string
+	NextStateRoot     string
+	AuthProofHash     string
+	VerifierGateHash  string
+	RecordCalldata    string
+	AcceptCalldata    string
+	SubmissionData    string
+	SubmissionHash    string
+	RecordTxHash      string
+	AcceptTxHash      string
+	RecordSubmittedAt int64
+	AcceptSubmittedAt int64
+	AcceptedAt        int64
+	LastError         string
+	LastErrorAt       int64
+	CreatedAt         int64
+	UpdatedAt         int64
+}
+
+type AcceptedBatchRecord struct {
+	BatchID              int64  `json:"batch_id"`
+	SubmissionID         string `json:"submission_id"`
+	EncodingVersion      string `json:"encoding_version"`
+	FirstSequence        int64  `json:"first_sequence_no"`
+	LastSequence         int64  `json:"last_sequence_no"`
+	EntryCount           int    `json:"entry_count"`
+	BatchDataHash        string `json:"batch_data_hash"`
+	PrevStateRoot        string `json:"prev_state_root"`
+	BalancesRoot         string `json:"balances_root"`
+	OrdersRoot           string `json:"orders_root"`
+	PositionsFundingRoot string `json:"positions_funding_root"`
+	WithdrawalsRoot      string `json:"withdrawals_root"`
+	NextStateRoot        string `json:"next_state_root"`
+	RecordTxHash         string `json:"record_tx_hash"`
+	AcceptTxHash         string `json:"accept_tx_hash"`
+	AcceptedAt           int64  `json:"accepted_at"`
+	CreatedAt            int64  `json:"created_at"`
+	UpdatedAt            int64  `json:"updated_at"`
+}
+
+type AcceptedWithdrawalRecord struct {
+	WithdrawalID     string `json:"withdrawal_id"`
+	BatchID          int64  `json:"batch_id"`
+	AccountID        int64  `json:"account_id"`
+	WalletAddress    string `json:"wallet_address"`
+	RecipientAddress string `json:"recipient_address"`
+	VaultAddress     string `json:"vault_address"`
+	Asset            string `json:"asset"`
+	Amount           int64  `json:"amount"`
+	Lane             string `json:"lane"`
+	ChainName        string `json:"chain_name"`
+	NetworkName      string `json:"network_name"`
+	RequestSequence  int64  `json:"request_sequence"`
+	ClaimID          string `json:"claim_id"`
+	ClaimStatus      string `json:"claim_status"`
+	ClaimTxHash      string `json:"claim_tx_hash"`
+	ClaimSubmittedAt int64  `json:"claim_submitted_at"`
+	ClaimedAt        int64  `json:"claimed_at"`
+	LastError        string `json:"last_error"`
+	LastErrorAt      int64  `json:"last_error_at"`
+	CreatedAt        int64  `json:"created_at"`
+	UpdatedAt        int64  `json:"updated_at"`
+}
+
+type AcceptedSubmissionMaterialization struct {
+	Batch               AcceptedBatchRecord        `json:"batch"`
+	AcceptedWithdrawals []AcceptedWithdrawalRecord `json:"accepted_withdrawals"`
+	QueuedClaimRefs     []string                   `json:"queued_claim_refs"`
+}
+
+type SubmissionBatchSummary struct {
+	BatchID              int64  `json:"batch_id"`
+	EncodingVersion      string `json:"encoding_version"`
+	FirstSequence        int64  `json:"first_sequence_no"`
+	LastSequence         int64  `json:"last_sequence_no"`
+	EntryCount           int    `json:"entry_count"`
+	InputHash            string `json:"input_hash"`
+	PrevStateRoot        string `json:"prev_state_root"`
+	BalancesRoot         string `json:"balances_root"`
+	OrdersRoot           string `json:"orders_root"`
+	PositionsFundingRoot string `json:"positions_funding_root"`
+	WithdrawalsRoot      string `json:"withdrawals_root"`
+	NextStateRoot        string `json:"next_state_root"`
+}
+
+type RollupContractCall struct {
+	ContractName string `json:"contract_name"`
+	ContractPath string `json:"contract_path"`
+	FunctionName string `json:"function_name"`
+	Selector     string `json:"selector"`
+	Calldata     string `json:"calldata"`
+}
+
+type ShadowBatchSubmissionBundle struct {
+	SubmissionVersion       string                 `json:"submission_version"`
+	Status                  string                 `json:"status"`
+	ReadyForAcceptance      bool                   `json:"ready_for_acceptance"`
+	Batch                   SubmissionBatchSummary `json:"batch"`
+	ShadowBatchContract     ShadowBatchContract    `json:"shadow_batch_contract"`
+	VerifierArtifactBundle  VerifierArtifactBundle `json:"verifier_artifact_bundle"`
+	RecordBatchMetadataCall RollupContractCall     `json:"record_batch_metadata_call"`
+	AcceptVerifiedBatchCall RollupContractCall     `json:"accept_verified_batch_call"`
+	Blockers                []string               `json:"blockers,omitempty"`
+	Limitations             []string               `json:"limitations"`
+}
+
+type PreparedShadowSubmission struct {
+	StoredSubmission StoredSubmission            `json:"stored_submission"`
+	Bundle           ShadowBatchSubmissionBundle `json:"bundle"`
 }
 
 type RootSet struct {

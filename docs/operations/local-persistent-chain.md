@@ -133,10 +133,32 @@ FUNNYOPTION_LOCAL_CHAIN_MODE=anvil
 - `FUNNYOPTION_NETWORK_NAME=local`
 - `FUNNYOPTION_CHAIN_CONFIRMATIONS=0`
 - `FUNNYOPTION_VAULT_ADDRESS=<自动生成>`
+- `FUNNYOPTION_ROLLUP_CORE_ADDRESS=<自动生成>`
+- `FUNNYOPTION_ROLLUP_VERIFIER_ADDRESS=<自动生成>`
 - `FUNNYOPTION_COLLATERAL_TOKEN_ADDRESS=<自动生成>`
 - `FUNNYOPTION_OPERATOR_WALLETS=<operator 地址>`
 
-也就是说，你不需要手动填本地部署后的 vault 地址和 token 地址，脚本会帮你生成。
+也就是说，你不需要手动填本地部署后的 vault、rollup core、verifier、token 地址，脚本会帮你生成。
+
+从这次开始，脚本生成的：
+
+- [`.run/dev/local-chain.env`](/Users/zhangza/code/funnyoption/.run/dev/local-chain.env)
+- [`.run/dev/local-chain-wallets.env`](/Users/zhangza/code/funnyoption/.run/dev/local-chain-wallets.env)
+
+都已经写成 `export KEY=...` 形式，所以它们可以直接被 `source` 后传给
+后续 `go run` / `psql` / `cast` 命令。
+
+如果你还要同时加载 [`.env.local`](/Users/zhangza/code/funnyoption/.env.local)，
+推荐统一这样做：
+
+```bash
+set -a
+source /Users/zhangza/code/funnyoption/.env.local
+source /Users/zhangza/code/funnyoption/.run/dev/local-chain.env
+set +a
+```
+
+这样 `.env.local` 里的数据库/Kafka/Redis 等变量也会一并 export 给子进程。
 
 ## 启动整套本地环境
 
@@ -169,12 +191,26 @@ FUNNYOPTION_LOCAL_CHAIN_MODE=anvil
 7. 部署：
    - [MockUSDT.sol](/Users/zhangza/code/funnyoption/contracts/src/MockUSDT.sol)
    - [FunnyVault.sol](/Users/zhangza/code/funnyoption/contracts/src/FunnyVault.sol)
+   - [FunnyRollupCore.sol](/Users/zhangza/code/funnyoption/contracts/src/FunnyRollupCore.sol)
+   - [FunnyRollupVerifier.sol](/Users/zhangza/code/funnyoption/contracts/src/FunnyRollupVerifier.sol)
 8. 给买方和 maker 钱包打本地 ETH，确保它们有 gas
 9. 给 operator、buyer、maker 三个钱包 mint 本地 USDT
-10. 把最终生成的链配置写到：
+10. 把 `FunnyRollupCore.setVerifier(...)` 指到本地 verifier
+11. 把最终生成的链配置写到：
     - [`.run/dev/local-chain.env`](/Users/zhangza/code/funnyoption/.run/dev/local-chain.env)
-11. 把测试钱包材料写到：
+12. 把测试钱包材料写到：
     - [`.run/dev/local-chain-wallets.env`](/Users/zhangza/code/funnyoption/.run/dev/local-chain-wallets.env)
+
+从这次开始，如果 `dev-up.sh` 发现这次是**新启动的一条本地 anvil**
+而不是复用已有进程，它还会自动清理这批“只属于旧本地链实例”的 runtime
+状态：
+
+- `chain_listener_cursors` 里对应本地 vault 的扫描 cursor
+- `chain_deposits` / `chain_withdrawals` 的本地 anvil 记录
+- `rollup_shadow_*` / `rollup_accepted_*` 的本地 shadow / accepted lane
+
+这样本地链重启后，不会再出现“数据库还记着旧链的 accepted batch / cursor，
+但新链 head 已经从零附近重新开始”的假状态。
 
 ### 第三步：业务服务会继续启动
 

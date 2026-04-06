@@ -614,10 +614,118 @@ worker 不必重新决定：
   - Go + Foundry tests now pin schema-hash / public-signal / `proofData` /
     `verifierProof` parity for more than one batch-specific artifact across
     the two runtimes
-  - 这仍然没有把 repo 变成 `Mode B`：
-    - 还没有 full prover
-    - 还没有 full verifier
-    - 还没有 production withdrawal rewrite
+    - 这仍然没有把 repo 变成 `Mode B`：
+      - 还没有 full prover
+      - 还没有 full verifier
+      - 还没有 production withdrawal rewrite
+  - `TASK-CHAIN-026` 再把 shadow batch / verifier artifact 往 runtime 方向
+    推进一步，但仍然不切 production truth：
+    - [`BuildShadowBatchSubmissionBundle(history, batch)`](/Users/zhangza/code/funnyoption/internal/rollup/submission.go)
+      把已有的:
+      - `ShadowBatchContract`
+      - `VerifierArtifactBundle`
+      组合成一个 deterministic onchain-submission bundle
+    - bundle 现在稳定包含两段链上调用边界：
+      - `FunnyRollupCore.recordBatchMetadata(...)`
+      - `FunnyRollupCore.acceptVerifiedBatch(...)`
+    - 而且不是只给 struct/json：
+      - 还给 ABI-encoded calldata bytes
+      - 这样后续 live submitter/runtime 不需要重新猜参数顺序、enum 编码
+        或 `bytes32` 规范化
+    - [`Store.PrepareNextSubmission(...)`](/Users/zhangza/code/funnyoption/internal/rollup/store.go)
+      现在把这条 offchain -> onchain acceptance path 落成 durable lane：
+      - 优先复用最早一个还没 submission row 的 materialized batch
+      - 如果还没有 batch，就先 materialize next batch
+      - 持久化到 `rollup_shadow_submissions`
+      - readiness 固定为：
+        - `READY`
+        - `BLOCKED_AUTH`
+    - repo command [`cmd/rollup`](/Users/zhangza/code/funnyoption/cmd/rollup/main.go)
+      已经能直接 prepare/persist/print 下一条 submission bundle
+    - 这条 lane 仍然只是在补“链下撮合 -> 链上 acceptance payload”的核心
+      runtime bridge：
+      - 还没有 live tx broadcasting
+      - 还没有 production truth switch
+      - 还没有 withdrawal runtime rewrite
+  - `TASK-CHAIN-027` 再把这条 lane 推到真正的 live runtime，但仍然不切
+    production truth：
+    - [`RollupSubmissionProcessor`](/Users/zhangza/code/funnyoption/internal/chain/service/rollup_submitter.go)
+      现在直接消费 `rollup_shadow_submissions`
+    - runtime state machine 固定为：
+      - `READY`
+      - `BLOCKED_AUTH`
+      - `RECORD_SUBMITTED`
+      - `ACCEPT_SUBMITTED`
+      - `ACCEPTED`
+      - `FAILED`
+    - 顺序 contract 也固定了：
+      - 只有最早一个 non-accepted submission 可以推进
+      - `BLOCKED_AUTH` / `FAILED` 会 truthfully block 后续 batch
+      - metadata leg 必须先上链并拿到成功 receipt
+      - acceptance leg 只能在 metadata receipt 成功后再提交
+    - repo command [`cmd/rollup -mode=submit-next`](/Users/zhangza/code/funnyoption/cmd/rollup/main.go)
+      和 chain service optional bootstrap 现在都能驱动这条 live lane
+    - 但这仍然不是 production Mode B finality：
+      - accepted root 还不会接管 SQL/Kafka truth
+      - withdrawal / forced-withdrawal runtime 还没切过来
+      - prover/verifier 也还只是当前 repo-fixed lane，而不是全状态
+        transition prover
+  - `TASK-CHAIN-028` 再把 live runtime 从“tx receipt 成功”收紧成“链上状态
+    真实可见后才推进”，仍然不切 production truth：
+    - metadata leg 现在不再只信 `recordBatchMetadata(...)` receipt
+    - runtime 会主动读取 [`FunnyRollupCore`](/Users/zhangza/code/funnyoption/contracts/src/FunnyRollupCore.sol)
+      上的：
+      - `latestBatchId`
+      - `latestStateRoot`
+      - `batchMetadata(batchId)`
+    - 只有当这些链上值和 persisted submission bundle 的预期完全一致时，
+      才会继续提交 `acceptVerifiedBatch(...)`
+    - acceptance leg 也同样不再只信 receipt：
+      - runtime 会对齐：
+        - `latestAcceptedBatchId`
+        - `latestAcceptedStateRoot`
+        - `acceptedBatches(batchId)`
+      - 只有 visible onchain accepted state 和 persisted bundle 对齐后，
+        submission 才会被标记为 `ACCEPTED`
+    - repo command
+      [`cmd/rollup -mode=submit-until-idle`](/Users/zhangza/code/funnyoption/cmd/rollup/main.go)
+      现在可以把当前 lane 一直推到稳定停止状态：
+      - `NOOP`
+      - `BLOCKED_AUTH`
+      - `FAILED`
+      - `FAILED_BLOCKED`
+    - 这个收口的意义是：
+      - persisted shadow submission lane 不再把“发交易成功”误当成“链上接纳成功”
+      - 但 accepted roots 仍然没有接管当前 production truth
+  - `TASK-CHAIN-029` 把 accepted lane 真正接到 slow-withdraw claim rewrite 上，
+    但仍然只切 withdrawal 子路径，不切 balances / settlement production truth：
+    - [`Store.MaterializeAcceptedSubmission(...)`](/Users/zhangza/code/funnyoption/internal/rollup/store.go)
+      现在会把 accepted submission 落成：
+      - `rollup_accepted_batches`
+      - `rollup_accepted_withdrawals`
+    - 只有当 withdrawal leaf 已经存在于 accepted batch 时，才会派生一条
+      canonical `WITHDRAWAL_CLAIM` queue row
+    - [`DepositStore.MarkClaimSubmitted(...)`](/Users/zhangza/code/funnyoption/internal/chain/service/sql_store.go)
+      / `MarkClaimConfirmedByTxHash(...)` 现在会把 accepted withdrawal 的
+      runtime 真相继续推进成：
+      - `CLAIM_SUBMITTED`
+      - `CLAIMED`
+      - `FAILED`
+    - `/api/v1/withdrawals` 读面现在不再只暴露链下 `DEBITED` 中间态，而是
+      truthfully 显示：
+      - `CLAIMABLE`
+      - `CLAIM_SUBMITTED`
+      - `CLAIMED`
+      - `CLAIM_FAILED`
+    - 本地链现在已经现场证明了：
+      - real `recordBatchMetadata(...)` broadcast
+      - real `acceptVerifiedBatch(...)` broadcast
+      - accepted withdrawal leaf materialization
+      - canonical withdrawal claim submit + `ClaimProcessed`
+    - 但这条 lane 仍然不是完整 Mode B finality：
+      - current SQL/Kafka balances / settlement truth 没切
+      - forced-withdraw / freeze / escape hatch 还没实现
+      - prover 仍然不是 full state-transition circuit
 
 因此边界明确分成三层：
 

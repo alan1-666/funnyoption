@@ -192,6 +192,11 @@ export interface Withdrawal {
   log_index: number;
   block_number: number;
   status: string;
+  claim_status: string;
+  claim_tx_hash: string;
+  claim_submitted_at: number;
+  claimed_at: number;
+  last_error: string;
   debited_at: number;
   created_at: number;
   updated_at: number;

@@ -833,10 +833,36 @@ func (s *SQLStore) ListWithdrawals(ctx context.Context, req dto.ListWithdrawalsR
 		filters []string
 	)
 	query := `
-		SELECT withdrawal_id, user_id, wallet_address, recipient_address, vault_address, asset, amount,
-		       chain_name, network_name, tx_hash, log_index, block_number, status,
-		       debited_at, created_at, updated_at
-		FROM chain_withdrawals
+		SELECT w.withdrawal_id,
+		       w.user_id,
+		       w.wallet_address,
+		       w.recipient_address,
+		       w.vault_address,
+		       w.asset,
+		       w.amount,
+		       w.chain_name,
+		       w.network_name,
+		       w.tx_hash,
+		       w.log_index,
+		       w.block_number,
+		       CASE
+		           WHEN aw.claim_status = 'CLAIMED' THEN 'CLAIMED'
+		           WHEN aw.claim_status = 'CLAIM_SUBMITTED' THEN 'CLAIM_SUBMITTED'
+		           WHEN aw.claim_status = 'CLAIMABLE' THEN 'CLAIMABLE'
+		           WHEN aw.claim_status = 'FAILED' THEN 'CLAIM_FAILED'
+		           ELSE w.status
+		       END AS effective_status,
+		       COALESCE(aw.claim_status, ''),
+		       COALESCE(aw.claim_tx_hash, ''),
+		       COALESCE(aw.claim_submitted_at, 0),
+		       COALESCE(aw.claimed_at, 0),
+		       COALESCE(aw.last_error, ''),
+		       w.debited_at,
+		       w.created_at,
+		       w.updated_at
+		FROM chain_withdrawals w
+		LEFT JOIN rollup_accepted_withdrawals aw
+		  ON aw.withdrawal_id = w.withdrawal_id
 	`
 
 	if req.UserID > 0 {
@@ -849,14 +875,22 @@ func (s *SQLStore) ListWithdrawals(ctx context.Context, req dto.ListWithdrawalsR
 	}
 	if status := normalizeOptional(req.Status); status != "" {
 		args = append(args, status)
-		filters = append(filters, fmt.Sprintf("status = $%d", len(args)))
+		filters = append(filters, fmt.Sprintf(`(
+			CASE
+			    WHEN aw.claim_status = 'CLAIMED' THEN 'CLAIMED'
+			    WHEN aw.claim_status = 'CLAIM_SUBMITTED' THEN 'CLAIM_SUBMITTED'
+			    WHEN aw.claim_status = 'CLAIMABLE' THEN 'CLAIMABLE'
+			    WHEN aw.claim_status = 'FAILED' THEN 'CLAIM_FAILED'
+			    ELSE w.status
+			END
+		) = $%d`, len(args)))
 	}
 	if len(filters) > 0 {
 		query += " WHERE " + strings.Join(filters, " AND ")
 	}
 
 	args = append(args, normalizeLimit(req.Limit))
-	query += fmt.Sprintf(" ORDER BY created_at DESC, withdrawal_id DESC LIMIT $%d", len(args))
+	query += fmt.Sprintf(" ORDER BY w.created_at DESC, w.withdrawal_id DESC LIMIT $%d", len(args))
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -1560,6 +1594,11 @@ func scanWithdrawal(row scanner) (dto.WithdrawalResponse, error) {
 		&item.LogIndex,
 		&item.BlockNumber,
 		&item.Status,
+		&item.ClaimStatus,
+		&item.ClaimTxHash,
+		&item.ClaimSubmittedAt,
+		&item.ClaimedAt,
+		&item.LastError,
 		&item.DebitedAt,
 		&item.CreatedAt,
 		&item.UpdatedAt,

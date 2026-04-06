@@ -82,6 +82,10 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
 | TASK-CHAIN-023 | completed | worker | TASK-CHAIN-022 | implement the fixed-vk Groth16 prover artifact pipeline so Go emits batch-specific proof artifacts from actual outer signals instead of one shared fixture while keeping the outer envelope, `proofData-v1`, and production truth unchanged |
 | TASK-CHAIN-024 | completed | worker | TASK-CHAIN-007 | harden market-expiry lifecycle semantics so `close_at` stops new trading even if a market row still says `OPEN`, oracle markets continue auto-resolving at `resolve_at`, and non-oracle markets become truthfully closed-awaiting-resolution instead of pretending time alone settles them |
 | TASK-CHAIN-025 | completed | worker | TASK-CHAIN-024 | distinguish manual post-close markets from oracle post-close markets with one runtime-effective `WAITING_RESOLUTION` state, and restrict ordinary operator resolve to that adjudication window |
+| TASK-CHAIN-026 | completed | commander+worker | TASK-CHAIN-023, TASK-CHAIN-025 | bridge stored shadow batches into persisted deterministic `recordBatchMetadata(...)` / `acceptVerifiedBatch(...)` submission bundles so the repo has one truthful offchain-to-onchain acceptance pipeline without changing production truth |
+| TASK-CHAIN-027 | completed | commander+worker | TASK-CHAIN-026 | turn persisted shadow submissions into one restart-safe live onchain submission runtime with durable metadata/acceptance tx tracking while keeping production truth unchanged |
+| TASK-CHAIN-028 | completed | commander+worker | TASK-CHAIN-027 | require visible `FunnyRollupCore` onchain state before promoting persisted submission runtime state, and add one `submit-until-idle` command path without changing production truth |
+| TASK-CHAIN-029 | completed | commander+worker | TASK-CHAIN-028 | materialize accepted submissions into durable accepted-batch / accepted-withdrawal mirrors, queue slow-withdraw claims only from accepted leaves, switch withdrawal read surfaces to accepted-claim truth, and prove one real local pending-submission broadcast through to accepted onchain state |
 
 ## Risks
 

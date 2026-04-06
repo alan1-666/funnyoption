@@ -12,14 +12,34 @@ import (
 )
 
 var ErrNoPendingBatch = errors.New("no pending rollup batch")
+var ErrNoPendingSubmission = errors.New("no pending rollup submission")
+
+const submissionSelectColumns = `
+		submission_id, batch_id, encoding_version, status,
+		batch_data_hash, next_state_root, auth_proof_hash,
+		verifier_gate_hash, record_calldata, accept_calldata,
+		submission_data, submission_hash, record_tx_hash, accept_tx_hash,
+		record_submitted_at, accept_submitted_at, accepted_at,
+		last_error, last_error_at, created_at, updated_at
+`
 
 type sqlQueryer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 type Store struct {
 	db *sql.DB
+}
+
+type acceptedWithdrawalClaimPayload struct {
+	EventID          string `json:"event_id"`
+	UserID           int64  `json:"user_id"`
+	WalletAddress    string `json:"wallet_address"`
+	RecipientAddress string `json:"recipient_address"`
+	PayoutAsset      string `json:"payout_asset"`
+	PayoutAmount     int64  `json:"payout_amount"`
 }
 
 func NewStore(db *sql.DB) *Store {
@@ -177,6 +197,60 @@ func (s *Store) MaterializeNextBatch(ctx context.Context, limit int) (StoredBatc
 	return batch, nil
 }
 
+func (s *Store) PrepareNextSubmission(ctx context.Context, limit int) (PreparedShadowSubmission, error) {
+	if s == nil {
+		return PreparedShadowSubmission{}, fmt.Errorf("rollup store is not configured")
+	}
+
+	batches, err := s.ListBatches(ctx)
+	if err != nil {
+		return PreparedShadowSubmission{}, err
+	}
+	submissions, err := s.ListSubmissions(ctx)
+	if err != nil {
+		return PreparedShadowSubmission{}, err
+	}
+
+	submissionByBatch := make(map[int64]StoredSubmission, len(submissions))
+	for _, submission := range submissions {
+		submissionByBatch[submission.BatchID] = submission
+	}
+
+	targetIndex := -1
+	for index, batch := range batches {
+		if _, exists := submissionByBatch[batch.BatchID]; !exists {
+			targetIndex = index
+			break
+		}
+	}
+
+	if targetIndex == -1 {
+		batch, err := s.MaterializeNextBatch(ctx, limit)
+		if err != nil {
+			if errors.Is(err, ErrNoPendingBatch) {
+				return PreparedShadowSubmission{}, ErrNoPendingSubmission
+			}
+			return PreparedShadowSubmission{}, err
+		}
+		batches = append(batches, batch)
+		targetIndex = len(batches) - 1
+	}
+
+	targetBatch := batches[targetIndex]
+	bundle, err := BuildShadowBatchSubmissionBundle(append([]StoredBatch(nil), batches[:targetIndex]...), targetBatch)
+	if err != nil {
+		return PreparedShadowSubmission{}, err
+	}
+	stored, err := s.upsertSubmission(ctx, targetBatch.BatchID, bundle)
+	if err != nil {
+		return PreparedShadowSubmission{}, err
+	}
+	return PreparedShadowSubmission{
+		StoredSubmission: stored,
+		Bundle:           bundle,
+	}, nil
+}
+
 func (s *Store) ListBatches(ctx context.Context) ([]StoredBatch, error) {
 	if s == nil {
 		return nil, nil
@@ -220,6 +294,110 @@ func (s *Store) ListBatches(ctx context.Context) ([]StoredBatch, error) {
 	return batches, rows.Err()
 }
 
+func (s *Store) ListSubmissions(ctx context.Context) ([]StoredSubmission, error) {
+	if s == nil {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+submissionSelectColumns+`
+		FROM rollup_shadow_submissions
+		ORDER BY batch_id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var submissions []StoredSubmission
+	for rows.Next() {
+		var submission StoredSubmission
+		if err := scanStoredSubmission(rows, &submission); err != nil {
+			return nil, err
+		}
+		submissions = append(submissions, submission)
+	}
+	return submissions, rows.Err()
+}
+
+func (s *Store) MaterializeAcceptedSubmissions(ctx context.Context) ([]AcceptedSubmissionMaterialization, error) {
+	if s == nil {
+		return nil, fmt.Errorf("rollup store is not configured")
+	}
+	submissions, err := s.ListSubmissions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	materialized := make([]AcceptedSubmissionMaterialization, 0)
+	for _, submission := range submissions {
+		if submission.Status != SubmissionStatusAccepted {
+			continue
+		}
+		item, err := s.MaterializeAcceptedSubmission(ctx, submission.SubmissionID)
+		if err != nil {
+			return nil, err
+		}
+		materialized = append(materialized, item)
+	}
+	return materialized, nil
+}
+
+func (s *Store) MaterializeAcceptedSubmission(ctx context.Context, submissionID string) (AcceptedSubmissionMaterialization, error) {
+	if s == nil {
+		return AcceptedSubmissionMaterialization{}, fmt.Errorf("rollup store is not configured")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AcceptedSubmissionMaterialization{}, err
+	}
+	defer tx.Rollback()
+
+	submission, err := s.loadSubmissionByID(ctx, tx, submissionID)
+	if err != nil {
+		return AcceptedSubmissionMaterialization{}, err
+	}
+	if submission.Status != SubmissionStatusAccepted {
+		return AcceptedSubmissionMaterialization{}, fmt.Errorf("submission %s is not accepted", strings.TrimSpace(submissionID))
+	}
+
+	batch, err := s.loadBatchByID(ctx, tx, submission.BatchID)
+	if err != nil {
+		return AcceptedSubmissionMaterialization{}, err
+	}
+
+	acceptedBatch, err := s.upsertAcceptedBatch(ctx, tx, batch, submission)
+	if err != nil {
+		return AcceptedSubmissionMaterialization{}, err
+	}
+
+	withdrawals, err := ExtractAcceptedWithdrawals(batch)
+	if err != nil {
+		return AcceptedSubmissionMaterialization{}, err
+	}
+	acceptedWithdrawals := make([]AcceptedWithdrawalRecord, 0, len(withdrawals))
+	queuedClaimRefs := make([]string, 0, len(withdrawals))
+	for _, withdrawal := range withdrawals {
+		storedWithdrawal, claimQueued, err := s.upsertAcceptedWithdrawal(ctx, tx, withdrawal)
+		if err != nil {
+			return AcceptedSubmissionMaterialization{}, err
+		}
+		if claimQueued {
+			queuedClaimRefs = append(queuedClaimRefs, storedWithdrawal.WithdrawalID)
+		}
+		acceptedWithdrawals = append(acceptedWithdrawals, storedWithdrawal)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return AcceptedSubmissionMaterialization{}, err
+	}
+
+	return AcceptedSubmissionMaterialization{
+		Batch:               acceptedBatch,
+		AcceptedWithdrawals: acceptedWithdrawals,
+		QueuedClaimRefs:     queuedClaimRefs,
+	}, nil
+}
+
 func (s *Store) latestBatch(ctx context.Context) (StoredBatch, bool, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT batch_id, encoding_version, first_sequence_no, last_sequence_no,
@@ -255,6 +433,56 @@ func (s *Store) latestBatch(ctx context.Context) (StoredBatch, bool, error) {
 	return batch, true, nil
 }
 
+func (s *Store) loadSubmissionByID(ctx context.Context, q sqlQueryer, submissionID string) (StoredSubmission, error) {
+	row := q.QueryRowContext(ctx, `
+		SELECT `+submissionSelectColumns+`
+		FROM rollup_shadow_submissions
+		WHERE submission_id = $1
+	`, strings.TrimSpace(submissionID))
+	var submission StoredSubmission
+	if err := scanStoredSubmission(row, &submission); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return StoredSubmission{}, fmt.Errorf("rollup submission %s not found", strings.TrimSpace(submissionID))
+		}
+		return StoredSubmission{}, err
+	}
+	return submission, nil
+}
+
+func (s *Store) loadBatchByID(ctx context.Context, q sqlQueryer, batchID int64) (StoredBatch, error) {
+	row := q.QueryRowContext(ctx, `
+		SELECT batch_id, encoding_version, first_sequence_no, last_sequence_no,
+		       entry_count, input_data, input_hash, prev_state_root,
+		       balances_root, orders_root, positions_funding_root,
+		       withdrawals_root, state_root, created_at
+		FROM rollup_shadow_batches
+		WHERE batch_id = $1
+	`, batchID)
+	var batch StoredBatch
+	if err := row.Scan(
+		&batch.BatchID,
+		&batch.EncodingVersion,
+		&batch.FirstSequence,
+		&batch.LastSequence,
+		&batch.EntryCount,
+		&batch.InputData,
+		&batch.InputHash,
+		&batch.PrevStateRoot,
+		&batch.BalancesRoot,
+		&batch.OrdersRoot,
+		&batch.PositionsFundingRoot,
+		&batch.WithdrawalsRoot,
+		&batch.StateRoot,
+		&batch.CreatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return StoredBatch{}, fmt.Errorf("rollup batch %d not found", batchID)
+		}
+		return StoredBatch{}, err
+	}
+	return batch, nil
+}
+
 func (s *Store) loadJournalEntriesAfter(ctx context.Context, afterSequence int64, limit int) ([]JournalEntry, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT sequence_no, entry_id, entry_type, source_type, source_ref,
@@ -286,4 +514,366 @@ func (s *Store) loadJournalEntriesAfter(ctx context.Context, afterSequence int64
 		entries = append(entries, entry)
 	}
 	return entries, rows.Err()
+}
+
+func (s *Store) upsertSubmission(ctx context.Context, batchID int64, bundle ShadowBatchSubmissionBundle) (StoredSubmission, error) {
+	submissionData, submissionHash, err := buildSubmissionHash(bundle)
+	if err != nil {
+		return StoredSubmission{}, err
+	}
+	submissionID := fmt.Sprintf("rsub_%d", batchID)
+
+	batchDataHash, err := solidityBytes32(bundle.Batch.InputHash, "bundle.batch.input_hash")
+	if err != nil {
+		return StoredSubmission{}, err
+	}
+	nextStateRoot, err := solidityBytes32(bundle.Batch.NextStateRoot, "bundle.batch.next_state_root")
+	if err != nil {
+		return StoredSubmission{}, err
+	}
+
+	row := s.db.QueryRowContext(ctx, `
+		INSERT INTO rollup_shadow_submissions (
+			submission_id, batch_id, encoding_version, status,
+			batch_data_hash, next_state_root, auth_proof_hash,
+			verifier_gate_hash, record_calldata, accept_calldata,
+			submission_data, submission_hash, created_at, updated_at
+		)
+		VALUES (
+			$1, $2, $3, $4,
+			$5, $6, $7,
+			$8, $9, $10,
+			$11::jsonb, $12, EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT
+		)
+		ON CONFLICT (batch_id) DO UPDATE SET
+			encoding_version = EXCLUDED.encoding_version,
+			status = EXCLUDED.status,
+			batch_data_hash = EXCLUDED.batch_data_hash,
+			next_state_root = EXCLUDED.next_state_root,
+			auth_proof_hash = EXCLUDED.auth_proof_hash,
+			verifier_gate_hash = EXCLUDED.verifier_gate_hash,
+			record_calldata = EXCLUDED.record_calldata,
+			accept_calldata = EXCLUDED.accept_calldata,
+			submission_data = EXCLUDED.submission_data,
+			submission_hash = EXCLUDED.submission_hash,
+			updated_at = EXCLUDED.updated_at
+		RETURNING `+submissionSelectColumns+`
+	`,
+		submissionID,
+		batchID,
+		SubmissionEncodingVersion,
+		bundle.Status,
+		batchDataHash,
+		nextStateRoot,
+		bundle.VerifierArtifactBundle.AuthProofDigest.AuthProofHash,
+		bundle.VerifierArtifactBundle.VerifierGateDigest.VerifierGateHash,
+		bundle.RecordBatchMetadataCall.Calldata,
+		bundle.AcceptVerifiedBatchCall.Calldata,
+		submissionData,
+		submissionHash,
+	)
+
+	var submission StoredSubmission
+	if err := scanStoredSubmission(row, &submission); err != nil {
+		return StoredSubmission{}, err
+	}
+	return submission, nil
+}
+
+func (s *Store) MarkSubmissionRecordSubmitted(ctx context.Context, submissionID, txHash string) (StoredSubmission, error) {
+	return s.updateSubmissionRuntime(ctx, submissionID, `
+		UPDATE rollup_shadow_submissions
+		SET status = $2,
+		    record_tx_hash = $3,
+		    record_submitted_at = EXTRACT(EPOCH FROM NOW())::BIGINT,
+		    last_error = '',
+		    last_error_at = 0,
+		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE submission_id = $1
+		RETURNING `+submissionSelectColumns, SubmissionStatusRecordSubmitted, normalizeSubmissionTxHash(txHash))
+}
+
+func (s *Store) MarkSubmissionAcceptSubmitted(ctx context.Context, submissionID, txHash string) (StoredSubmission, error) {
+	return s.updateSubmissionRuntime(ctx, submissionID, `
+		UPDATE rollup_shadow_submissions
+		SET status = $2,
+		    accept_tx_hash = $3,
+		    accept_submitted_at = EXTRACT(EPOCH FROM NOW())::BIGINT,
+		    last_error = '',
+		    last_error_at = 0,
+		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE submission_id = $1
+		RETURNING `+submissionSelectColumns, SubmissionStatusAcceptSubmitted, normalizeSubmissionTxHash(txHash))
+}
+
+func (s *Store) MarkSubmissionAccepted(ctx context.Context, submissionID string) (StoredSubmission, error) {
+	return s.updateSubmissionRuntime(ctx, submissionID, `
+		UPDATE rollup_shadow_submissions
+		SET status = $2,
+		    accepted_at = EXTRACT(EPOCH FROM NOW())::BIGINT,
+		    last_error = '',
+		    last_error_at = 0,
+		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE submission_id = $1
+		RETURNING `+submissionSelectColumns, SubmissionStatusAccepted)
+}
+
+func (s *Store) MarkSubmissionFailed(ctx context.Context, submissionID, errMsg string) (StoredSubmission, error) {
+	return s.updateSubmissionRuntime(ctx, submissionID, `
+		UPDATE rollup_shadow_submissions
+		SET status = $2,
+		    last_error = $3,
+		    last_error_at = EXTRACT(EPOCH FROM NOW())::BIGINT,
+		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE submission_id = $1
+		RETURNING `+submissionSelectColumns, SubmissionStatusFailed, normalizeSubmissionError(errMsg))
+}
+
+func (s *Store) RecordSubmissionError(ctx context.Context, submissionID, errMsg string) (StoredSubmission, error) {
+	return s.updateSubmissionRuntime(ctx, submissionID, `
+		UPDATE rollup_shadow_submissions
+		SET last_error = $2,
+		    last_error_at = EXTRACT(EPOCH FROM NOW())::BIGINT,
+		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE submission_id = $1
+		RETURNING `+submissionSelectColumns, normalizeSubmissionError(errMsg))
+}
+
+func (s *Store) updateSubmissionRuntime(ctx context.Context, submissionID, query string, args ...any) (StoredSubmission, error) {
+	if s == nil {
+		return StoredSubmission{}, fmt.Errorf("rollup store is not configured")
+	}
+	row := s.db.QueryRowContext(ctx, query, append([]any{submissionID}, args...)...)
+	var submission StoredSubmission
+	if err := scanStoredSubmission(row, &submission); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return StoredSubmission{}, fmt.Errorf("rollup submission %s not found", strings.TrimSpace(submissionID))
+		}
+		return StoredSubmission{}, err
+	}
+	return submission, nil
+}
+
+func (s *Store) upsertAcceptedBatch(ctx context.Context, q sqlQueryer, batch StoredBatch, submission StoredSubmission) (AcceptedBatchRecord, error) {
+	row := q.QueryRowContext(ctx, `
+		INSERT INTO rollup_accepted_batches (
+			batch_id, submission_id, encoding_version, first_sequence_no, last_sequence_no,
+			entry_count, batch_data_hash, prev_state_root, balances_root, orders_root,
+			positions_funding_root, withdrawals_root, next_state_root, record_tx_hash,
+			accept_tx_hash, accepted_at, created_at, updated_at
+		)
+		VALUES (
+			$1, $2, $3, $4, $5,
+			$6, $7, $8, $9, $10,
+			$11, $12, $13, $14,
+			$15, $16, EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT
+		)
+		ON CONFLICT (batch_id) DO UPDATE SET
+			submission_id = EXCLUDED.submission_id,
+			encoding_version = EXCLUDED.encoding_version,
+			first_sequence_no = EXCLUDED.first_sequence_no,
+			last_sequence_no = EXCLUDED.last_sequence_no,
+			entry_count = EXCLUDED.entry_count,
+			batch_data_hash = EXCLUDED.batch_data_hash,
+			prev_state_root = EXCLUDED.prev_state_root,
+			balances_root = EXCLUDED.balances_root,
+			orders_root = EXCLUDED.orders_root,
+			positions_funding_root = EXCLUDED.positions_funding_root,
+			withdrawals_root = EXCLUDED.withdrawals_root,
+			next_state_root = EXCLUDED.next_state_root,
+			record_tx_hash = EXCLUDED.record_tx_hash,
+			accept_tx_hash = EXCLUDED.accept_tx_hash,
+			accepted_at = EXCLUDED.accepted_at,
+			updated_at = EXCLUDED.updated_at
+		RETURNING batch_id, submission_id, encoding_version, first_sequence_no, last_sequence_no,
+		          entry_count, batch_data_hash, prev_state_root, balances_root, orders_root,
+		          positions_funding_root, withdrawals_root, next_state_root, record_tx_hash,
+		          accept_tx_hash, accepted_at, created_at, updated_at
+	`,
+		batch.BatchID,
+		submission.SubmissionID,
+		batch.EncodingVersion,
+		batch.FirstSequence,
+		batch.LastSequence,
+		batch.EntryCount,
+		batch.InputHash,
+		batch.PrevStateRoot,
+		batch.BalancesRoot,
+		batch.OrdersRoot,
+		batch.PositionsFundingRoot,
+		batch.WithdrawalsRoot,
+		batch.StateRoot,
+		submission.RecordTxHash,
+		submission.AcceptTxHash,
+		submission.AcceptedAt,
+	)
+	var item AcceptedBatchRecord
+	if err := row.Scan(
+		&item.BatchID,
+		&item.SubmissionID,
+		&item.EncodingVersion,
+		&item.FirstSequence,
+		&item.LastSequence,
+		&item.EntryCount,
+		&item.BatchDataHash,
+		&item.PrevStateRoot,
+		&item.BalancesRoot,
+		&item.OrdersRoot,
+		&item.PositionsFundingRoot,
+		&item.WithdrawalsRoot,
+		&item.NextStateRoot,
+		&item.RecordTxHash,
+		&item.AcceptTxHash,
+		&item.AcceptedAt,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		return AcceptedBatchRecord{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) upsertAcceptedWithdrawal(ctx context.Context, q sqlQueryer, withdrawal AcceptedWithdrawalRecord) (AcceptedWithdrawalRecord, bool, error) {
+	row := q.QueryRowContext(ctx, `
+		INSERT INTO rollup_accepted_withdrawals (
+			withdrawal_id, batch_id, account_id, wallet_address, recipient_address, vault_address,
+			asset, amount, lane, chain_name, network_name, request_sequence,
+			claim_id, claim_status, claim_tx_hash, claim_submitted_at, claimed_at,
+			last_error, last_error_at, created_at, updated_at
+		)
+		VALUES (
+			$1, $2, $3, $4, $5, $6,
+			$7, $8, $9, $10, $11, $12,
+			$13, $14, '', 0, 0,
+			'', 0, EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT
+		)
+		ON CONFLICT (withdrawal_id) DO UPDATE SET
+			batch_id = EXCLUDED.batch_id,
+			account_id = EXCLUDED.account_id,
+			wallet_address = EXCLUDED.wallet_address,
+			recipient_address = EXCLUDED.recipient_address,
+			vault_address = EXCLUDED.vault_address,
+			asset = EXCLUDED.asset,
+			amount = EXCLUDED.amount,
+			lane = EXCLUDED.lane,
+			chain_name = EXCLUDED.chain_name,
+			network_name = EXCLUDED.network_name,
+			request_sequence = EXCLUDED.request_sequence,
+			claim_id = EXCLUDED.claim_id,
+			updated_at = EXCLUDED.updated_at
+		RETURNING withdrawal_id, batch_id, account_id, wallet_address, recipient_address, vault_address,
+		          asset, amount, lane, chain_name, network_name, request_sequence,
+		          claim_id, claim_status, claim_tx_hash, claim_submitted_at, claimed_at,
+		          last_error, last_error_at, created_at, updated_at
+	`,
+		withdrawal.WithdrawalID,
+		withdrawal.BatchID,
+		withdrawal.AccountID,
+		withdrawal.WalletAddress,
+		withdrawal.RecipientAddress,
+		withdrawal.VaultAddress,
+		withdrawal.Asset,
+		withdrawal.Amount,
+		withdrawal.Lane,
+		withdrawal.ChainName,
+		withdrawal.NetworkName,
+		withdrawal.RequestSequence,
+		withdrawal.ClaimID,
+		AcceptedWithdrawalStatusClaimable,
+	)
+	var stored AcceptedWithdrawalRecord
+	if err := row.Scan(
+		&stored.WithdrawalID,
+		&stored.BatchID,
+		&stored.AccountID,
+		&stored.WalletAddress,
+		&stored.RecipientAddress,
+		&stored.VaultAddress,
+		&stored.Asset,
+		&stored.Amount,
+		&stored.Lane,
+		&stored.ChainName,
+		&stored.NetworkName,
+		&stored.RequestSequence,
+		&stored.ClaimID,
+		&stored.ClaimStatus,
+		&stored.ClaimTxHash,
+		&stored.ClaimSubmittedAt,
+		&stored.ClaimedAt,
+		&stored.LastError,
+		&stored.LastErrorAt,
+		&stored.CreatedAt,
+		&stored.UpdatedAt,
+	); err != nil {
+		return AcceptedWithdrawalRecord{}, false, err
+	}
+
+	payload, err := json.Marshal(acceptedWithdrawalClaimPayload{
+		EventID:          stored.WithdrawalID,
+		UserID:           stored.AccountID,
+		WalletAddress:    stored.WalletAddress,
+		RecipientAddress: stored.RecipientAddress,
+		PayoutAsset:      stored.Asset,
+		PayoutAmount:     stored.Amount,
+	})
+	if err != nil {
+		return AcceptedWithdrawalRecord{}, false, err
+	}
+
+	result, err := q.ExecContext(ctx, `
+		INSERT INTO chain_transactions (
+			biz_type, ref_id, chain_name, network_name, wallet_address, tx_hash,
+			status, payload, error_message, attempt_count, created_at, updated_at
+		)
+		VALUES ('WITHDRAWAL_CLAIM', $1, $2, $3, $4, '', 'PENDING', $5, '', 0,
+		        EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT)
+		ON CONFLICT (biz_type, ref_id) DO NOTHING
+	`, stored.WithdrawalID, stored.ChainName, stored.NetworkName, stored.WalletAddress, payload)
+	if err != nil {
+		return AcceptedWithdrawalRecord{}, false, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return AcceptedWithdrawalRecord{}, false, err
+	}
+	return stored, rowsAffected > 0, nil
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanStoredSubmission(scanner rowScanner, submission *StoredSubmission) error {
+	return scanner.Scan(
+		&submission.SubmissionID,
+		&submission.BatchID,
+		&submission.EncodingVersion,
+		&submission.Status,
+		&submission.BatchDataHash,
+		&submission.NextStateRoot,
+		&submission.AuthProofHash,
+		&submission.VerifierGateHash,
+		&submission.RecordCalldata,
+		&submission.AcceptCalldata,
+		&submission.SubmissionData,
+		&submission.SubmissionHash,
+		&submission.RecordTxHash,
+		&submission.AcceptTxHash,
+		&submission.RecordSubmittedAt,
+		&submission.AcceptSubmittedAt,
+		&submission.AcceptedAt,
+		&submission.LastError,
+		&submission.LastErrorAt,
+		&submission.CreatedAt,
+		&submission.UpdatedAt,
+	)
+}
+
+func normalizeSubmissionTxHash(txHash string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(txHash))
+	return strings.TrimPrefix(trimmed, "0x")
+}
+
+func normalizeSubmissionError(errMsg string) string {
+	return strings.TrimSpace(errMsg)
 }

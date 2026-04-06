@@ -24,6 +24,7 @@ type fakeDepositStore struct {
 	hasScanCursor    bool
 	savedScanCursors []uint64
 	claimTasks       []claimmodel.ClaimTask
+	confirmedClaimTx string
 }
 
 func (f *fakeDepositStore) UpsertDeposit(ctx context.Context, deposit chainmodel.Deposit) (chainmodel.Deposit, error) {
@@ -108,6 +109,12 @@ func (f *fakeDepositStore) MarkClaimFailed(ctx context.Context, id int64, errMsg
 	_ = ctx
 	_ = id
 	_ = errMsg
+	return nil
+}
+
+func (f *fakeDepositStore) MarkClaimConfirmedByTxHash(ctx context.Context, txHash string) error {
+	_ = ctx
+	f.confirmedClaimTx = txHash
 	return nil
 }
 

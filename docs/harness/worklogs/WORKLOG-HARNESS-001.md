@@ -2212,3 +2212,241 @@
 - next:
   - follow `docs/architecture/frontend-surface-copy.md` for future UI slices,
     especially on market detail, portfolio, and admin-facing surfaces
+
+### 2026-04-06 17:31 CST
+
+- thread: COMMANDER
+- scope:
+  - reviewed and accepted `TASK-CHAIN-026`
+  - merged planning and execution in one current-session tranche because the
+    user explicitly asked to continue in the same thread instead of routing a
+    new worker
+- changed:
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-026.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-026.md`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md`
+- validated:
+  - `go test ./internal/rollup ./cmd/rollup`
+  - `forge test --match-path contracts/test/FunnyRollupCore.t.sol`
+  - `git diff --check`
+- blockers:
+  - production truth still remains on SQL/Kafka settlement and direct-vault
+    claim; the new lane only prepares/persists onchain acceptance payloads
+- next:
+  - continue on the same main thread with either:
+    - live onchain submission runtime for persisted shadow bundles
+    - broader rollup/state-transition proving work
+
+### 2026-04-06 18:09 CST
+
+- thread: COMMANDER
+- scope:
+  - opened `TASK-CHAIN-027` as the next current-session rollup runtime slice
+  - chose the narrowest real bridge after `CHAIN-026`: make persisted shadow
+    submissions actually submit onchain in a restart-safe way
+- changed:
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-027.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-027.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-027.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - scope stays narrow:
+    - no production truth switch
+    - no proof-envelope changes
+    - no withdrawal rewrite
+- blockers:
+  - none yet
+- next:
+  - implement:
+    - durable submission state transitions
+    - tx hash / receipt tracking
+    - minimal command path
+    - optional chain-service bootstrap
+
+### 2026-04-06 18:33 CST
+
+- thread: COMMANDER
+- scope:
+  - reviewed and accepted `TASK-CHAIN-027`
+  - kept the lane narrow: live onchain submission runtime only, no production
+    truth switch
+- changed:
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-027.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-027.md`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md`
+- validated:
+  - `go test ./internal/rollup ./internal/chain/service ./cmd/rollup`
+  - `forge test --match-path contracts/test/FunnyRollupCore.t.sol`
+  - `git diff --check`
+  - local Postgres migration/apply for
+    `migrations/016_rollup_shadow_submission_runtime.sql`
+- blockers:
+  - local `.env.local` still lacks `CHAIN_RPC_URL` and `ROLLUP_CORE_ADDRESS`,
+    so the merged thread could not run one real live broadcast from this
+    workstation config
+- next:
+  - continue from the now-stable accepted submission runtime into a broader
+    state-transition proving lane, rather than reopening the submission state
+    machine again
+
+### 2026-04-06 18:47 CST
+
+- thread: COMMANDER
+- scope:
+  - tightened the missing-config story for the live submitter so local dev no
+    longer has to hand-wire `ROLLUP_CORE_ADDRESS`
+- changed:
+  - updated:
+    - `.env.example`
+    - `configs/staging/funnyoption.env.example`
+    - `configs/test/funnyoption.env.example`
+    - `scripts/local-chain-up.sh`
+    - `docs/operations/local-persistent-chain.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-027.md`
+- validated:
+  - `go run ./cmd/rollup -mode=print-genesis-root`
+  - `bash -n scripts/local-chain-up.sh`
+  - `./scripts/local-chain-up.sh`
+  - `source .env.local && source .run/dev/local-chain.env && go run ./cmd/rollup -mode=submit-next -timeout=15s`
+- blockers:
+  - no real live submission was broadcast in this follow-up because local
+    Postgres currently has no pending shadow submission row
+- next:
+  - continue the proving/state-transition lane rather than adding more config
+    scaffolding
+
+### 2026-04-06 20:19 CST
+
+- thread: COMMANDER
+- scope:
+  - opened `TASK-CHAIN-028` as the next current-session rollup runtime slice
+  - chose the narrowest runtime hardening after `CHAIN-027`: do not trust
+    receipt success alone; require visible `FunnyRollupCore` state before
+    promoting the persisted submission lane
+- changed:
+  - created:
+    - `docs/harness/tasks/TASK-CHAIN-028.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-028.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-028.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - scope stays narrow:
+    - no production truth switch
+    - no proof/public-signal contract changes
+    - no withdrawal rewrite
+- blockers:
+  - none yet
+- next:
+  - implement:
+    - `FunnyRollupCore` read/reconciliation helpers
+    - one runtime contract that compares persisted submission expectations
+      against visible onchain state
+    - `cmd/rollup -mode=submit-until-idle`
+
+### 2026-04-06 20:31 CST
+
+- thread: COMMANDER
+- scope:
+  - reviewed and accepted `TASK-CHAIN-028`
+  - kept the lane narrow: onchain reconciliation + submit-until-idle only,
+    still no production truth switch
+- changed:
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-028.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-028.md`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md`
+    - `docs/operations/local-persistent-chain.md`
+- validated:
+  - `go test ./internal/rollup ./internal/chain/service ./cmd/rollup`
+  - `forge test --match-path contracts/test/FunnyRollupCore.t.sol`
+  - `bash -n ./scripts/local-chain-up.sh`
+  - `./scripts/local-chain-up.sh`
+  - `set -a && source .env.local && source .run/dev/local-chain.env && set +a && go run ./cmd/rollup -mode=submit-until-idle -timeout=15s`
+- blockers:
+  - no prepared pending shadow submission row exists yet on this workstation,
+    so the live command path validated only the configured no-pending /
+    reconciliation-ready behavior, not one full metadata+acceptance broadcast
+- next:
+  - continue from the now-stable submission + reconciliation boundary into a
+    richer state-transition proving lane, rather than reopening this runtime
+    contract again
+
+### 2026-04-06 21:06 CST
+
+- thread: COMMANDER
+- scope:
+  - started `TASK-CHAIN-029`
+  - narrowed the next slice to:
+    - accepted-submission materialization
+    - accepted-withdrawal mirror / slow-withdraw claim queue
+    - one real local pending-submission broadcast proof
+- changed:
+  - added:
+    - `docs/harness/tasks/TASK-CHAIN-029.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-029.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-029.md`
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- blockers:
+  - this workstation still has no locally materialized shadow journal/batch,
+    so the tranche must first produce a real local lifecycle run before the
+    new acceptance lane can be proven end-to-end
+- next:
+  - implement accepted-batch / accepted-withdrawal materialization
+  - wire accepted withdrawals into canonical `WITHDRAWAL_CLAIM`
+  - run local full-flow -> prepare/submit -> accepted-state verification
+
+### 2026-04-06 23:32 CST
+
+- thread: COMMANDER
+- scope:
+  - reviewed and accepted `TASK-CHAIN-029`
+  - kept the lane honest:
+    - no balance/settlement production-truth switch yet
+    - no forced-withdraw / freeze runtime yet
+    - no claim that FunnyOption is already full `Mode B`
+- changed:
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md`
+    - `docs/operations/local-persistent-chain.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-029.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-029.md`
+- validated:
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/rollup ./internal/chain/service ./internal/api/handler ./internal/api`
+  - `cd web && npm run build`
+  - `bash -n scripts/local-chain-up.sh scripts/dev-up.sh`
+  - local runtime now proved:
+    - real `recordBatchMetadata(...)`
+    - real `acceptVerifiedBatch(...)`
+    - accepted withdrawal leaf materialization
+    - canonical `WITHDRAWAL_CLAIM`
+    - `ClaimProcessed` confirmation
+    - `/api/v1/withdrawals` returning `status=CLAIMED`
+- blockers:
+  - remaining true gaps are now:
+    - full settlement/account production-truth switch
+    - forced-withdraw / freeze / escape hatch runtime
+    - full state-transition prover instead of the current narrowed lane
+- next:
+  - move into forced-withdrawal foundations and broader truth-switch design,
+    rather than reopening the accepted slow-withdraw lane again

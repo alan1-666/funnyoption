@@ -432,6 +432,11 @@ type WithdrawalResponse struct {
 	LogIndex         int64  `json:"log_index"`
 	BlockNumber      int64  `json:"block_number"`
 	Status           string `json:"status"`
+	ClaimStatus      string `json:"claim_status"`
+	ClaimTxHash      string `json:"claim_tx_hash"`
+	ClaimSubmittedAt int64  `json:"claim_submitted_at"`
+	ClaimedAt        int64  `json:"claimed_at"`
+	LastError        string `json:"last_error"`
 	DebitedAt        int64  `json:"debited_at"`
 	CreatedAt        int64  `json:"created_at"`
 	UpdatedAt        int64  `json:"updated_at"`

@@ -27,6 +27,7 @@ type DepositStore interface {
 	ListPendingClaims(ctx context.Context, limit int) ([]claimmodel.ClaimTask, error)
 	MarkClaimSubmitted(ctx context.Context, id int64, txHash string) error
 	MarkClaimFailed(ctx context.Context, id int64, errMsg string) error
+	MarkClaimConfirmedByTxHash(ctx context.Context, txHash string) error
 }
 
 type SQLStore struct {
@@ -260,7 +261,7 @@ func (s *SQLStore) ListPendingClaims(ctx context.Context, limit int) ([]claimmod
 		SELECT id, biz_type, ref_id, chain_name, network_name, wallet_address, tx_hash, status,
 		       payload, attempt_count, error_message, created_at, updated_at
 		FROM chain_transactions
-		WHERE biz_type = 'CLAIM'
+		WHERE biz_type IN ('CLAIM', 'WITHDRAWAL_CLAIM')
 		  AND status = 'PENDING'
 		ORDER BY created_at ASC, id ASC
 		LIMIT $1
@@ -307,7 +308,18 @@ func (s *SQLStore) ListPendingClaims(ctx context.Context, limit int) ([]claimmod
 }
 
 func (s *SQLStore) MarkClaimSubmitted(ctx context.Context, id int64, txHash string) error {
-	_, err := s.db.ExecContext(ctx, `
+	txHash = strings.ToLower(strings.TrimSpace(txHash))
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var (
+		bizType string
+		refID   string
+	)
+	err = tx.QueryRowContext(ctx, `
 		UPDATE chain_transactions
 		SET status = 'SUBMITTED',
 			tx_hash = $2,
@@ -315,20 +327,111 @@ func (s *SQLStore) MarkClaimSubmitted(ctx context.Context, id int64, txHash stri
 			attempt_count = attempt_count + 1,
 			updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
 		WHERE id = $1
-	`, id, strings.ToLower(strings.TrimSpace(txHash)))
-	return err
+		RETURNING biz_type, ref_id
+	`, id, txHash).Scan(&bizType, &refID)
+	if err != nil {
+		return err
+	}
+	if bizType == "WITHDRAWAL_CLAIM" {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE rollup_accepted_withdrawals
+			SET claim_status = 'CLAIM_SUBMITTED',
+			    claim_tx_hash = $2,
+			    claim_submitted_at = EXTRACT(EPOCH FROM NOW())::BIGINT,
+			    last_error = '',
+			    last_error_at = 0,
+			    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+			WHERE withdrawal_id = $1
+		`, refID, txHash); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *SQLStore) MarkClaimFailed(ctx context.Context, id int64, errMsg string) error {
-	_, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var (
+		bizType string
+		refID   string
+	)
+	err = tx.QueryRowContext(ctx, `
 		UPDATE chain_transactions
 		SET status = 'FAILED',
 			error_message = $2,
 			attempt_count = attempt_count + 1,
 			updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
 		WHERE id = $1
-	`, id, truncateString(errMsg, 255))
-	return err
+		RETURNING biz_type, ref_id
+	`, id, truncateString(errMsg, 255)).Scan(&bizType, &refID)
+	if err != nil {
+		return err
+	}
+	if bizType == "WITHDRAWAL_CLAIM" {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE rollup_accepted_withdrawals
+			SET claim_status = 'FAILED',
+			    last_error = $2,
+			    last_error_at = EXTRACT(EPOCH FROM NOW())::BIGINT,
+			    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+			WHERE withdrawal_id = $1
+		`, refID, truncateString(errMsg, 255)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *SQLStore) MarkClaimConfirmedByTxHash(ctx context.Context, txHash string) error {
+	txHash = strings.ToLower(strings.TrimSpace(txHash))
+	if txHash == "" {
+		return fmt.Errorf("tx hash is required")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var (
+		bizType string
+		refID   string
+	)
+	err = tx.QueryRowContext(ctx, `
+		UPDATE chain_transactions
+		SET status = 'CONFIRMED',
+			error_message = '',
+			updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE tx_hash = $1
+		  AND status = 'SUBMITTED'
+		RETURNING biz_type, ref_id
+	`, txHash).Scan(&bizType, &refID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if bizType == "WITHDRAWAL_CLAIM" {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE rollup_accepted_withdrawals
+			SET claim_status = 'CLAIMED',
+			    claimed_at = EXTRACT(EPOCH FROM NOW())::BIGINT,
+			    last_error = '',
+			    last_error_at = 0,
+			    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+			WHERE withdrawal_id = $1
+		`, refID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func truncateString(value string, size int) string {

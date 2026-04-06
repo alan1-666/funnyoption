@@ -243,6 +243,41 @@ New tables:
   - `input_hash` is the current repo-local `shadow-batch-v1` `batch_data_hash`
     surface for future prover / L1 metadata consumers
   - replay should consume `input_data`, not current mutable SQL snapshots
+- `rollup_shadow_submissions`
+  - durable onchain-submission artifact for one materialized shadow batch
+  - stores stable `recordBatchMetadata(...)` / `acceptVerifiedBatch(...)`
+    calldata plus the full submission bundle JSON
+  - durable runtime tracking now also stores:
+    - `record_tx_hash`
+    - `accept_tx_hash`
+    - `record_submitted_at`
+    - `accept_submitted_at`
+    - `accepted_at`
+    - `last_error`
+    - `last_error_at`
+  - `status` is currently:
+    - `READY` when auth rows are fully `JOINED`
+    - `BLOCKED_AUTH` otherwise
+    - `RECORD_SUBMITTED` after the metadata leg is broadcast
+    - `ACCEPT_SUBMITTED` after the acceptance leg is broadcast
+    - `ACCEPTED` after the acceptance receipt succeeds
+    - `FAILED` after the runtime marks the lane as terminally failed
+  - this table is still shadow-only and does not mean the repo has switched
+    production truth to accepted onchain roots
+- `rollup_accepted_batches`
+  - durable mirror of accepted `FunnyRollupCore` batches after visible onchain
+    reconciliation succeeds
+  - stores the accepted component roots and both metadata/acceptance tx hashes
+- `rollup_accepted_withdrawals`
+  - durable mirror of withdrawal leaves that were actually present in an
+    accepted batch
+  - current runtime `claim_status` is:
+    - `CLAIMABLE`
+    - `CLAIM_SUBMITTED`
+    - `CLAIMED`
+    - `FAILED`
+  - canonical slow-withdraw `WITHDRAWAL_CLAIM` queue rows are only derived
+    from this table, never directly from `chain_withdrawals`
 
 Current `shadow-batch-v1` contract:
 
@@ -412,6 +447,54 @@ First proof-lane storage / migration consequence:
   the outer proof/public-signal envelope, `proofData-v1`, fixed
   `proofTypeHash`, limb splitting, proof-bytes codec, and verifier verdict
   parity aligned across both runtimes
+- `TASK-CHAIN-026` adds the next durable bridge:
+  - [`BuildShadowBatchSubmissionBundle(history, batch)`](/Users/zhangza/code/funnyoption/internal/rollup/submission.go)
+    consumes the existing shadow batch contract plus verifier artifact bundle
+    and emits:
+    - one stable `recordBatchMetadata(...)` export
+    - one stable `acceptVerifiedBatch(...)` export
+    - ABI-encoded calldata for both calls
+  - [`Store.PrepareNextSubmission(...)`](/Users/zhangza/code/funnyoption/internal/rollup/store.go)
+    now:
+    - reuses the earliest materialized batch that has no submission yet, or
+      materializes the next batch first if needed
+    - persists a deterministic row in `rollup_shadow_submissions`
+    - keeps submission readiness explicit as `READY` vs `BLOCKED_AUTH`
+  - the repo command
+    [`cmd/rollup`](/Users/zhangza/code/funnyoption/cmd/rollup/main.go)
+    can now prepare the next shadow submission and print the full bundle as
+    JSON for later chain/runtime integration
+- `TASK-CHAIN-027` extends the same lane into a restart-safe runtime:
+  - [`RollupSubmissionProcessor.PollOnce(...)`](/Users/zhangza/code/funnyoption/internal/chain/service/rollup_submitter.go)
+    now:
+    - stops on the earliest non-accepted submission so batch order stays
+      truthful
+    - never broadcasts `BLOCKED_AUTH` rows
+    - submits `recordBatchMetadata(...)` first
+    - waits for the metadata receipt before submitting
+      `acceptVerifiedBatch(...)`
+    - only marks `ACCEPTED` after the acceptance receipt succeeds
+  - [`cmd/rollup -mode=submit-next`](/Users/zhangza/code/funnyoption/cmd/rollup/main.go)
+    can now drive one live submission step when chain RPC, operator key, and
+    `rollup_core_address` config are present
+- `TASK-CHAIN-028` hardens that runtime with visible onchain reconciliation:
+  - metadata receipt success is no longer enough on its own
+  - the runtime now re-reads `FunnyRollupCore.latestBatchId`,
+    `latestStateRoot`, and `batchMetadata(batchId)` and only advances once
+    they match the persisted submission expectation
+  - acceptance receipt success is also no longer enough on its own
+  - the runtime now re-reads `latestAcceptedBatchId`,
+    `latestAcceptedStateRoot`, and `acceptedBatches(batchId)` and only marks
+    `ACCEPTED` once they match the persisted submission expectation
+  - [`cmd/rollup -mode=submit-until-idle`](/Users/zhangza/code/funnyoption/cmd/rollup/main.go)
+    can now keep polling until the lane reaches a stable stop condition
+- `TASK-CHAIN-029` extends the same lane into accepted-withdrawal truth:
+  - accepted submissions are now materialized into `rollup_accepted_batches`
+    and `rollup_accepted_withdrawals`
+  - `WITHDRAWAL_CLAIM` queue rows are only created after the related
+    withdrawal leaf is present in an accepted batch
+  - `/api/v1/withdrawals` now exposes effective withdrawal status from the
+    accepted-claim lane, not just the raw `chain_withdrawals.status`
 - deprecated blank-vault `/api/v1/sessions` rows should remain shadow /
   compatibility-only; proof tooling should migrate to V2 trading-key rows
   before those batches are treated as verifier-eligible

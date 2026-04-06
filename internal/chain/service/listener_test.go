@@ -156,6 +156,49 @@ func TestDepositListenerPollOnceResumesFromSavedCursor(t *testing.T) {
 	}
 }
 
+func TestDepositListenerPollOnceResetsSavedCursorWhenAheadOfSafeHead(t *testing.T) {
+	store := &fakeDepositStore{
+		scanCursor:    700,
+		hasScanCursor: true,
+	}
+	account := &fakeChainAccountClient{}
+	publisher := &fakeChainPublisher{}
+	processor := NewProcessor(slog.Default(), store, account, publisher, sharedkafka.NewTopics("funnyoption."))
+	reader := &fakeLogReader{head: 20}
+	cfg := config.ServiceConfig{
+		ChainName:               "bsc",
+		NetworkName:             "testnet",
+		VaultAddress:            "0x00000000000000000000000000000000000000bb",
+		Confirmations:           0,
+		StartBlock:              11,
+		PollInterval:            time.Second,
+		CollateralSymbol:        "USDT",
+		CollateralDecimals:      6,
+		CollateralDisplayDigits: 2,
+	}
+
+	listener, err := NewDepositListenerWithReader(slog.Default(), cfg, store, processor, reader)
+	if err != nil {
+		t.Fatalf("NewDepositListenerWithReader returned error: %v", err)
+	}
+
+	if err := listener.pollOnce(context.Background()); err != nil {
+		t.Fatalf("pollOnce returned error: %v", err)
+	}
+	if len(reader.queries) != 1 {
+		t.Fatalf("expected one filter query, got %d", len(reader.queries))
+	}
+	if reader.queries[0].FromBlock.Uint64() != 11 || reader.queries[0].ToBlock.Uint64() != 20 {
+		t.Fatalf("unexpected block range: %d-%d", reader.queries[0].FromBlock.Uint64(), reader.queries[0].ToBlock.Uint64())
+	}
+	if listener.nextBlock != 21 {
+		t.Fatalf("expected next block 21, got %d", listener.nextBlock)
+	}
+	if store.scanCursor != 21 {
+		t.Fatalf("expected saved scan cursor 21, got %d", store.scanCursor)
+	}
+}
+
 func TestDepositListenerPollOnceSkipsPrunedHistoryAndPersistsCursor(t *testing.T) {
 	store := &fakeDepositStore{}
 	account := &fakeChainAccountClient{}
@@ -296,6 +339,52 @@ func TestDepositListenerPollOnceCreditsFreshDepositAfterPrunedFastForwardRestart
 	}
 }
 
+func TestDepositListenerPollOnceMarksClaimConfirmed(t *testing.T) {
+	store := &fakeDepositStore{}
+	account := &fakeChainAccountClient{}
+	publisher := &fakeChainPublisher{}
+	processor := NewProcessor(slog.Default(), store, account, publisher, sharedkafka.NewTopics("funnyoption."))
+	reader := &fakeLogReader{
+		head: 120,
+		logs: []types.Log{
+			{
+				Address: common.HexToAddress("0x00000000000000000000000000000000000000bb"),
+				Topics: []common.Hash{
+					claimProcessedEventTopic,
+					common.HexToHash("0x01"),
+					common.BytesToHash(common.HexToAddress("0x00000000000000000000000000000000000000aa").Bytes()),
+				},
+				Data:        append(common.LeftPadBytes(big.NewInt(5_000_000).Bytes(), 32), common.LeftPadBytes(common.HexToAddress("0x00000000000000000000000000000000000000cc").Bytes(), 32)...),
+				BlockNumber: 108,
+				TxHash:      common.HexToHash("0xabc123"),
+				Index:       1,
+			},
+		},
+	}
+	cfg := config.ServiceConfig{
+		ChainName:               "bsc",
+		NetworkName:             "testnet",
+		VaultAddress:            "0x00000000000000000000000000000000000000bb",
+		Confirmations:           6,
+		StartBlock:              100,
+		PollInterval:            time.Second,
+		CollateralSymbol:        "USDT",
+		CollateralDecimals:      6,
+		CollateralDisplayDigits: 2,
+	}
+
+	listener, err := NewDepositListenerWithReader(slog.Default(), cfg, store, processor, reader)
+	if err != nil {
+		t.Fatalf("NewDepositListenerWithReader returned error: %v", err)
+	}
+	if err := listener.pollOnce(context.Background()); err != nil {
+		t.Fatalf("pollOnce returned error: %v", err)
+	}
+	if store.confirmedClaimTx != "0000000000000000000000000000000000000000000000000000000000abc123" {
+		t.Fatalf("expected confirmed claim tx abc123, got %s", store.confirmedClaimTx)
+	}
+}
+
 func TestDepositListenerSkipsWalletWithoutSession(t *testing.T) {
 	store := &fakeDepositStore{}
 	account := &fakeChainAccountClient{}
@@ -345,7 +434,7 @@ func TestDepositListenerPollOnceDebitsWithdrawalWallet(t *testing.T) {
 			"0x00000000000000000000000000000000000000aa": 1001,
 		},
 		withdrawal: chainmodel.Withdrawal{
-			WithdrawalID:     "0x00000000000000000000000000000000000000000000000000000000000000ff",
+			WithdrawalID:     "00000000000000000000000000000000000000000000000000000000000000ff",
 			UserID:           1001,
 			WalletAddress:    "0x00000000000000000000000000000000000000aa",
 			RecipientAddress: "0x00000000000000000000000000000000000000cc",

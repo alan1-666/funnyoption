@@ -11,6 +11,7 @@ LOG_DIR="${ROOT_DIR}/.logs/dev"
 BIN_DIR="${RUN_DIR}/bin"
 KAFKA_COMPOSE_FILE="${ROOT_DIR}/deploy/kafka/docker-compose.yml"
 MANAGED_KAFKA_FILE="${RUN_DIR}/managed-kafka"
+LOCAL_CHAIN_FRESH_FILE="${RUN_DIR}/local-chain-fresh-start"
 
 mkdir -p "${RUN_DIR}" "${LOG_DIR}" "${BIN_DIR}"
 
@@ -293,6 +294,35 @@ require_command psql
 require_command nc
 require_command lsof
 
+reset_local_anvil_runtime_state() {
+  [[ "${FUNNYOPTION_LOCAL_CHAIN_MODE}" == "anvil" ]] || return 0
+  [[ -f "${LOCAL_CHAIN_FRESH_FILE}" ]] || return 0
+
+  echo "==> resetting local anvil runtime state"
+  psql "${FUNNYOPTION_POSTGRES_DSN}" <<SQL
+DELETE FROM chain_listener_cursors
+ WHERE chain_name = 'anvil'
+   AND network_name = 'local'
+   AND vault_address = '${FUNNYOPTION_VAULT_ADDRESS}';
+DELETE FROM chain_transactions
+ WHERE chain_name = 'anvil'
+   AND network_name = 'local';
+DELETE FROM chain_withdrawals
+ WHERE chain_name = 'anvil'
+   AND network_name = 'local';
+DELETE FROM chain_deposits
+ WHERE chain_name = 'anvil'
+   AND network_name = 'local';
+TRUNCATE rollup_accepted_withdrawals,
+         rollup_accepted_batches,
+         rollup_shadow_submissions,
+         rollup_shadow_batches,
+         rollup_shadow_journal_entries
+RESTART IDENTITY;
+SQL
+  rm -f "${LOCAL_CHAIN_FRESH_FILE}"
+}
+
 if [[ "${FUNNYOPTION_LOCAL_CHAIN_MODE}" == "anvil" ]]; then
   require_command anvil
   require_command forge
@@ -313,6 +343,8 @@ if ! psql "${FUNNYOPTION_POSTGRES_DSN}" -Atc "SELECT 1" >/dev/null; then
   echo "postgres is not reachable: ${FUNNYOPTION_POSTGRES_DSN}"
   exit 1
 fi
+
+reset_local_anvil_runtime_state
 
 echo "==> checking kafka"
 FIRST_BROKER="${FUNNYOPTION_KAFKA_BROKERS%%,*}"

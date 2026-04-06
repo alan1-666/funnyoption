@@ -1579,10 +1579,10 @@ func (s *SQLStore) listAcceptedBalances(ctx context.Context, req dto.ListBalance
 	`
 
 	args = append(args, req.UserID)
-	filters = append(filters, fmt.Sprintf("account_id = $%d", len(args)))
+	filters = append(filters, fmt.Sprintf("ab.account_id = $%d", len(args)))
 	if asset := normalizeOptional(req.Asset); asset != "" {
 		args = append(args, asset)
-		filters = append(filters, fmt.Sprintf("asset = $%d", len(args)))
+		filters = append(filters, fmt.Sprintf("ab.asset = $%d", len(args)))
 	}
 	query += " WHERE " + strings.Join(filters, " AND ")
 	args = append(args, normalizeLimit(req.Limit))

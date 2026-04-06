@@ -255,6 +255,70 @@ type PayoutResponse struct {
 	UpdatedAt       int64  `json:"updated_at"`
 }
 
+type ListRollupEscapeCollateralClaimsRequest struct {
+	UserID        int64  `form:"user_id"`
+	WalletAddress string `form:"wallet_address"`
+	Status        string `form:"status"`
+	Limit         int    `form:"limit"`
+}
+
+type RollupEscapeCollateralClaimResponse struct {
+	BatchID          int64    `json:"batch_id"`
+	AccountID        int64    `json:"account_id"`
+	StateRoot        string   `json:"state_root"`
+	CollateralAsset  string   `json:"collateral_asset"`
+	MerkleRoot       string   `json:"merkle_root"`
+	LeafCount        int64    `json:"leaf_count"`
+	TotalAmount      int64    `json:"total_amount"`
+	WalletAddress    string   `json:"wallet_address"`
+	ClaimAmount      int64    `json:"claim_amount"`
+	LeafIndex        int64    `json:"leaf_index"`
+	LeafHash         string   `json:"leaf_hash"`
+	ProofHashes      []string `json:"proof_hashes"`
+	ClaimID          string   `json:"claim_id"`
+	ClaimStatus      string   `json:"claim_status"`
+	ClaimTxHash      string   `json:"claim_tx_hash"`
+	ClaimSubmittedAt int64    `json:"claim_submitted_at"`
+	ClaimedAt        int64    `json:"claimed_at"`
+	AnchorStatus     string   `json:"anchor_status"`
+	AnchorTxHash     string   `json:"anchor_tx_hash"`
+	AnchorSubmittedAt int64   `json:"anchor_submitted_at"`
+	AnchoredAt       int64    `json:"anchored_at"`
+	LastError        string   `json:"last_error"`
+	LastErrorAt      int64    `json:"last_error_at"`
+	CreatedAt        int64    `json:"created_at"`
+	UpdatedAt        int64    `json:"updated_at"`
+}
+
+type ListRollupWithdrawalClaimsRequest struct {
+	UserID        int64  `form:"user_id"`
+	WalletAddress string `form:"wallet_address"`
+	BatchID       int64  `form:"batch_id"`
+	Status        string `form:"status"`
+	Limit         int    `form:"limit"`
+}
+
+type RollupWithdrawalClaimResponse struct {
+	BatchID          int64    `json:"batch_id"`
+	WithdrawalID     string   `json:"withdrawal_id"`
+	AccountID        int64    `json:"account_id"`
+	WalletAddress    string   `json:"wallet_address"`
+	RecipientAddress string   `json:"recipient_address"`
+	Amount           int64    `json:"amount"`
+	LeafIndex        int64    `json:"leaf_index"`
+	LeafHash         string   `json:"leaf_hash"`
+	ProofHashes      []string `json:"proof_hashes"`
+	ClaimID          string   `json:"claim_id"`
+	ClaimStatus      string   `json:"claim_status"`
+	ClaimTxHash      string   `json:"claim_tx_hash"`
+	ClaimSubmittedAt int64    `json:"claim_submitted_at"`
+	ClaimedAt        int64    `json:"claimed_at"`
+	LastError        string   `json:"last_error"`
+	LastErrorAt      int64    `json:"last_error_at"`
+	CreatedAt        int64    `json:"created_at"`
+	UpdatedAt        int64    `json:"updated_at"`
+}
+
 type ListFreezesRequest struct {
 	UserID int64  `form:"user_id"`
 	Status string `form:"status"`

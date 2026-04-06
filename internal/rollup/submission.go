@@ -23,6 +23,14 @@ const funnyRollupCoreSubmissionABIJSON = `[
   },
   {
     "type":"function",
+    "name":"publishBatchData",
+    "inputs":[
+      {"name":"batchId","type":"uint64"},
+      {"name":"batchData","type":"bytes"}
+    ]
+  },
+  {
+    "type":"function",
     "name":"acceptVerifiedBatch",
     "inputs":[
       {
@@ -39,7 +47,8 @@ const funnyRollupCoreSubmissionABIJSON = `[
           {"name":"ordersRoot","type":"bytes32"},
           {"name":"positionsFundingRoot","type":"bytes32"},
           {"name":"withdrawalsRoot","type":"bytes32"},
-          {"name":"nextStateRoot","type":"bytes32"}
+          {"name":"nextStateRoot","type":"bytes32"},
+          {"name":"conservationHash","type":"bytes32"}
         ]
       },
       {
@@ -72,6 +81,7 @@ type rollupCorePublicInputsCall struct {
 	PositionsFundingRoot common.Hash `abi:"positionsFundingRoot"`
 	WithdrawalsRoot      common.Hash `abi:"withdrawalsRoot"`
 	NextStateRoot        common.Hash `abi:"nextStateRoot"`
+	ConservationHash     common.Hash `abi:"conservationHash"`
 }
 
 type rollupCoreMetadataSubsetCall struct {
@@ -94,6 +104,10 @@ func BuildShadowBatchSubmissionBundle(history []StoredBatch, batch StoredBatch) 
 	if err != nil {
 		return ShadowBatchSubmissionBundle{}, err
 	}
+	publishCall, err := buildPublishBatchDataCall(batch)
+	if err != nil {
+		return ShadowBatchSubmissionBundle{}, err
+	}
 	acceptCall, err := buildAcceptVerifiedBatchCall(
 		artifactBundle.AcceptanceContract.SolidityExport.Calldata,
 		artifactBundle.VerifierInterface.Calldata.Proof,
@@ -111,11 +125,12 @@ func BuildShadowBatchSubmissionBundle(history []StoredBatch, batch StoredBatch) 
 		ShadowBatchContract:     shadowBatchContract,
 		VerifierArtifactBundle:  artifactBundle,
 		RecordBatchMetadataCall: recordCall,
+		PublishBatchDataCall:    publishCall,
 		AcceptVerifiedBatchCall: acceptCall,
 		Blockers:                blockers,
 		Limitations: []string{
 			"this submission bundle is a deterministic shadow-to-onchain export lane; it does not switch production truth away from SQL/Kafka settlement or direct-vault claim.",
-			"recordBatchMetadata(...) and acceptVerifiedBatch(...) payloads are chain-ready calldata exports, but this tranche does not broadcast live transactions.",
+			"recordBatchMetadata(...), publishBatchData(...), and acceptVerifiedBatch(...) payloads are chain-ready calldata exports, but this tranche does not broadcast live transactions.",
 			"READY only means auth statuses are fully JOINED and the bundle is eligible for the current verifier-gated acceptance path; it is not yet a production Mode B finality claim.",
 		},
 	}, nil
@@ -150,7 +165,17 @@ func buildSubmissionBatchSummary(batch StoredBatch) SubmissionBatchSummary {
 		PositionsFundingRoot: defaultComponentRoot(batch.PositionsFundingRoot, hashStrings("shadow", "positions_funding", hashStrings("shadow", "positions", "leafs", "empty"), ZeroMarketFundingRoot(), ZeroInsuranceRoot())),
 		WithdrawalsRoot:      defaultComponentRoot(batch.WithdrawalsRoot, ZeroWithdrawalsRoot()),
 		NextStateRoot:        defaultStateRoot(batch.StateRoot),
+		ConservationHash:     buildBatchConservationHash(batch),
 	}
+}
+
+func buildBatchConservationHash(batch StoredBatch) string {
+	if input, err := DecodeBatchInput(batch.InputData); err == nil {
+		if record, err := BuildConservationRecord(batch.BatchID, input.Entries); err == nil {
+			return record.ConservationHash
+		}
+	}
+	return ZeroConservationHash()
 }
 
 func buildSubmissionStatus(authStatuses []VerifierAcceptanceAuthStatus) (string, []string) {
@@ -193,6 +218,26 @@ func buildRecordBatchMetadataCall(metadata L1BatchMetadata) (RollupContractCall,
 		ContractName: FunnyRollupCoreContractName,
 		ContractPath: FunnyRollupCoreContractPath,
 		FunctionName: "recordBatchMetadata",
+		Selector:     "0x" + hex.EncodeToString(method.ID),
+		Calldata:     "0x" + hex.EncodeToString(append(method.ID, data...)),
+	}, nil
+}
+
+func buildPublishBatchDataCall(batch StoredBatch) (RollupContractCall, error) {
+	method := funnyRollupCoreSubmissionABI.Methods["publishBatchData"]
+	batchID, err := solidityUint64FromInt64(batch.BatchID, "batch.batch_id")
+	if err != nil {
+		return RollupContractCall{}, err
+	}
+	batchData := []byte(batch.InputData)
+	data, err := method.Inputs.Pack(batchID, batchData)
+	if err != nil {
+		return RollupContractCall{}, fmt.Errorf("pack publishBatchData calldata: %w", err)
+	}
+	return RollupContractCall{
+		ContractName: FunnyRollupCoreContractName,
+		ContractPath: FunnyRollupCoreContractPath,
+		FunctionName: "publishBatchData",
 		Selector:     "0x" + hex.EncodeToString(method.ID),
 		Calldata:     "0x" + hex.EncodeToString(append(method.ID, data...)),
 	}, nil
@@ -255,6 +300,10 @@ func buildSubmissionPublicInputsCall(publicInputs SolidityVerifierPublicInputs) 
 	if err != nil {
 		return rollupCorePublicInputsCall{}, err
 	}
+	conservationHash, err := solidityHashFromBytes32(publicInputs.ConservationHash, "public_inputs.conservation_hash")
+	if err != nil {
+		return rollupCorePublicInputsCall{}, err
+	}
 	return rollupCorePublicInputsCall{
 		BatchID:              publicInputs.BatchID,
 		FirstSequenceNo:      publicInputs.FirstSequence,
@@ -267,6 +316,7 @@ func buildSubmissionPublicInputsCall(publicInputs SolidityVerifierPublicInputs) 
 		PositionsFundingRoot: positionsFundingRoot,
 		WithdrawalsRoot:      withdrawalsRoot,
 		NextStateRoot:        nextStateRoot,
+		ConservationHash:     conservationHash,
 	}, nil
 }
 

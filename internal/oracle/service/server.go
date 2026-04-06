@@ -2,11 +2,15 @@ package service
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"log/slog"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 
 	"funnyoption/internal/shared/config"
 	shareddb "funnyoption/internal/shared/db"
@@ -27,6 +31,16 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	provider := NewBinanceProvider(binanceBaseURL(), httpClient)
 	worker := NewWorker(logger, store, provider, publisher, cfg.KafkaTopics, oraclePollInterval(cfg))
+
+	if signerKey := loadOracleSignerKey(logger); signerKey != nil {
+		worker.SetSignerKey(signerKey)
+		signerAddr := crypto.PubkeyToAddress(signerKey.PublicKey)
+		logger.Info("oracle attestation signer configured", "address", signerAddr.Hex())
+	}
+	if trustedSigners := loadTrustedSigners(logger); len(trustedSigners) > 0 {
+		worker.SetTrustedSigners(trustedSigners)
+		logger.Info("oracle trusted signers configured", "count", len(trustedSigners))
+	}
 
 	logger.Info(
 		"oracle worker bootstrapped",
@@ -63,4 +77,39 @@ func binanceBaseURL() string {
 		return "https://api.binance.com"
 	}
 	return value
+}
+
+func loadOracleSignerKey(logger *slog.Logger) *ecdsa.PrivateKey {
+	raw := strings.TrimSpace(os.Getenv("FUNNYOPTION_ORACLE_SIGNER_KEY"))
+	if raw == "" {
+		return nil
+	}
+	raw = strings.TrimPrefix(raw, "0x")
+	key, err := crypto.HexToECDSA(raw)
+	if err != nil {
+		logger.Warn("invalid FUNNYOPTION_ORACLE_SIGNER_KEY, attestation signing disabled", "err", err)
+		return nil
+	}
+	return key
+}
+
+func loadTrustedSigners(logger *slog.Logger) []common.Address {
+	raw := strings.TrimSpace(os.Getenv("FUNNYOPTION_ORACLE_TRUSTED_SIGNERS"))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	var signers []common.Address
+	for _, part := range parts {
+		addr := strings.TrimSpace(part)
+		if addr == "" {
+			continue
+		}
+		if !common.IsHexAddress(addr) {
+			logger.Warn("skipping invalid trusted signer address", "address", addr)
+			continue
+		}
+		signers = append(signers, common.HexToAddress(addr))
+	}
+	return signers
 }

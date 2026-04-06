@@ -169,6 +169,10 @@ func buildVerifierGateDigestContract(publicInputs SolidityVerifierPublicInputs, 
 	if err != nil {
 		return VerifierGateDigestContract{}, err
 	}
+	conservationHash, err := solidityHashFromBytes32(publicInputs.ConservationHash, "public_inputs.conservation_hash")
+	if err != nil {
+		return VerifierGateDigestContract{}, err
+	}
 	normalizedAuthProofHash, err := solidityHashFromBytes32(authProofHash, "auth_proof_hash")
 	if err != nil {
 		return VerifierGateDigestContract{}, err
@@ -180,6 +184,7 @@ func buildVerifierGateDigestContract(publicInputs SolidityVerifierPublicInputs, 
 		{Type: solidityUint64ABIType},
 		{Type: solidityUint64ABIType},
 		{Type: solidityUint64ABIType},
+		{Type: solidityBytes32ABIType},
 		{Type: solidityBytes32ABIType},
 		{Type: solidityBytes32ABIType},
 		{Type: solidityBytes32ABIType},
@@ -201,6 +206,7 @@ func buildVerifierGateDigestContract(publicInputs SolidityVerifierPublicInputs, 
 		positionsFundingRoot,
 		withdrawalsRoot,
 		nextStateRoot,
+		conservationHash,
 		normalizedAuthProofHash,
 	)
 	if err != nil {
@@ -210,7 +216,7 @@ func buildVerifierGateDigestContract(publicInputs SolidityVerifierPublicInputs, 
 	return VerifierGateDigestContract{
 		EncodingVersion:     BatchEncodingVersion,
 		EncodingVersionHash: batchEncodingHash,
-		HashFunction:        "keccak256(abi.encode(batchEncodingHash, batchId, firstSequenceNo, lastSequenceNo, entryCount, batchDataHash, prevStateRoot, balancesRoot, ordersRoot, positionsFundingRoot, withdrawalsRoot, nextStateRoot, authProofHash))",
+		HashFunction:        "keccak256(abi.encode(batchEncodingHash, batchId, firstSequenceNo, lastSequenceNo, entryCount, batchDataHash, prevStateRoot, balancesRoot, ordersRoot, positionsFundingRoot, withdrawalsRoot, nextStateRoot, conservationHash, authProofHash))",
 		FieldOrder: []VerifierGateDigestField{
 			{Name: "batchEncodingHash", Type: "bytes32"},
 			{Name: "batchId", Type: "uint64"},
@@ -224,6 +230,7 @@ func buildVerifierGateDigestContract(publicInputs SolidityVerifierPublicInputs, 
 			{Name: "positionsFundingRoot", Type: "bytes32"},
 			{Name: "withdrawalsRoot", Type: "bytes32"},
 			{Name: "nextStateRoot", Type: "bytes32"},
+			{Name: "conservationHash", Type: "bytes32"},
 			{Name: "authProofHash", Type: "bytes32"},
 		},
 		PublicInputs:     publicInputs,
@@ -249,11 +256,13 @@ func buildVerifierInterfaceSolidityExport(publicInputs SolidityVerifierPublicInp
 	if err != nil {
 		return VerifierInterfaceSolidityExport{}, err
 	}
-	groth16ProofBytes, groth16PublicInputs, groth16ProofTuple, err := buildBatchSpecificGroth16Proof(
-		verifierGateDigest.EncodingVersionHash,
-		verifierGateDigest.AuthProofHash,
-		verifierGateDigest.VerifierGateHash,
-	)
+	groth16Context := SolidityVerifierGateContext{
+		BatchEncodingHash: verifierGateDigest.EncodingVersionHash,
+		PublicInputs:      publicInputs,
+		AuthProofHash:     verifierGateDigest.AuthProofHash,
+		VerifierGateHash:  verifierGateDigest.VerifierGateHash,
+	}
+	groth16Artifact, err := BuildFixedGroth16Artifact(groth16Context)
 	if err != nil {
 		return VerifierInterfaceSolidityExport{}, err
 	}
@@ -270,7 +279,7 @@ func buildVerifierInterfaceSolidityExport(publicInputs SolidityVerifierPublicInp
 		normalizedBatchEncodingHash,
 		normalizedAuthProofHash,
 		normalizedVerifierGateHash,
-		groth16ProofBytes,
+		common.FromHex(groth16Artifact.ProofBytes),
 	)
 	if err != nil {
 		return VerifierInterfaceSolidityExport{}, err
@@ -293,7 +302,7 @@ func buildVerifierInterfaceSolidityExport(publicInputs SolidityVerifierPublicInp
 	if err != nil {
 		return VerifierInterfaceSolidityExport{}, err
 	}
-	groth16Fixture, err := buildGroth16Fixture(groth16PublicInputs, groth16ProofTuple)
+	groth16Fixture, err := buildGroth16Fixture(groth16Artifact.PublicInputs, groth16Artifact.ProofTuple)
 	if err != nil {
 		return VerifierInterfaceSolidityExport{}, err
 	}
@@ -357,7 +366,7 @@ func buildVerifierInterfaceSolidityExport(publicInputs SolidityVerifierPublicInp
 				BatchEncodingHash:   verifierGateDigest.EncodingVersionHash,
 				AuthProofHash:       verifierGateDigest.AuthProofHash,
 				VerifierGateHash:    verifierGateDigest.VerifierGateHash,
-				ProofBytes:          "0x" + hex.EncodeToString(groth16ProofBytes),
+				ProofBytes:          groth16Artifact.ProofBytes,
 			},
 			ProofData: "0x" + hex.EncodeToString(proofDataBytes),
 			Proof:     "0x" + hex.EncodeToString(proofBytes),
@@ -366,11 +375,11 @@ func buildVerifierInterfaceSolidityExport(publicInputs SolidityVerifierPublicInp
 }
 
 func buildGroth16Fixture(publicInputs []string, proofTuple VerifierGroth16ProofTuple) (VerifierGroth16Fixture, error) {
-	if len(publicInputs) != 6 {
-		return VerifierGroth16Fixture{}, fmt.Errorf("expected 6 Groth16 public inputs, got %d", len(publicInputs))
+	if len(publicInputs) != 8 {
+		return VerifierGroth16Fixture{}, fmt.Errorf("expected 8 Groth16 public inputs, got %d", len(publicInputs))
 	}
 	return VerifierGroth16Fixture{
-		ProofBytesEncoding: "abi.encode(uint256[2] a, uint256[2][2] b, uint256[2] c)",
+		ProofBytesEncoding: "abi.encode(bytes32 transitionWitnessHash, uint256[2] a, uint256[2][2] b, uint256[2] c)",
 		PublicInputFieldOrder: []VerifierProofSchemaField{
 			{Name: "batchEncodingHashHi", Type: "uint256"},
 			{Name: "batchEncodingHashLo", Type: "uint256"},
@@ -378,6 +387,8 @@ func buildGroth16Fixture(publicInputs []string, proofTuple VerifierGroth16ProofT
 			{Name: "authProofHashLo", Type: "uint256"},
 			{Name: "verifierGateHashHi", Type: "uint256"},
 			{Name: "verifierGateHashLo", Type: "uint256"},
+			{Name: "transitionWitnessHashHi", Type: "uint256"},
+			{Name: "transitionWitnessHashLo", Type: "uint256"},
 		},
 		PublicInputs:    publicInputs,
 		ProofTuple:      proofTuple,
@@ -385,7 +396,7 @@ func buildGroth16Fixture(publicInputs []string, proofTuple VerifierGroth16ProofT
 	}, nil
 }
 
-func buildGroth16PublicInputsHex(batchEncodingHash, authProofHash, verifierGateHash string) ([]string, error) {
+func buildGroth16PublicInputsHex(batchEncodingHash, authProofHash, verifierGateHash, transitionWitnessHash string) ([]string, error) {
 	batchEncoding, err := solidityHashFromBytes32(batchEncodingHash, "groth16.batch_encoding_hash")
 	if err != nil {
 		return nil, err
@@ -398,6 +409,10 @@ func buildGroth16PublicInputsHex(batchEncodingHash, authProofHash, verifierGateH
 	if err != nil {
 		return nil, err
 	}
+	transitionWitness, err := solidityHashFromBytes32(transitionWitnessHash, "groth16.transition_witness_hash")
+	if err != nil {
+		return nil, err
+	}
 	return []string{
 		uint128Hex(batchEncoding[:16]),
 		uint128Hex(batchEncoding[16:]),
@@ -405,12 +420,14 @@ func buildGroth16PublicInputsHex(batchEncodingHash, authProofHash, verifierGateH
 		uint128Hex(authProof[16:]),
 		uint128Hex(verifierGate[:16]),
 		uint128Hex(verifierGate[16:]),
+		uint128Hex(transitionWitness[:16]),
+		uint128Hex(transitionWitness[16:]),
 	}, nil
 }
 
 func buildGroth16ProofTuple(proofBytes []byte) (VerifierGroth16ProofTuple, error) {
-	if len(proofBytes) != 32*8 {
-		return VerifierGroth16ProofTuple{}, fmt.Errorf("expected 256-byte Groth16 proof tuple, got %d bytes", len(proofBytes))
+	if len(proofBytes) < 32*8 {
+		return VerifierGroth16ProofTuple{}, fmt.Errorf("expected at least 256-byte Groth16 proof tuple, got %d bytes", len(proofBytes))
 	}
 	words := make([]string, 8)
 	for i := 0; i < 8; i++ {
@@ -554,6 +571,14 @@ func buildSolidityVerifierPublicInputs(publicInputs ShadowBatchPublicInputs) (So
 	if err != nil {
 		return SolidityVerifierPublicInputs{}, err
 	}
+	conservationHash := publicInputs.ConservationHash
+	if strings.TrimSpace(conservationHash) == "" {
+		conservationHash = ZeroConservationHash()
+	}
+	conservationHashNorm, err := solidityBytes32(conservationHash, "public_inputs.conservation_hash")
+	if err != nil {
+		return SolidityVerifierPublicInputs{}, err
+	}
 	return SolidityVerifierPublicInputs{
 		BatchID:              batchID,
 		FirstSequence:        firstSequence,
@@ -566,6 +591,7 @@ func buildSolidityVerifierPublicInputs(publicInputs ShadowBatchPublicInputs) (So
 		PositionsFundingRoot: positionsFundingRoot,
 		WithdrawalsRoot:      withdrawalsRoot,
 		NextStateRoot:        nextStateRoot,
+		ConservationHash:     conservationHashNorm,
 	}, nil
 }
 

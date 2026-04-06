@@ -29,6 +29,7 @@ type DepositStore interface {
 	MarkClaimSubmitted(ctx context.Context, id int64, txHash string) error
 	MarkClaimFailed(ctx context.Context, id int64, errMsg string) error
 	MarkClaimConfirmedByTxHash(ctx context.Context, txHash string) error
+	MarkAcceptedEscapeClaimConfirmed(ctx context.Context, claimID, txHash string) error
 }
 
 type SQLStore struct {
@@ -360,6 +361,15 @@ func (s *SQLStore) markClaimSubmittedOnce(ctx context.Context, id int64, txHash 
 		`, refID, txHash); err != nil {
 			return err
 		}
+	} else if bizType == "CLAIM" {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE rollup_accepted_payouts
+			SET status = 'CLAIM_SUBMITTED',
+			    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+			WHERE event_id = $1
+		`, refID); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -402,6 +412,15 @@ func (s *SQLStore) markClaimFailedOnce(ctx context.Context, id int64, errMsg str
 			    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
 			WHERE withdrawal_id = $1
 		`, refID, truncateString(errMsg, 255)); err != nil {
+			return err
+		}
+	} else if bizType == "CLAIM" {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE rollup_accepted_payouts
+			SET status = 'CLAIM_FAILED',
+			    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+			WHERE event_id = $1
+		`, refID); err != nil {
 			return err
 		}
 	}
@@ -457,8 +476,42 @@ func (s *SQLStore) markClaimConfirmedByTxHashOnce(ctx context.Context, txHash st
 		`, refID); err != nil {
 			return err
 		}
+	} else if bizType == "CLAIM" {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE rollup_accepted_payouts
+			SET status = 'CLAIMED',
+			    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+			WHERE event_id = $1
+		`, refID); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
+}
+
+func (s *SQLStore) MarkAcceptedEscapeClaimConfirmed(ctx context.Context, claimID, txHash string) error {
+	return withPostgresDeadlockRetry(ctx, 3, func() error {
+		return s.markAcceptedEscapeClaimConfirmedOnce(ctx, claimID, txHash)
+	})
+}
+
+func (s *SQLStore) markAcceptedEscapeClaimConfirmedOnce(ctx context.Context, claimID, txHash string) error {
+	claimID = strings.TrimSpace(strings.ToLower(claimID))
+	txHash = strings.ToLower(strings.TrimSpace(txHash))
+	if claimID == "" {
+		return fmt.Errorf("claim id is required")
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE rollup_accepted_escape_leaves
+		SET claim_status = 'CLAIMED',
+		    claim_tx_hash = $2,
+		    claimed_at = EXTRACT(EPOCH FROM NOW())::BIGINT,
+		    last_error = '',
+		    last_error_at = 0,
+		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE claim_id = $1
+	`, claimID, txHash)
+	return err
 }
 
 func (s *SQLStore) UpsertRollupForcedWithdrawalRequest(

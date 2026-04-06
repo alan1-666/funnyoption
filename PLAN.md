@@ -50,6 +50,7 @@ Detailed execution lives in `docs/harness/plans/active/`.
 - Forced-withdrawal satisfaction runtime task: [`docs/harness/tasks/TASK-CHAIN-033.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-033.md)
 - Frozen-mode trading gate task: [`docs/harness/tasks/TASK-CHAIN-034.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-034.md)
 - Broader frozen-mode mutable-truth guard task: [`docs/harness/tasks/TASK-CHAIN-035.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-035.md)
+- Escape-hatch collateral claims, accepted/frozen truth closeout, and state-transition prover task: [`docs/harness/tasks/TASK-CHAIN-036.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-036.md)
 
 ## Strategic lanes
 

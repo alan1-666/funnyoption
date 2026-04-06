@@ -7,9 +7,12 @@ import (
 	"math/big"
 	"strings"
 
+	"funnyoption/internal/rollup"
+
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 const funnyRollupCoreReadABIJSON = `[
@@ -116,6 +119,39 @@ const funnyRollupCoreReadABIJSON = `[
       {"name":"frozenAt","type":"uint64"},
       {"name":"status","type":"uint8"}
     ]
+  },
+  {
+    "type":"function",
+    "name":"latestEscapeCollateralBatchId",
+    "stateMutability":"view",
+    "inputs":[],
+    "outputs":[{"name":"","type":"uint64"}]
+  },
+  {
+    "type":"function",
+    "name":"latestEscapeCollateralRoot",
+    "stateMutability":"view",
+    "inputs":[],
+    "outputs":[{"name":"","type":"bytes32"}]
+  },
+  {
+    "type":"function",
+    "name":"batchDataPublished",
+    "stateMutability":"view",
+    "inputs":[{"name":"","type":"uint64"}],
+    "outputs":[{"name":"","type":"bool"}]
+  },
+  {
+    "type":"function",
+    "name":"escapeCollateralRoots",
+    "stateMutability":"view",
+    "inputs":[{"name":"","type":"uint64"}],
+    "outputs":[
+      {"name":"merkleRoot","type":"bytes32"},
+      {"name":"leafCount","type":"uint64"},
+      {"name":"totalAmount","type":"uint256"},
+      {"name":"anchoredAt","type":"uint64"}
+    ]
   }
 ]`
 
@@ -163,6 +199,15 @@ type rollupCoreForcedWithdrawalRequestState struct {
 	SatisfiedAt      uint64
 	FrozenAt         uint64
 	Status           uint8
+}
+
+type rollupCoreEscapeCollateralRootState struct {
+	LatestEscapeCollateralBatchID uint64
+	LatestEscapeCollateralRoot    common.Hash
+	MerkleRoot                    common.Hash
+	LeafCount                     uint64
+	TotalAmount                   int64
+	AnchoredAt                    uint64
 }
 
 func mustRollupCoreReadABI(raw string) abi.ABI {
@@ -220,6 +265,33 @@ func (p *RollupSubmissionProcessor) loadRecordedBatchState(
 		PrevStateRoot:   prevStateRoot,
 		NextStateRoot:   nextStateRoot,
 	}, nil
+}
+
+func (p *RollupSubmissionProcessor) loadBatchDataPublishedState(
+	ctx context.Context,
+	blockNumber *big.Int,
+	batchID uint64,
+) (bool, error) {
+	values, err := p.callRollupCoreMethod(ctx, blockNumber, "batchDataPublished", batchID)
+	if err != nil {
+		return false, err
+	}
+	return decodeABIBoolValue(values[0], "batchDataPublished")
+}
+
+func (p *RollupSubmissionProcessor) reconcilePublishDataState(
+	ctx context.Context,
+	submission rollup.StoredSubmission,
+	receipt *types.Receipt,
+) (bool, error) {
+	if submission.BatchID <= 0 {
+		return false, fmt.Errorf("submission batch_id must be positive")
+	}
+	published, err := p.loadBatchDataPublishedState(ctx, resolveReceiptBlockNumber(receipt), uint64(submission.BatchID))
+	if err != nil {
+		return false, err
+	}
+	return published, nil
 }
 
 func (p *RollupSubmissionProcessor) loadAcceptedBatchState(
@@ -352,6 +424,60 @@ func (p *RollupSubmissionProcessor) loadFreezeState(
 		Frozen:          frozen,
 		FrozenAt:        frozenAt,
 		FreezeRequestID: freezeRequestID,
+	}, nil
+}
+
+func (p *RollupSubmissionProcessor) loadEscapeCollateralRootState(
+	ctx context.Context,
+	blockNumber *big.Int,
+	batchID uint64,
+) (rollupCoreEscapeCollateralRootState, error) {
+	latestBatchValues, err := p.callRollupCoreMethod(ctx, blockNumber, "latestEscapeCollateralBatchId")
+	if err != nil {
+		return rollupCoreEscapeCollateralRootState{}, err
+	}
+	latestBatchID, err := decodeABIUint64Value(latestBatchValues[0], "latestEscapeCollateralBatchId")
+	if err != nil {
+		return rollupCoreEscapeCollateralRootState{}, err
+	}
+
+	latestRootValues, err := p.callRollupCoreMethod(ctx, blockNumber, "latestEscapeCollateralRoot")
+	if err != nil {
+		return rollupCoreEscapeCollateralRootState{}, err
+	}
+	latestRoot, err := decodeABIBytes32Value(latestRootValues[0], "latestEscapeCollateralRoot")
+	if err != nil {
+		return rollupCoreEscapeCollateralRootState{}, err
+	}
+
+	rootValues, err := p.callRollupCoreMethod(ctx, blockNumber, "escapeCollateralRoots", batchID)
+	if err != nil {
+		return rollupCoreEscapeCollateralRootState{}, err
+	}
+	merkleRoot, err := decodeABIBytes32Value(rootValues[0], "escapeCollateralRoots.merkleRoot")
+	if err != nil {
+		return rollupCoreEscapeCollateralRootState{}, err
+	}
+	leafCount, err := decodeABIUint64Value(rootValues[1], "escapeCollateralRoots.leafCount")
+	if err != nil {
+		return rollupCoreEscapeCollateralRootState{}, err
+	}
+	totalAmount, err := decodeABIInt64Value(rootValues[2], "escapeCollateralRoots.totalAmount")
+	if err != nil {
+		return rollupCoreEscapeCollateralRootState{}, err
+	}
+	anchoredAt, err := decodeABIUint64Value(rootValues[3], "escapeCollateralRoots.anchoredAt")
+	if err != nil {
+		return rollupCoreEscapeCollateralRootState{}, err
+	}
+
+	return rollupCoreEscapeCollateralRootState{
+		LatestEscapeCollateralBatchID: latestBatchID,
+		LatestEscapeCollateralRoot:    latestRoot,
+		MerkleRoot:                    merkleRoot,
+		LeafCount:                     leafCount,
+		TotalAmount:                   totalAmount,
+		AnchoredAt:                    anchoredAt,
 	}, nil
 }
 
@@ -530,6 +656,10 @@ func decodeABIInt64FromUintValue(value any, field string) (int64, error) {
 	default:
 		return 0, fmt.Errorf("%s returned unsupported uint256 type %T", field, value)
 	}
+}
+
+func decodeABIInt64Value(value any, field string) (int64, error) {
+	return decodeABIInt64FromUintValue(value, field)
 }
 
 func decodeABIBoolValue(value any, field string) (bool, error) {

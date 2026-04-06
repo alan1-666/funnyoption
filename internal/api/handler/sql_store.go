@@ -44,6 +44,8 @@ type QueryStore interface {
 	ListDeposits(ctx context.Context, req dto.ListDepositsRequest) ([]dto.DepositResponse, error)
 	ListWithdrawals(ctx context.Context, req dto.ListWithdrawalsRequest) ([]dto.WithdrawalResponse, error)
 	ListRollupForcedWithdrawals(ctx context.Context, req dto.ListRollupForcedWithdrawalsRequest) ([]dto.RollupForcedWithdrawalResponse, error)
+	ListRollupEscapeCollateralClaims(ctx context.Context, req dto.ListRollupEscapeCollateralClaimsRequest) ([]dto.RollupEscapeCollateralClaimResponse, error)
+	ListRollupWithdrawalClaims(ctx context.Context, req dto.ListRollupWithdrawalClaimsRequest) ([]dto.RollupWithdrawalClaimResponse, error)
 	GetRollupFreezeState(ctx context.Context) (dto.RollupFreezeStateResponse, error)
 	ListChainTransactions(ctx context.Context, req dto.ListChainTransactionsRequest) ([]dto.ChainTransactionResponse, error)
 	ListOrders(ctx context.Context, req dto.ListOrdersRequest) ([]dto.OrderResponse, error)
@@ -465,12 +467,25 @@ func (s *SQLStore) CreateClaimRequest(ctx context.Context, req dto.ClaimPayoutRe
 		payoutAsset  string
 		payoutAmount int64
 	)
-	err = s.db.QueryRowContext(ctx, `
+	acceptedVisible, err := s.acceptedReadTruthVisible(ctx)
+	if err != nil {
+		return dto.ChainTransactionResponse{}, err
+	}
+	query := `
 		SELECT market_id, payout_asset, payout_amount
 		FROM settlement_payouts
 		WHERE event_id = $1
 		  AND user_id = $2
-	`, strings.TrimSpace(req.EventID), req.UserID).Scan(&marketID, &payoutAsset, &payoutAmount)
+	`
+	if acceptedVisible {
+		query = `
+			SELECT market_id, payout_asset, payout_amount
+			FROM rollup_accepted_payouts
+			WHERE event_id = $1
+			  AND user_id = $2
+		`
+	}
+	err = s.db.QueryRowContext(ctx, query, strings.TrimSpace(req.EventID), req.UserID).Scan(&marketID, &payoutAsset, &payoutAmount)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return dto.ChainTransactionResponse{}, ErrNotFound
@@ -487,7 +502,13 @@ func (s *SQLStore) CreateClaimRequest(ctx context.Context, req dto.ClaimPayoutRe
 		return dto.ChainTransactionResponse{}, err
 	}
 
-	row := s.db.QueryRowContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return dto.ChainTransactionResponse{}, err
+	}
+	defer tx.Rollback()
+
+	row := tx.QueryRowContext(ctx, `
 		INSERT INTO chain_transactions (
 			biz_type, ref_id, chain_name, network_name, wallet_address, tx_hash,
 			status, payload, error_message, attempt_count, created_at, updated_at
@@ -497,7 +518,25 @@ func (s *SQLStore) CreateClaimRequest(ctx context.Context, req dto.ClaimPayoutRe
 		RETURNING id, biz_type, ref_id, chain_name, network_name, wallet_address, tx_hash,
 		          status, payload, error_message, attempt_count, created_at, updated_at
 	`, strings.TrimSpace(req.EventID), normalizeWalletAddress(req.WalletAddress), payload)
-	return scanChainTransaction(row)
+	created, err := scanChainTransaction(row)
+	if err != nil {
+		return dto.ChainTransactionResponse{}, err
+	}
+	if acceptedVisible {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE rollup_accepted_payouts
+			SET status = 'CLAIM_PENDING',
+			    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+			WHERE event_id = $1
+			  AND user_id = $2
+		`, strings.TrimSpace(req.EventID), req.UserID); err != nil {
+			return dto.ChainTransactionResponse{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return dto.ChainTransactionResponse{}, err
+	}
+	return created, nil
 }
 
 func (s *SQLStore) GetOrder(ctx context.Context, orderID string) (dto.OrderResponse, error) {
@@ -983,6 +1022,180 @@ func (s *SQLStore) ListRollupForcedWithdrawals(ctx context.Context, req dto.List
 	return normalizeCollectionItems(items), nil
 }
 
+func (s *SQLStore) ListRollupEscapeCollateralClaims(ctx context.Context, req dto.ListRollupEscapeCollateralClaimsRequest) ([]dto.RollupEscapeCollateralClaimResponse, error) {
+	var (
+		args    []any
+		filters []string
+	)
+	query := `
+		WITH latest_anchor AS (
+			SELECT MAX(batch_id) AS batch_id
+			FROM rollup_accepted_escape_roots
+			WHERE anchor_status = 'ANCHORED'
+		)
+		SELECT l.batch_id, l.account_id, r.state_root, r.collateral_asset, r.merkle_root,
+		       r.leaf_count, r.total_amount, l.wallet_address, l.claim_amount,
+		       l.leaf_index, l.leaf_hash, l.proof_hashes, l.claim_id, l.claim_status,
+		       l.claim_tx_hash, l.claim_submitted_at, l.claimed_at, r.anchor_status,
+		       r.anchor_tx_hash, r.anchor_submitted_at, r.anchored_at,
+		       l.last_error, l.last_error_at, l.created_at, l.updated_at
+		FROM rollup_accepted_escape_leaves l
+		JOIN rollup_accepted_escape_roots r ON r.batch_id = l.batch_id
+		JOIN latest_anchor a ON a.batch_id = l.batch_id
+	`
+	if req.UserID > 0 {
+		args = append(args, req.UserID)
+		filters = append(filters, fmt.Sprintf("l.account_id = $%d", len(args)))
+	}
+	if wallet := normalizeWalletAddress(req.WalletAddress); wallet != "" {
+		args = append(args, wallet)
+		filters = append(filters, fmt.Sprintf("l.wallet_address = $%d", len(args)))
+	}
+	if status := normalizeOptional(req.Status); status != "" {
+		args = append(args, status)
+		filters = append(filters, fmt.Sprintf("l.claim_status = $%d", len(args)))
+	}
+	if len(filters) > 0 {
+		query += " WHERE " + strings.Join(filters, " AND ")
+	}
+	args = append(args, normalizeLimit(req.Limit))
+	query += fmt.Sprintf(" ORDER BY l.account_id ASC LIMIT $%d", len(args))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]dto.RollupEscapeCollateralClaimResponse, 0)
+	for rows.Next() {
+		var (
+			item      dto.RollupEscapeCollateralClaimResponse
+			proofJSON []byte
+		)
+		if err := rows.Scan(
+			&item.BatchID,
+			&item.AccountID,
+			&item.StateRoot,
+			&item.CollateralAsset,
+			&item.MerkleRoot,
+			&item.LeafCount,
+			&item.TotalAmount,
+			&item.WalletAddress,
+			&item.ClaimAmount,
+			&item.LeafIndex,
+			&item.LeafHash,
+			&proofJSON,
+			&item.ClaimID,
+			&item.ClaimStatus,
+			&item.ClaimTxHash,
+			&item.ClaimSubmittedAt,
+			&item.ClaimedAt,
+			&item.AnchorStatus,
+			&item.AnchorTxHash,
+			&item.AnchorSubmittedAt,
+			&item.AnchoredAt,
+			&item.LastError,
+			&item.LastErrorAt,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if len(proofJSON) > 0 {
+			if err := json.Unmarshal(proofJSON, &item.ProofHashes); err != nil {
+				return nil, err
+			}
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return normalizeCollectionItems(items), nil
+}
+
+func (s *SQLStore) ListRollupWithdrawalClaims(ctx context.Context, req dto.ListRollupWithdrawalClaimsRequest) ([]dto.RollupWithdrawalClaimResponse, error) {
+	var (
+		args    []any
+		filters []string
+	)
+	query := `
+		SELECT l.batch_id, l.withdrawal_id, l.account_id, l.wallet_address, l.recipient_address,
+		       l.amount, l.leaf_index, l.leaf_hash, l.proof_hashes, l.claim_id, l.claim_status,
+		       l.claim_tx_hash, l.claim_submitted_at, l.claimed_at,
+		       l.last_error, l.last_error_at, l.created_at, l.updated_at
+		FROM rollup_accepted_withdrawal_leaves l
+	`
+	if req.UserID > 0 {
+		args = append(args, req.UserID)
+		filters = append(filters, fmt.Sprintf("l.account_id = $%d", len(args)))
+	}
+	if wallet := normalizeWalletAddress(req.WalletAddress); wallet != "" {
+		args = append(args, wallet)
+		filters = append(filters, fmt.Sprintf("l.wallet_address = $%d", len(args)))
+	}
+	if req.BatchID > 0 {
+		args = append(args, req.BatchID)
+		filters = append(filters, fmt.Sprintf("l.batch_id = $%d", len(args)))
+	}
+	if status := normalizeOptional(req.Status); status != "" {
+		args = append(args, status)
+		filters = append(filters, fmt.Sprintf("l.claim_status = $%d", len(args)))
+	}
+	if len(filters) > 0 {
+		query += " WHERE " + strings.Join(filters, " AND ")
+	}
+	args = append(args, normalizeLimit(req.Limit))
+	query += fmt.Sprintf(" ORDER BY l.batch_id DESC, l.leaf_index ASC LIMIT $%d", len(args))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]dto.RollupWithdrawalClaimResponse, 0)
+	for rows.Next() {
+		var (
+			item      dto.RollupWithdrawalClaimResponse
+			proofJSON []byte
+		)
+		if err := rows.Scan(
+			&item.BatchID,
+			&item.WithdrawalID,
+			&item.AccountID,
+			&item.WalletAddress,
+			&item.RecipientAddress,
+			&item.Amount,
+			&item.LeafIndex,
+			&item.LeafHash,
+			&proofJSON,
+			&item.ClaimID,
+			&item.ClaimStatus,
+			&item.ClaimTxHash,
+			&item.ClaimSubmittedAt,
+			&item.ClaimedAt,
+			&item.LastError,
+			&item.LastErrorAt,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if len(proofJSON) > 0 {
+			if err := json.Unmarshal(proofJSON, &item.ProofHashes); err != nil {
+				return nil, err
+			}
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return normalizeCollectionItems(items), nil
+}
+
 func (s *SQLStore) GetRollupFreezeState(ctx context.Context) (dto.RollupFreezeStateResponse, error) {
 	var item dto.RollupFreezeStateResponse
 	err := s.db.QueryRowContext(ctx, `
@@ -1340,8 +1553,29 @@ func (s *SQLStore) listAcceptedBalances(ctx context.Context, req dto.ListBalance
 		filters []string
 	)
 	query := `
-		SELECT account_id, asset, available, frozen, created_at, updated_at
-		FROM rollup_accepted_balances
+		WITH latest_anchor AS (
+			SELECT MAX(batch_id) AS batch_id
+			FROM rollup_accepted_escape_roots
+			WHERE anchor_status = 'ANCHORED'
+		)
+		SELECT ab.account_id,
+		       ab.asset,
+		       CASE
+		           WHEN el.claim_status = 'CLAIMED' AND ab.asset = 'USDT' THEN 0
+		           ELSE ab.available
+		       END AS available,
+		       CASE
+		           WHEN el.claim_status = 'CLAIMED' AND ab.asset = 'USDT' THEN 0
+		           ELSE ab.frozen
+		       END AS frozen,
+		       ab.created_at,
+		       ab.updated_at
+		FROM rollup_accepted_balances ab
+		LEFT JOIN latest_anchor la ON TRUE
+		LEFT JOIN rollup_accepted_escape_leaves el
+		  ON el.batch_id = la.batch_id
+		 AND el.account_id = ab.account_id
+		 AND el.collateral_asset = ab.asset
 	`
 
 	args = append(args, req.UserID)
@@ -1606,6 +1840,14 @@ func (s *SQLStore) ListLedgerPostings(ctx context.Context, entryID string) ([]dt
 }
 
 func (s *SQLStore) BuildLiabilityReport(ctx context.Context) ([]dto.LiabilityReportLine, error) {
+	acceptedVisible, err := s.acceptedReadTruthVisible(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if acceptedVisible {
+		return s.buildAcceptedLiabilityReport(ctx)
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT asset, SUM(available) AS user_available, SUM(frozen) AS user_frozen
 		FROM account_balances
@@ -1664,6 +1906,88 @@ func (s *SQLStore) BuildLiabilityReport(ctx context.Context) ([]dto.LiabilityRep
 		lines[idx].InternalTotal = lines[idx].UserAvailable + lines[idx].UserFrozen + lines[idx].PendingWithdraw + lines[idx].PendingSettlement + lines[idx].PlatformFee
 	}
 
+	if err := withdrawRows.Err(); err != nil {
+		return nil, err
+	}
+	return normalizeCollectionItems(lines), nil
+}
+
+func (s *SQLStore) buildAcceptedLiabilityReport(ctx context.Context) ([]dto.LiabilityReportLine, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		WITH latest_anchor AS (
+			SELECT MAX(batch_id) AS batch_id
+			FROM rollup_accepted_escape_roots
+			WHERE anchor_status = 'ANCHORED'
+		)
+		SELECT ab.asset,
+		       SUM(
+		           CASE
+		               WHEN el.claim_status = 'CLAIMED' AND ab.asset = 'USDT' THEN 0
+		               ELSE ab.available
+		           END
+		       ) AS user_available,
+		       SUM(
+		           CASE
+		               WHEN el.claim_status = 'CLAIMED' AND ab.asset = 'USDT' THEN 0
+		               ELSE ab.frozen
+		           END
+		       ) AS user_frozen
+		FROM rollup_accepted_balances ab
+		LEFT JOIN latest_anchor la ON TRUE
+		LEFT JOIN rollup_accepted_escape_leaves el
+		  ON el.batch_id = la.batch_id
+		 AND el.account_id = ab.account_id
+		 AND el.collateral_asset = ab.asset
+		GROUP BY ab.asset
+		ORDER BY ab.asset ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	lines := make([]dto.LiabilityReportLine, 0)
+	indexByAsset := make(map[string]int)
+	for rows.Next() {
+		var item dto.LiabilityReportLine
+		if err := rows.Scan(&item.Asset, &item.UserAvailable, &item.UserFrozen); err != nil {
+			return nil, err
+		}
+		item.InternalTotal = item.UserAvailable + item.UserFrozen
+		indexByAsset[item.Asset] = len(lines)
+		lines = append(lines, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	withdrawRows, err := s.db.QueryContext(ctx, `
+		SELECT asset, SUM(amount) AS pending_withdraw
+		FROM rollup_accepted_withdrawals
+		WHERE claim_status IN ('CLAIMABLE', 'CLAIM_SUBMITTED')
+		GROUP BY asset
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer withdrawRows.Close()
+	for withdrawRows.Next() {
+		var (
+			asset   string
+			pending int64
+		)
+		if err := withdrawRows.Scan(&asset, &pending); err != nil {
+			return nil, err
+		}
+		idx, ok := indexByAsset[asset]
+		if !ok {
+			lines = append(lines, dto.LiabilityReportLine{Asset: asset})
+			idx = len(lines) - 1
+			indexByAsset[asset] = idx
+		}
+		lines[idx].PendingWithdraw = pending
+		lines[idx].InternalTotal = lines[idx].UserAvailable + lines[idx].UserFrozen + lines[idx].PendingWithdraw + lines[idx].PendingSettlement + lines[idx].PlatformFee
+	}
 	if err := withdrawRows.Err(); err != nil {
 		return nil, err
 	}
@@ -2139,14 +2463,51 @@ func (s *SQLStore) loadMarketRuntime(ctx context.Context, marketIDs []int64) (ma
 		return nil, err
 	}
 
-	payoutRows, err := s.db.QueryContext(ctx, `
+	acceptedVisible, err := s.acceptedReadTruthVisible(ctx)
+	if err != nil {
+		return nil, err
+	}
+	payoutQuery := `
 		SELECT market_id,
 		       COUNT(*) AS payout_count,
-		       COUNT(*) FILTER (WHERE status = 'COMPLETED') AS completed_payout_count
+		       COUNT(*) FILTER (WHERE status IN ('COMPLETED', 'CLAIM_PENDING', 'CLAIM_SUBMITTED', 'CLAIMED')) AS completed_payout_count
 		FROM settlement_payouts
 		WHERE market_id = ANY($1)
 		GROUP BY market_id
-	`, pq.Array(marketIDs))
+	`
+	claimQuery := `
+		SELECT sp.market_id,
+		       COUNT(*) FILTER (WHERE ct.status = 'PENDING') AS pending_claim_count,
+		       COUNT(*) FILTER (WHERE ct.status = 'SUBMITTED') AS submitted_claim_count,
+		       COUNT(*) FILTER (WHERE ct.status = 'FAILED') AS failed_claim_count
+		FROM chain_transactions ct
+		INNER JOIN settlement_payouts sp ON sp.event_id = ct.ref_id
+		WHERE ct.biz_type = 'CLAIM'
+		  AND sp.market_id = ANY($1)
+		GROUP BY sp.market_id
+	`
+	if acceptedVisible {
+		payoutQuery = `
+			SELECT market_id,
+			       COUNT(*) AS payout_count,
+			       COUNT(*) FILTER (WHERE status IN ('COMPLETED', 'CLAIM_PENDING', 'CLAIM_SUBMITTED', 'CLAIMED')) AS completed_payout_count
+			FROM rollup_accepted_payouts
+			WHERE market_id = ANY($1)
+			GROUP BY market_id
+		`
+		claimQuery = `
+			SELECT ap.market_id,
+			       COUNT(*) FILTER (WHERE ct.status = 'PENDING') AS pending_claim_count,
+			       COUNT(*) FILTER (WHERE ct.status = 'SUBMITTED') AS submitted_claim_count,
+			       COUNT(*) FILTER (WHERE ct.status = 'FAILED') AS failed_claim_count
+			FROM chain_transactions ct
+			INNER JOIN rollup_accepted_payouts ap ON ap.event_id = ct.ref_id
+			WHERE ct.biz_type = 'CLAIM'
+			  AND ap.market_id = ANY($1)
+			GROUP BY ap.market_id
+		`
+	}
+	payoutRows, err := s.db.QueryContext(ctx, payoutQuery, pq.Array(marketIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -2171,17 +2532,7 @@ func (s *SQLStore) loadMarketRuntime(ctx context.Context, marketIDs []int64) (ma
 		return nil, err
 	}
 
-	claimRows, err := s.db.QueryContext(ctx, `
-		SELECT sp.market_id,
-		       COUNT(*) FILTER (WHERE ct.status = 'PENDING') AS pending_claim_count,
-		       COUNT(*) FILTER (WHERE ct.status = 'SUBMITTED') AS submitted_claim_count,
-		       COUNT(*) FILTER (WHERE ct.status = 'FAILED') AS failed_claim_count
-		FROM chain_transactions ct
-		INNER JOIN settlement_payouts sp ON sp.event_id = ct.ref_id
-		WHERE ct.biz_type = 'CLAIM'
-		  AND sp.market_id = ANY($1)
-		GROUP BY sp.market_id
-	`, pq.Array(marketIDs))
+	claimRows, err := s.db.QueryContext(ctx, claimQuery, pq.Array(marketIDs))
 	if err != nil {
 		return nil, err
 	}

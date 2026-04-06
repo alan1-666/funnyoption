@@ -11,6 +11,10 @@ interface IFunnyVaultClaimReader {
         returns (address wallet, uint256 amount, address recipient);
 }
 
+interface IFunnyVaultClaimProcessor {
+    function processClaim(bytes32 claimId, address wallet, uint256 amount, address recipient) external;
+}
+
 contract FunnyRollupCore {
     bytes32 public constant SHADOW_BATCH_V1_HASH = keccak256("shadow-batch-v1");
 
@@ -46,6 +50,7 @@ contract FunnyRollupCore {
         bytes32 positionsFundingRoot;
         bytes32 withdrawalsRoot;
         bytes32 nextStateRoot;
+        bytes32 conservationHash;
     }
 
     struct L1BatchMetadata {
@@ -66,6 +71,7 @@ contract FunnyRollupCore {
         bytes32 positionsFundingRoot;
         bytes32 withdrawalsRoot;
         bytes32 nextStateRoot;
+        bytes32 conservationHash;
         bytes32 authProofHash;
         bytes32 verifierGateHash;
     }
@@ -82,6 +88,13 @@ contract FunnyRollupCore {
         ForcedWithdrawalStatus status;
     }
 
+    struct EscapeCollateralRoot {
+        bytes32 merkleRoot;
+        uint64 leafCount;
+        uint256 totalAmount;
+        uint64 anchoredAt;
+    }
+
     address public immutable operator;
     IFunnyRollupBatchVerifier public verifier;
     address public vault;
@@ -94,10 +107,15 @@ contract FunnyRollupCore {
     bytes32 public latestStateRoot;
     uint64 public latestAcceptedBatchId;
     bytes32 public latestAcceptedStateRoot;
+    uint64 public latestEscapeCollateralBatchId;
+    bytes32 public latestEscapeCollateralRoot;
 
     mapping(uint64 => BatchMetadata) public batchMetadata;
+    mapping(uint64 => bool) public batchDataPublished;
     mapping(uint64 => AcceptedBatch) public acceptedBatches;
+    mapping(uint64 => bytes32) public acceptedWithdrawalRoots;
     mapping(uint64 => ForcedWithdrawalRequest) public forcedWithdrawalRequests;
+    mapping(uint64 => EscapeCollateralRoot) public escapeCollateralRoots;
 
     event BatchMetadataRecorded(
         uint64 indexed batchId, bytes32 indexed batchDataHash, bytes32 indexed prevStateRoot, bytes32 nextStateRoot
@@ -116,6 +134,21 @@ contract FunnyRollupCore {
         bytes32 indexed nextStateRoot,
         bytes32 prevStateRoot,
         bytes32 authProofHash
+    );
+    event EscapeCollateralRootRecorded(
+        uint64 indexed batchId, bytes32 indexed merkleRoot, uint64 leafCount, uint256 totalAmount
+    );
+    event BatchDataPublished(uint64 indexed batchId, uint256 dataLength);
+    event WithdrawalClaimed(
+        uint64 indexed batchId,
+        uint256 leafIndex,
+        bytes32 indexed withdrawalId,
+        address indexed wallet,
+        uint256 amount,
+        address recipient
+    );
+    event EscapeCollateralClaimed(
+        uint64 indexed batchId, bytes32 indexed claimId, address indexed wallet, uint256 amount, address recipient
     );
 
     error InvalidOperator();
@@ -140,6 +173,19 @@ contract FunnyRollupCore {
     error ForcedWithdrawalClaimMismatch();
     error ForcedWithdrawalDeadlineNotReached();
     error AlreadyFrozen();
+    error InvalidEscapeCollateralRoot();
+    error EscapeCollateralBatchNotAccepted();
+    error EscapeCollateralBatchOutOfOrder();
+    error EscapeCollateralRootNotAnchored();
+    error InvalidEscapeCollateralProof();
+    error EscapeCollateralLeafIndexOutOfRange();
+    error DataAlreadyPublished();
+    error DataHashMismatch();
+    error DataNotPublished();
+    error BatchNotAccepted();
+    error NoWithdrawalRoot();
+    error InvalidWithdrawalProof();
+    error WithdrawalLeafIndexOutOfRange();
 
     constructor(address operator_, bytes32 genesisStateRoot_) {
         if (operator_ == address(0)) revert InvalidOperator();
@@ -241,6 +287,98 @@ contract FunnyRollupCore {
         return frozen;
     }
 
+    function recordEscapeCollateralRoot(uint64 batchId, bytes32 merkleRoot, uint64 leafCount, uint256 totalAmount)
+        external
+    {
+        if (msg.sender != operator) revert OnlyOperator();
+        if (frozen) revert RollupIsFrozen();
+        if (batchId == 0 || batchId > latestAcceptedBatchId) revert EscapeCollateralBatchNotAccepted();
+        if (acceptedBatches[batchId].nextStateRoot == bytes32(0)) revert EscapeCollateralBatchNotAccepted();
+        if (latestEscapeCollateralBatchId != 0 && batchId < latestEscapeCollateralBatchId) {
+            revert EscapeCollateralBatchOutOfOrder();
+        }
+        if (merkleRoot == bytes32(0)) revert InvalidEscapeCollateralRoot();
+
+        escapeCollateralRoots[batchId] = EscapeCollateralRoot({
+            merkleRoot: merkleRoot,
+            leafCount: leafCount,
+            totalAmount: totalAmount,
+            anchoredAt: uint64(block.timestamp)
+        });
+        latestEscapeCollateralBatchId = batchId;
+        latestEscapeCollateralRoot = merkleRoot;
+
+        emit EscapeCollateralRootRecorded(batchId, merkleRoot, leafCount, totalAmount);
+    }
+
+    function claimEscapeCollateral(
+        uint64 batchId,
+        uint64 leafIndex,
+        uint256 amount,
+        address recipient,
+        bytes32[] calldata proof
+    ) external {
+        if (!frozen) revert RollupIsFrozen();
+        if (vault == address(0)) revert VaultNotConfigured();
+        if (recipient == address(0)) revert InvalidRecipient();
+        if (batchId == 0 || batchId != latestEscapeCollateralBatchId) revert EscapeCollateralRootNotAnchored();
+
+        EscapeCollateralRoot memory anchored = escapeCollateralRoots[batchId];
+        if (anchored.merkleRoot == bytes32(0)) revert EscapeCollateralRootNotAnchored();
+        if (leafIndex >= anchored.leafCount) revert EscapeCollateralLeafIndexOutOfRange();
+        if (amount == 0) revert InvalidAmount();
+
+        bytes32 leaf = _hashEscapeCollateralLeaf(batchId, leafIndex, msg.sender, amount);
+        if (!_verifyEscapeCollateralProof(anchored.merkleRoot, leaf, leafIndex, proof)) {
+            revert InvalidEscapeCollateralProof();
+        }
+
+        bytes32 claimId = keccak256(abi.encodePacked("funny-rollup-escape-claim-v1", batchId, leafIndex, msg.sender, amount));
+        IFunnyVaultClaimProcessor(vault).processClaim(claimId, msg.sender, amount, recipient);
+
+        emit EscapeCollateralClaimed(batchId, claimId, msg.sender, amount, recipient);
+    }
+
+    function publishBatchData(uint64 batchId, bytes calldata batchData) external {
+        if (msg.sender != operator) revert OnlyOperator();
+        if (frozen) revert RollupIsFrozen();
+        if (batchMetadata[batchId].batchDataHash == bytes32(0)) revert BatchMetadataNotRecorded();
+        if (batchDataPublished[batchId]) revert DataAlreadyPublished();
+        if (keccak256(batchData) != batchMetadata[batchId].batchDataHash) revert DataHashMismatch();
+
+        batchDataPublished[batchId] = true;
+        emit BatchDataPublished(batchId, batchData.length);
+    }
+
+    function claimAcceptedWithdrawal(
+        uint64 batchId,
+        uint64 leafIndex,
+        bytes32 withdrawalId,
+        uint256 amount,
+        address recipient,
+        bytes32[] calldata proof
+    ) external {
+        if (vault == address(0)) revert VaultNotConfigured();
+        if (recipient == address(0)) revert InvalidRecipient();
+        if (amount == 0) revert InvalidAmount();
+        if (acceptedBatches[batchId].nextStateRoot == bytes32(0)) revert BatchNotAccepted();
+
+        bytes32 root = acceptedWithdrawalRoots[batchId];
+        if (root == bytes32(0)) revert NoWithdrawalRoot();
+
+        bytes32 leaf = _hashWithdrawalLeaf(batchId, leafIndex, withdrawalId, msg.sender, amount, recipient);
+        if (!_verifyMerkleProof(root, leaf, leafIndex, proof)) {
+            revert InvalidWithdrawalProof();
+        }
+
+        bytes32 claimId = keccak256(
+            abi.encodePacked("funny-rollup-withdrawal-claim-v1", batchId, leafIndex, withdrawalId, msg.sender)
+        );
+        IFunnyVaultClaimProcessor(vault).processClaim(claimId, msg.sender, amount, recipient);
+
+        emit WithdrawalClaimed(batchId, leafIndex, withdrawalId, msg.sender, amount, recipient);
+    }
+
     function recordBatchMetadata(uint64 batchId, bytes32 batchDataHash, bytes32 prevStateRoot, bytes32 nextStateRoot)
         external
     {
@@ -278,6 +416,7 @@ contract FunnyRollupCore {
             revert BatchMetadataNotRecorded();
         }
         _assertRecordedMetadataMatches(recordedMetadata, publicInputs);
+        if (!batchDataPublished[publicInputs.batchId]) revert DataNotPublished();
 
         for (uint256 i = 0; i < authStatuses.length; ++i) {
             if (authStatuses[i] != AuthJoinStatus.JOINED) {
@@ -301,11 +440,15 @@ contract FunnyRollupCore {
             positionsFundingRoot: publicInputs.positionsFundingRoot,
             withdrawalsRoot: publicInputs.withdrawalsRoot,
             nextStateRoot: publicInputs.nextStateRoot,
+            conservationHash: publicInputs.conservationHash,
             authProofHash: authProofHash,
             verifierGateHash: verifierContext.verifierGateHash
         });
         latestAcceptedBatchId = publicInputs.batchId;
         latestAcceptedStateRoot = publicInputs.nextStateRoot;
+        if (publicInputs.withdrawalsRoot != bytes32(0)) {
+            acceptedWithdrawalRoots[publicInputs.batchId] = publicInputs.withdrawalsRoot;
+        }
 
         emit VerifiedBatchAccepted(
             publicInputs.batchId,
@@ -339,6 +482,7 @@ contract FunnyRollupCore {
                 publicInputs.positionsFundingRoot,
                 publicInputs.withdrawalsRoot,
                 publicInputs.nextStateRoot,
+                publicInputs.conservationHash,
                 authProofHash
             )
         );
@@ -362,11 +506,37 @@ contract FunnyRollupCore {
                 ordersRoot: publicInputs.ordersRoot,
                 positionsFundingRoot: publicInputs.positionsFundingRoot,
                 withdrawalsRoot: publicInputs.withdrawalsRoot,
-                nextStateRoot: publicInputs.nextStateRoot
+                nextStateRoot: publicInputs.nextStateRoot,
+                conservationHash: publicInputs.conservationHash
             }),
             authProofHash: authProofHash,
             verifierGateHash: hashVerifierGateBatch(publicInputs, authProofHash)
         });
+    }
+
+    function hashEscapeCollateralLeaf(uint64 batchId, uint64 leafIndex, address wallet, uint256 amount)
+        external
+        pure
+        returns (bytes32)
+    {
+        return _hashEscapeCollateralLeaf(batchId, leafIndex, wallet, amount);
+    }
+
+    function verifyEscapeCollateralProof(uint64 batchId, uint64 leafIndex, address wallet, uint256 amount, bytes32[] calldata proof)
+        external
+        view
+        returns (bool)
+    {
+        EscapeCollateralRoot memory anchored = escapeCollateralRoots[batchId];
+        if (anchored.merkleRoot == bytes32(0)) {
+            return false;
+        }
+        return _verifyEscapeCollateralProof(
+            anchored.merkleRoot,
+            _hashEscapeCollateralLeaf(batchId, leafIndex, wallet, amount),
+            leafIndex,
+            proof
+        );
     }
 
     function _assertMetadataSubsetMatches(
@@ -389,5 +559,83 @@ contract FunnyRollupCore {
                 || recordedMetadata.prevStateRoot != publicInputs.prevStateRoot
                 || recordedMetadata.nextStateRoot != publicInputs.nextStateRoot
         ) revert MetadataMismatch();
+    }
+
+    function _hashEscapeCollateralLeaf(uint64 batchId, uint64 leafIndex, address wallet, uint256 amount)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encodePacked("funny-rollup-escape-collateral-v1", batchId, leafIndex, wallet, amount));
+    }
+
+    function _verifyEscapeCollateralProof(bytes32 root, bytes32 leaf, uint64 leafIndex, bytes32[] calldata proof)
+        internal
+        pure
+        returns (bool)
+    {
+        return _verifyMerkleProof(root, leaf, leafIndex, proof);
+    }
+
+    function _hashWithdrawalLeaf(
+        uint64 batchId,
+        uint64 leafIndex,
+        bytes32 withdrawalId,
+        address wallet,
+        uint256 amount,
+        address recipient
+    ) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encodePacked("funny-rollup-withdrawal-leaf-v1", batchId, leafIndex, withdrawalId, wallet, amount, recipient)
+        );
+    }
+
+    function _verifyMerkleProof(bytes32 root, bytes32 leaf, uint64 leafIndex, bytes32[] calldata proof)
+        internal
+        pure
+        returns (bool)
+    {
+        bytes32 computed = leaf;
+        uint64 index = leafIndex;
+        for (uint256 i = 0; i < proof.length; i++) {
+            bytes32 sibling = proof[i];
+            if (index % 2 == 0) {
+                computed = keccak256(abi.encodePacked(computed, sibling));
+            } else {
+                computed = keccak256(abi.encodePacked(sibling, computed));
+            }
+            index = index / 2;
+        }
+        return computed == root;
+    }
+
+    function hashWithdrawalLeaf(
+        uint64 batchId,
+        uint64 leafIndex,
+        bytes32 withdrawalId,
+        address wallet,
+        uint256 amount,
+        address recipient
+    ) external pure returns (bytes32) {
+        return _hashWithdrawalLeaf(batchId, leafIndex, withdrawalId, wallet, amount, recipient);
+    }
+
+    function verifyWithdrawalProof(
+        uint64 batchId,
+        uint64 leafIndex,
+        bytes32 withdrawalId,
+        address wallet,
+        uint256 amount,
+        address recipient,
+        bytes32[] calldata proof
+    ) external view returns (bool) {
+        bytes32 root = acceptedWithdrawalRoots[batchId];
+        if (root == bytes32(0)) return false;
+        return _verifyMerkleProof(
+            root,
+            _hashWithdrawalLeaf(batchId, leafIndex, withdrawalId, wallet, amount, recipient),
+            leafIndex,
+            proof
+        );
     }
 }

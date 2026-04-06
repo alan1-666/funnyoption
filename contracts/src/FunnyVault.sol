@@ -15,6 +15,7 @@ contract FunnyVault {
 
     IERC20Minimal public immutable collateralToken;
     address public immutable operator;
+    address public rollupCore;
 
     mapping(address => uint256) public depositedBalance;
     mapping(bytes32 => bool) public processedClaims;
@@ -23,14 +24,24 @@ contract FunnyVault {
     event Deposited(address indexed wallet, uint256 amount);
     event WithdrawalQueued(bytes32 indexed withdrawalId, address indexed wallet, uint256 amount, address recipient);
     event ClaimProcessed(bytes32 indexed claimId, address indexed wallet, uint256 amount, address recipient);
+    event RollupCoreUpdated(address indexed rollupCore);
 
     error OnlyOperator();
+    error OnlyAuthorizedClaimer();
     error InvalidAmount();
     error ClaimAlreadyProcessed();
+    error InvalidRollupCore();
 
     constructor(address collateralToken_, address operator_) {
         collateralToken = IERC20Minimal(collateralToken_);
         operator = operator_;
+    }
+
+    function setRollupCore(address rollupCore_) external {
+        if (msg.sender != operator) revert OnlyOperator();
+        if (rollupCore_ == address(0)) revert InvalidRollupCore();
+        rollupCore = rollupCore_;
+        emit RollupCoreUpdated(rollupCore_);
     }
 
     function deposit(uint256 amount) external {
@@ -48,7 +59,7 @@ contract FunnyVault {
     }
 
     function processClaim(bytes32 claimId, address wallet, uint256 amount, address recipient) external {
-        if (msg.sender != operator) revert OnlyOperator();
+        if (msg.sender != operator && msg.sender != rollupCore) revert OnlyAuthorizedClaimer();
         if (processedClaims[claimId]) revert ClaimAlreadyProcessed();
         if (amount == 0) revert InvalidAmount();
 

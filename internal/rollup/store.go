@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
+	sharedauth "funnyoption/internal/shared/auth"
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
 
@@ -17,9 +19,9 @@ var ErrNoPendingSubmission = errors.New("no pending rollup submission")
 const submissionSelectColumns = `
 		submission_id, batch_id, encoding_version, status,
 		batch_data_hash, next_state_root, auth_proof_hash,
-		verifier_gate_hash, record_calldata, accept_calldata,
-		submission_data, submission_hash, record_tx_hash, accept_tx_hash,
-		record_submitted_at, accept_submitted_at, accepted_at,
+		verifier_gate_hash, record_calldata, publish_calldata, accept_calldata,
+		submission_data, submission_hash, record_tx_hash, publish_tx_hash, accept_tx_hash,
+		record_submitted_at, publish_submitted_at, accept_submitted_at, accepted_at,
 		last_error, last_error_at, created_at, updated_at
 `
 
@@ -427,7 +429,42 @@ func (s *Store) MaterializeAcceptedSubmission(ctx context.Context, submissionID 
 			return AcceptedSubmissionMaterialization{}, fmt.Errorf("accepted replay state_root mismatch: have %s want %s", snapshot.Roots.StateRoot, latestAccepted.NextStateRoot)
 		}
 	}
+	walletByAccount, err := s.lookupAcceptedWallets(ctx, tx, snapshot.Balances)
+	if err != nil {
+		return AcceptedSubmissionMaterialization{}, err
+	}
+	escapeRoot, escapeLeaves, err := BuildAcceptedEscapeCollateralSnapshot(
+		snapshot.BatchID,
+		latestAccepted.NextStateRoot,
+		snapshot.Balances,
+		walletByAccount,
+	)
+	if err != nil {
+		return AcceptedSubmissionMaterialization{}, err
+	}
+	snapshot.EscapeCollateralRoot = escapeRoot
+	snapshot.EscapeCollateralLeaves = escapeLeaves
 	if err := s.replaceAcceptedReadTruth(ctx, tx, snapshot, latestAccepted.AcceptedAt); err != nil {
+		return AcceptedSubmissionMaterialization{}, err
+	}
+	if err := s.upsertAcceptedEscapeRoot(ctx, tx, snapshot.EscapeCollateralRoot, latestAccepted.AcceptedAt); err != nil {
+		return AcceptedSubmissionMaterialization{}, err
+	}
+	if err := s.replaceAcceptedEscapeLeaves(ctx, tx, snapshot.EscapeCollateralRoot.BatchID, snapshot.EscapeCollateralLeaves, latestAccepted.AcceptedAt); err != nil {
+		return AcceptedSubmissionMaterialization{}, err
+	}
+
+	withdrawalRoot, withdrawalLeaves, err := BuildAcceptedWithdrawalMerkleTree(
+		snapshot.BatchID,
+		acceptedWithdrawals,
+	)
+	if err != nil {
+		return AcceptedSubmissionMaterialization{}, err
+	}
+	if err := s.upsertAcceptedWithdrawalRoot(ctx, tx, withdrawalRoot, latestAccepted.AcceptedAt); err != nil {
+		return AcceptedSubmissionMaterialization{}, err
+	}
+	if err := s.replaceAcceptedWithdrawalLeaves(ctx, tx, withdrawalRoot.BatchID, withdrawalLeaves, latestAccepted.AcceptedAt); err != nil {
 		return AcceptedSubmissionMaterialization{}, err
 	}
 
@@ -441,6 +478,10 @@ func (s *Store) MaterializeAcceptedSubmission(ctx context.Context, submissionID 
 		AcceptedBalances:    snapshot.Balances,
 		AcceptedPositions:   snapshot.Positions,
 		AcceptedPayouts:     snapshot.Payouts,
+		EscapeCollateralRoot: snapshot.EscapeCollateralRoot,
+		EscapeCollateralLeaves: snapshot.EscapeCollateralLeaves,
+		WithdrawalRoot:       withdrawalRoot,
+		WithdrawalLeaves:     withdrawalLeaves,
 		QueuedClaimRefs:     queuedClaimRefs,
 	}, nil
 }
@@ -663,14 +704,14 @@ func (s *Store) upsertSubmission(ctx context.Context, batchID int64, bundle Shad
 		INSERT INTO rollup_shadow_submissions (
 			submission_id, batch_id, encoding_version, status,
 			batch_data_hash, next_state_root, auth_proof_hash,
-			verifier_gate_hash, record_calldata, accept_calldata,
+			verifier_gate_hash, record_calldata, publish_calldata, accept_calldata,
 			submission_data, submission_hash, created_at, updated_at
 		)
 		VALUES (
 			$1, $2, $3, $4,
 			$5, $6, $7,
-			$8, $9, $10,
-			$11::jsonb, $12, EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT
+			$8, $9, $10, $11,
+			$12::jsonb, $13, EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT
 		)
 		ON CONFLICT (batch_id) DO UPDATE SET
 			encoding_version = EXCLUDED.encoding_version,
@@ -680,6 +721,7 @@ func (s *Store) upsertSubmission(ctx context.Context, batchID int64, bundle Shad
 			auth_proof_hash = EXCLUDED.auth_proof_hash,
 			verifier_gate_hash = EXCLUDED.verifier_gate_hash,
 			record_calldata = EXCLUDED.record_calldata,
+			publish_calldata = EXCLUDED.publish_calldata,
 			accept_calldata = EXCLUDED.accept_calldata,
 			submission_data = EXCLUDED.submission_data,
 			submission_hash = EXCLUDED.submission_hash,
@@ -695,6 +737,7 @@ func (s *Store) upsertSubmission(ctx context.Context, batchID int64, bundle Shad
 		bundle.VerifierArtifactBundle.AuthProofDigest.AuthProofHash,
 		bundle.VerifierArtifactBundle.VerifierGateDigest.VerifierGateHash,
 		bundle.RecordBatchMetadataCall.Calldata,
+		bundle.PublishBatchDataCall.Calldata,
 		bundle.AcceptVerifiedBatchCall.Calldata,
 		submissionData,
 		submissionHash,
@@ -720,6 +763,30 @@ func (s *Store) MarkSubmissionRecordSubmitted(ctx context.Context, submissionID,
 		RETURNING `+submissionSelectColumns, SubmissionStatusRecordSubmitted, normalizeSubmissionTxHash(txHash))
 }
 
+func (s *Store) MarkSubmissionPublishSubmitted(ctx context.Context, submissionID, txHash string) (StoredSubmission, error) {
+	return s.updateSubmissionRuntime(ctx, submissionID, `
+		UPDATE rollup_shadow_submissions
+		SET status = $2,
+		    publish_tx_hash = $3,
+		    publish_submitted_at = EXTRACT(EPOCH FROM NOW())::BIGINT,
+		    last_error = '',
+		    last_error_at = 0,
+		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE submission_id = $1
+		RETURNING `+submissionSelectColumns, SubmissionStatusPublishSubmitted, normalizeSubmissionTxHash(txHash))
+}
+
+func (s *Store) MarkSubmissionDataPublished(ctx context.Context, submissionID string) (StoredSubmission, error) {
+	return s.updateSubmissionRuntime(ctx, submissionID, `
+		UPDATE rollup_shadow_submissions
+		SET status = $2,
+		    last_error = '',
+		    last_error_at = 0,
+		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE submission_id = $1
+		RETURNING `+submissionSelectColumns, SubmissionStatusDataPublished)
+}
+
 func (s *Store) MarkSubmissionAcceptSubmitted(ctx context.Context, submissionID, txHash string) (StoredSubmission, error) {
 	return s.updateSubmissionRuntime(ctx, submissionID, `
 		UPDATE rollup_shadow_submissions
@@ -743,6 +810,354 @@ func (s *Store) MarkSubmissionAccepted(ctx context.Context, submissionID string)
 		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
 		WHERE submission_id = $1
 		RETURNING `+submissionSelectColumns, SubmissionStatusAccepted)
+}
+
+func (s *Store) ListAcceptedEscapeRoots(ctx context.Context) ([]AcceptedEscapeCollateralRootRecord, error) {
+	if s == nil {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT batch_id, state_root, collateral_asset, merkle_root, leaf_count, total_amount,
+		       anchor_status, anchor_tx_hash, anchor_submitted_at, anchored_at,
+		       last_error, last_error_at, created_at, updated_at
+		FROM rollup_accepted_escape_roots
+		ORDER BY batch_id ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]AcceptedEscapeCollateralRootRecord, 0)
+	for rows.Next() {
+		var item AcceptedEscapeCollateralRootRecord
+		if err := rows.Scan(
+			&item.BatchID,
+			&item.StateRoot,
+			&item.CollateralAsset,
+			&item.MerkleRoot,
+			&item.LeafCount,
+			&item.TotalAmount,
+			&item.AnchorStatus,
+			&item.AnchorTxHash,
+			&item.AnchorSubmittedAt,
+			&item.AnchoredAt,
+			&item.LastError,
+			&item.LastErrorAt,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) NextEscapeCollateralRootForAnchor(ctx context.Context) (AcceptedEscapeCollateralRootRecord, bool, error) {
+	if s == nil {
+		return AcceptedEscapeCollateralRootRecord{}, false, nil
+	}
+	row := s.db.QueryRowContext(ctx, `
+		SELECT batch_id, state_root, collateral_asset, merkle_root, leaf_count, total_amount,
+		       anchor_status, anchor_tx_hash, anchor_submitted_at, anchored_at,
+		       last_error, last_error_at, created_at, updated_at
+		FROM rollup_accepted_escape_roots
+		WHERE anchor_status IN ('READY', 'SUBMITTED', 'FAILED')
+		ORDER BY batch_id ASC
+		LIMIT 1
+	`)
+	var item AcceptedEscapeCollateralRootRecord
+	if err := row.Scan(
+		&item.BatchID,
+		&item.StateRoot,
+		&item.CollateralAsset,
+		&item.MerkleRoot,
+		&item.LeafCount,
+		&item.TotalAmount,
+		&item.AnchorStatus,
+		&item.AnchorTxHash,
+		&item.AnchorSubmittedAt,
+		&item.AnchoredAt,
+		&item.LastError,
+		&item.LastErrorAt,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AcceptedEscapeCollateralRootRecord{}, false, nil
+		}
+		return AcceptedEscapeCollateralRootRecord{}, false, err
+	}
+	return item, true, nil
+}
+
+func (s *Store) MarkEscapeCollateralRootSubmitted(ctx context.Context, batchID int64, txHash string) (AcceptedEscapeCollateralRootRecord, error) {
+	return s.updateEscapeCollateralRoot(ctx, batchID, `
+		UPDATE rollup_accepted_escape_roots
+		SET anchor_status = $2,
+		    anchor_tx_hash = $3,
+		    anchor_submitted_at = EXTRACT(EPOCH FROM NOW())::BIGINT,
+		    last_error = '',
+		    last_error_at = 0,
+		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE batch_id = $1
+		RETURNING batch_id, state_root, collateral_asset, merkle_root, leaf_count, total_amount,
+		          anchor_status, anchor_tx_hash, anchor_submitted_at, anchored_at,
+		          last_error, last_error_at, created_at, updated_at
+	`, EscapeCollateralAnchorStatusSubmitted, normalizeSubmissionTxHash(txHash))
+}
+
+func (s *Store) MarkEscapeCollateralRootAnchored(ctx context.Context, batchID int64) (AcceptedEscapeCollateralRootRecord, error) {
+	return s.updateEscapeCollateralRoot(ctx, batchID, `
+		UPDATE rollup_accepted_escape_roots
+		SET anchor_status = $2,
+		    anchored_at = EXTRACT(EPOCH FROM NOW())::BIGINT,
+		    last_error = '',
+		    last_error_at = 0,
+		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE batch_id = $1
+		RETURNING batch_id, state_root, collateral_asset, merkle_root, leaf_count, total_amount,
+		          anchor_status, anchor_tx_hash, anchor_submitted_at, anchored_at,
+		          last_error, last_error_at, created_at, updated_at
+	`, EscapeCollateralAnchorStatusAnchored)
+}
+
+func (s *Store) MarkEscapeCollateralRootFailed(ctx context.Context, batchID int64, errMsg string) (AcceptedEscapeCollateralRootRecord, error) {
+	return s.updateEscapeCollateralRoot(ctx, batchID, `
+		UPDATE rollup_accepted_escape_roots
+		SET anchor_status = $2,
+		    last_error = $3,
+		    last_error_at = EXTRACT(EPOCH FROM NOW())::BIGINT,
+		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE batch_id = $1
+		RETURNING batch_id, state_root, collateral_asset, merkle_root, leaf_count, total_amount,
+		          anchor_status, anchor_tx_hash, anchor_submitted_at, anchored_at,
+		          last_error, last_error_at, created_at, updated_at
+	`, EscapeCollateralAnchorStatusFailed, normalizeSubmissionError(errMsg))
+}
+
+func (s *Store) updateEscapeCollateralRoot(ctx context.Context, batchID int64, query string, args ...any) (AcceptedEscapeCollateralRootRecord, error) {
+	if s == nil {
+		return AcceptedEscapeCollateralRootRecord{}, fmt.Errorf("rollup store is not configured")
+	}
+	row := s.db.QueryRowContext(ctx, query, append([]any{batchID}, args...)...)
+	var item AcceptedEscapeCollateralRootRecord
+	if err := row.Scan(
+		&item.BatchID,
+		&item.StateRoot,
+		&item.CollateralAsset,
+		&item.MerkleRoot,
+		&item.LeafCount,
+		&item.TotalAmount,
+		&item.AnchorStatus,
+		&item.AnchorTxHash,
+		&item.AnchorSubmittedAt,
+		&item.AnchoredAt,
+		&item.LastError,
+		&item.LastErrorAt,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AcceptedEscapeCollateralRootRecord{}, fmt.Errorf("rollup accepted escape root %d not found", batchID)
+		}
+		return AcceptedEscapeCollateralRootRecord{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) GetLatestAnchoredEscapeCollateralClaim(
+	ctx context.Context,
+	accountID int64,
+	walletAddress string,
+	claimID string,
+) (AcceptedEscapeCollateralRootRecord, AcceptedEscapeCollateralLeafRecord, bool, error) {
+	if s == nil {
+		return AcceptedEscapeCollateralRootRecord{}, AcceptedEscapeCollateralLeafRecord{}, false, nil
+	}
+
+	var (
+		args       []any
+		conditions []string
+	)
+	query := `
+		WITH latest_anchor AS (
+			SELECT batch_id, state_root, collateral_asset, merkle_root, leaf_count, total_amount,
+			       anchor_status, anchor_tx_hash, anchor_submitted_at, anchored_at,
+			       last_error, last_error_at, created_at, updated_at
+			FROM rollup_accepted_escape_roots
+			WHERE anchor_status = 'ANCHORED'
+			ORDER BY batch_id DESC
+			LIMIT 1
+		)
+		SELECT r.batch_id, r.state_root, r.collateral_asset, r.merkle_root, r.leaf_count, r.total_amount,
+		       r.anchor_status, r.anchor_tx_hash, r.anchor_submitted_at, r.anchored_at,
+		       r.last_error, r.last_error_at, r.created_at, r.updated_at,
+		       l.batch_id, l.account_id, l.wallet_address, l.collateral_asset, l.claim_amount,
+		       l.leaf_index, l.leaf_hash, l.proof_hashes, l.claim_id, l.claim_status,
+		       l.claim_tx_hash, l.claim_submitted_at, l.claimed_at,
+		       l.last_error, l.last_error_at, l.created_at, l.updated_at
+		FROM latest_anchor r
+		JOIN rollup_accepted_escape_leaves l ON l.batch_id = r.batch_id
+	`
+	if accountID > 0 {
+		args = append(args, accountID)
+		conditions = append(conditions, fmt.Sprintf("l.account_id = $%d", len(args)))
+	}
+	if wallet := sharedauth.NormalizeHex(walletAddress); wallet != "" {
+		args = append(args, wallet)
+		conditions = append(conditions, fmt.Sprintf("l.wallet_address = $%d", len(args)))
+	}
+	if normalizedClaimID := normalizeText(claimID); normalizedClaimID != "" {
+		args = append(args, normalizedClaimID)
+		conditions = append(conditions, fmt.Sprintf("l.claim_id = $%d", len(args)))
+	}
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += " ORDER BY l.claim_status ASC, l.account_id ASC LIMIT 1"
+
+	row := s.db.QueryRowContext(ctx, query, args...)
+	var (
+		root      AcceptedEscapeCollateralRootRecord
+		leaf      AcceptedEscapeCollateralLeafRecord
+		proofJSON []byte
+	)
+	if err := row.Scan(
+		&root.BatchID,
+		&root.StateRoot,
+		&root.CollateralAsset,
+		&root.MerkleRoot,
+		&root.LeafCount,
+		&root.TotalAmount,
+		&root.AnchorStatus,
+		&root.AnchorTxHash,
+		&root.AnchorSubmittedAt,
+		&root.AnchoredAt,
+		&root.LastError,
+		&root.LastErrorAt,
+		&root.CreatedAt,
+		&root.UpdatedAt,
+		&leaf.BatchID,
+		&leaf.AccountID,
+		&leaf.WalletAddress,
+		&leaf.CollateralAsset,
+		&leaf.ClaimAmount,
+		&leaf.LeafIndex,
+		&leaf.LeafHash,
+		&proofJSON,
+		&leaf.ClaimID,
+		&leaf.ClaimStatus,
+		&leaf.ClaimTxHash,
+		&leaf.ClaimSubmittedAt,
+		&leaf.ClaimedAt,
+		&leaf.LastError,
+		&leaf.LastErrorAt,
+		&leaf.CreatedAt,
+		&leaf.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AcceptedEscapeCollateralRootRecord{}, AcceptedEscapeCollateralLeafRecord{}, false, nil
+		}
+		return AcceptedEscapeCollateralRootRecord{}, AcceptedEscapeCollateralLeafRecord{}, false, err
+	}
+	if len(strings.TrimSpace(string(proofJSON))) > 0 {
+		if err := json.Unmarshal(proofJSON, &leaf.ProofHashes); err != nil {
+			return AcceptedEscapeCollateralRootRecord{}, AcceptedEscapeCollateralLeafRecord{}, false, err
+		}
+	}
+	return root, leaf, true, nil
+}
+
+func (s *Store) MarkEscapeCollateralClaimSubmitted(ctx context.Context, claimID, txHash string) (AcceptedEscapeCollateralLeafRecord, error) {
+	return s.updateEscapeCollateralClaim(ctx, claimID, `
+		UPDATE rollup_accepted_escape_leaves
+		SET claim_status = $2,
+		    claim_tx_hash = $3,
+		    claim_submitted_at = EXTRACT(EPOCH FROM NOW())::BIGINT,
+		    last_error = '',
+		    last_error_at = 0,
+		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE claim_id = $1
+		RETURNING batch_id, account_id, wallet_address, collateral_asset, claim_amount,
+		          leaf_index, leaf_hash, proof_hashes, claim_id, claim_status,
+		          claim_tx_hash, claim_submitted_at, claimed_at,
+		          last_error, last_error_at, created_at, updated_at
+	`, EscapeCollateralClaimStatusSubmitted, normalizeSubmissionTxHash(txHash))
+}
+
+func (s *Store) MarkEscapeCollateralClaimFailed(ctx context.Context, claimID, errMsg string) (AcceptedEscapeCollateralLeafRecord, error) {
+	return s.updateEscapeCollateralClaim(ctx, claimID, `
+		UPDATE rollup_accepted_escape_leaves
+		SET claim_status = $2,
+		    last_error = $3,
+		    last_error_at = EXTRACT(EPOCH FROM NOW())::BIGINT,
+		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE claim_id = $1
+		RETURNING batch_id, account_id, wallet_address, collateral_asset, claim_amount,
+		          leaf_index, leaf_hash, proof_hashes, claim_id, claim_status,
+		          claim_tx_hash, claim_submitted_at, claimed_at,
+		          last_error, last_error_at, created_at, updated_at
+	`, EscapeCollateralClaimStatusFailed, normalizeSubmissionError(errMsg))
+}
+
+func (s *Store) MarkEscapeCollateralClaimClaimed(ctx context.Context, claimID, txHash string) (AcceptedEscapeCollateralLeafRecord, error) {
+	return s.updateEscapeCollateralClaim(ctx, claimID, `
+		UPDATE rollup_accepted_escape_leaves
+		SET claim_status = $2,
+		    claim_tx_hash = $3,
+		    claimed_at = EXTRACT(EPOCH FROM NOW())::BIGINT,
+		    last_error = '',
+		    last_error_at = 0,
+		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE claim_id = $1
+		RETURNING batch_id, account_id, wallet_address, collateral_asset, claim_amount,
+		          leaf_index, leaf_hash, proof_hashes, claim_id, claim_status,
+		          claim_tx_hash, claim_submitted_at, claimed_at,
+		          last_error, last_error_at, created_at, updated_at
+	`, EscapeCollateralClaimStatusClaimed, normalizeSubmissionTxHash(txHash))
+}
+
+func (s *Store) updateEscapeCollateralClaim(ctx context.Context, claimID, query string, args ...any) (AcceptedEscapeCollateralLeafRecord, error) {
+	if s == nil {
+		return AcceptedEscapeCollateralLeafRecord{}, fmt.Errorf("rollup store is not configured")
+	}
+	row := s.db.QueryRowContext(ctx, query, append([]any{normalizeText(claimID)}, args...)...)
+	var (
+		item      AcceptedEscapeCollateralLeafRecord
+		proofJSON []byte
+	)
+	if err := row.Scan(
+		&item.BatchID,
+		&item.AccountID,
+		&item.WalletAddress,
+		&item.CollateralAsset,
+		&item.ClaimAmount,
+		&item.LeafIndex,
+		&item.LeafHash,
+		&proofJSON,
+		&item.ClaimID,
+		&item.ClaimStatus,
+		&item.ClaimTxHash,
+		&item.ClaimSubmittedAt,
+		&item.ClaimedAt,
+		&item.LastError,
+		&item.LastErrorAt,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AcceptedEscapeCollateralLeafRecord{}, fmt.Errorf("rollup accepted escape claim %s not found", normalizeText(claimID))
+		}
+		return AcceptedEscapeCollateralLeafRecord{}, err
+	}
+	if len(strings.TrimSpace(string(proofJSON))) > 0 {
+		if err := json.Unmarshal(proofJSON, &item.ProofHashes); err != nil {
+			return AcceptedEscapeCollateralLeafRecord{}, err
+		}
+	}
+	return item, nil
 }
 
 func (s *Store) MarkSubmissionFailed(ctx context.Context, submissionID, errMsg string) (StoredSubmission, error) {
@@ -1013,6 +1428,146 @@ func (s *Store) replaceAcceptedReadTruth(ctx context.Context, q sqlQueryer, snap
 	return nil
 }
 
+func (s *Store) lookupAcceptedWallets(ctx context.Context, q sqlQueryer, balances []AcceptedBalanceRecord) (map[int64]string, error) {
+	accountSet := make(map[int64]struct{})
+	for _, balance := range balances {
+		accountSet[balance.AccountID] = struct{}{}
+	}
+	if len(accountSet) == 0 {
+		return map[int64]string{}, nil
+	}
+
+	accountIDs := make([]int64, 0, len(accountSet))
+	for accountID := range accountSet {
+		accountIDs = append(accountIDs, accountID)
+	}
+	sort.Slice(accountIDs, func(i, j int) bool { return accountIDs[i] < accountIDs[j] })
+
+	args := make([]any, 0, len(accountIDs))
+	placeholders := make([]string, 0, len(accountIDs))
+	for index, accountID := range accountIDs {
+		args = append(args, accountID)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", index+1))
+	}
+
+	rows, err := q.QueryContext(ctx, `
+		SELECT user_id, wallet_address
+		FROM user_profiles
+		WHERE user_id IN (`+strings.Join(placeholders, ", ")+`)
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	walletByAccount := make(map[int64]string, len(accountIDs))
+	for rows.Next() {
+		var (
+			accountID     int64
+			walletAddress string
+		)
+		if err := rows.Scan(&accountID, &walletAddress); err != nil {
+			return nil, err
+		}
+		walletByAccount[accountID] = walletAddress
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return walletByAccount, nil
+}
+
+func (s *Store) upsertAcceptedEscapeRoot(ctx context.Context, q sqlQueryer, root AcceptedEscapeCollateralRootRecord, acceptedAt int64) error {
+	_, err := q.ExecContext(ctx, `
+		INSERT INTO rollup_accepted_escape_roots (
+			batch_id, state_root, collateral_asset, merkle_root, leaf_count, total_amount,
+			anchor_status, anchor_tx_hash, anchor_submitted_at, anchored_at,
+			last_error, last_error_at, created_at, updated_at
+		)
+		VALUES (
+			$1, $2, $3, $4, $5, $6,
+			COALESCE(NULLIF($7, ''), 'READY'), $8, $9, $10,
+			$11, $12, $13, $13
+		)
+		ON CONFLICT (batch_id) DO UPDATE SET
+			state_root = EXCLUDED.state_root,
+			collateral_asset = EXCLUDED.collateral_asset,
+			merkle_root = EXCLUDED.merkle_root,
+			leaf_count = EXCLUDED.leaf_count,
+			total_amount = EXCLUDED.total_amount,
+			updated_at = EXCLUDED.updated_at
+	`, root.BatchID, root.StateRoot, root.CollateralAsset, root.MerkleRoot, root.LeafCount, root.TotalAmount, root.AnchorStatus, root.AnchorTxHash, root.AnchorSubmittedAt, root.AnchoredAt, root.LastError, root.LastErrorAt, acceptedAt)
+	return err
+}
+
+func (s *Store) replaceAcceptedEscapeLeaves(ctx context.Context, q sqlQueryer, batchID int64, leaves []AcceptedEscapeCollateralLeafRecord, acceptedAt int64) error {
+	if _, err := q.ExecContext(ctx, `DELETE FROM rollup_accepted_escape_leaves WHERE batch_id = $1`, batchID); err != nil {
+		return err
+	}
+	for _, leaf := range leaves {
+		proofJSON, err := json.Marshal(leaf.ProofHashes)
+		if err != nil {
+			return err
+		}
+		if _, err := q.ExecContext(ctx, `
+			INSERT INTO rollup_accepted_escape_leaves (
+				batch_id, account_id, wallet_address, collateral_asset, claim_amount,
+				leaf_index, leaf_hash, proof_hashes, claim_id, claim_status,
+				claim_tx_hash, claim_submitted_at, claimed_at, last_error, last_error_at, created_at, updated_at
+			)
+			VALUES (
+				$1, $2, $3, $4, $5,
+				$6, $7, $8::jsonb, $9, $10,
+				$11, $12, $13, $14, $15, $16, $16
+			)
+		`, batchID, leaf.AccountID, leaf.WalletAddress, leaf.CollateralAsset, leaf.ClaimAmount, leaf.LeafIndex, leaf.LeafHash, proofJSON, leaf.ClaimID, leaf.ClaimStatus, leaf.ClaimTxHash, leaf.ClaimSubmittedAt, leaf.ClaimedAt, leaf.LastError, leaf.LastErrorAt, acceptedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) upsertAcceptedWithdrawalRoot(ctx context.Context, q sqlQueryer, root AcceptedWithdrawalRootRecord, acceptedAt int64) error {
+	_, err := q.ExecContext(ctx, `
+		INSERT INTO rollup_accepted_withdrawal_roots (
+			batch_id, merkle_root, leaf_count, created_at, updated_at
+		)
+		VALUES ($1, $2, $3, $4, $4)
+		ON CONFLICT (batch_id) DO UPDATE SET
+			merkle_root = EXCLUDED.merkle_root,
+			leaf_count = EXCLUDED.leaf_count,
+			updated_at = EXCLUDED.updated_at
+	`, root.BatchID, root.MerkleRoot, root.LeafCount, acceptedAt)
+	return err
+}
+
+func (s *Store) replaceAcceptedWithdrawalLeaves(ctx context.Context, q sqlQueryer, batchID int64, leaves []AcceptedWithdrawalLeafRecord, acceptedAt int64) error {
+	if _, err := q.ExecContext(ctx, `DELETE FROM rollup_accepted_withdrawal_leaves WHERE batch_id = $1`, batchID); err != nil {
+		return err
+	}
+	for _, leaf := range leaves {
+		proofJSON, err := json.Marshal(leaf.ProofHashes)
+		if err != nil {
+			return err
+		}
+		if _, err := q.ExecContext(ctx, `
+			INSERT INTO rollup_accepted_withdrawal_leaves (
+				batch_id, withdrawal_id, account_id, wallet_address, recipient_address, amount,
+				leaf_index, leaf_hash, proof_hashes, claim_id, claim_status,
+				claim_tx_hash, claim_submitted_at, claimed_at, last_error, last_error_at, created_at, updated_at
+			)
+			VALUES (
+				$1, $2, $3, $4, $5, $6,
+				$7, $8, $9::jsonb, $10, $11,
+				$12, $13, $14, $15, $16, $17, $17
+			)
+		`, batchID, leaf.WithdrawalID, leaf.AccountID, leaf.WalletAddress, leaf.RecipientAddress, leaf.Amount, leaf.LeafIndex, leaf.LeafHash, proofJSON, leaf.ClaimID, leaf.ClaimStatus, leaf.ClaimTxHash, leaf.ClaimSubmittedAt, leaf.ClaimedAt, leaf.LastError, leaf.LastErrorAt, acceptedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }
@@ -1028,12 +1583,15 @@ func scanStoredSubmission(scanner rowScanner, submission *StoredSubmission) erro
 		&submission.AuthProofHash,
 		&submission.VerifierGateHash,
 		&submission.RecordCalldata,
+		&submission.PublishCalldata,
 		&submission.AcceptCalldata,
 		&submission.SubmissionData,
 		&submission.SubmissionHash,
 		&submission.RecordTxHash,
+		&submission.PublishTxHash,
 		&submission.AcceptTxHash,
 		&submission.RecordSubmittedAt,
+		&submission.PublishSubmittedAt,
 		&submission.AcceptSubmittedAt,
 		&submission.AcceptedAt,
 		&submission.LastError,

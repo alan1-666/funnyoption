@@ -300,6 +300,7 @@ fi
 
 cast send --rpc-url "${RPC_URL}" --private-key "${OPERATOR_PRIVATE_KEY}" "${ROLLUP_CORE_ADDRESS}" "setVerifier(address)" "${ROLLUP_VERIFIER_ADDRESS}" >/dev/null
 cast send --rpc-url "${RPC_URL}" --private-key "${OPERATOR_PRIVATE_KEY}" "${ROLLUP_CORE_ADDRESS}" "setVault(address)" "${VAULT_ADDRESS}" >/dev/null
+cast send --rpc-url "${RPC_URL}" --private-key "${OPERATOR_PRIVATE_KEY}" "${VAULT_ADDRESS}" "setRollupCore(address)" "${ROLLUP_CORE_ADDRESS}" >/dev/null
 cast send --rpc-url "${RPC_URL}" --private-key "${OPERATOR_PRIVATE_KEY}" "${ROLLUP_CORE_ADDRESS}" "setForcedWithdrawalGracePeriod(uint64)" "${FUNNYOPTION_LOCAL_CHAIN_FORCED_WITHDRAWAL_GRACE_PERIOD}" >/dev/null
 
 if (( DEPLOYED_FRESH == 0 )) && [[ -n "${EXISTING_START_BLOCK}" ]]; then

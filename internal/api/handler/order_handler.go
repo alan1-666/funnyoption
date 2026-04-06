@@ -1002,6 +1002,54 @@ func (h *OrderHandler) ListRollupForcedWithdrawals(ctx *gin.Context) {
 	writeCollectionResponse(ctx, http.StatusOK, items)
 }
 
+func (h *OrderHandler) ListRollupEscapeCollateralClaims(ctx *gin.Context) {
+	var req dto.ListRollupEscapeCollateralClaimsRequest
+	if err := ctx.ShouldBindQuery(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.UserID <= 0 && strings.TrimSpace(req.WalletAddress) == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "user_id or wallet_address is required"})
+		return
+	}
+	if h.store == nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
+		return
+	}
+
+	items, err := h.store.ListRollupEscapeCollateralClaims(ctx, req)
+	if err != nil {
+		h.logger.Error("list rollup escape collateral claims failed", "user_id", req.UserID, "wallet_address", req.WalletAddress, "err", err)
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "list rollup escape collateral claims failed"})
+		return
+	}
+	writeCollectionResponse(ctx, http.StatusOK, items)
+}
+
+func (h *OrderHandler) ListRollupWithdrawalClaims(ctx *gin.Context) {
+	var req dto.ListRollupWithdrawalClaimsRequest
+	if err := ctx.ShouldBindQuery(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.UserID <= 0 && strings.TrimSpace(req.WalletAddress) == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "user_id or wallet_address is required"})
+		return
+	}
+	if h.store == nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
+		return
+	}
+
+	items, err := h.store.ListRollupWithdrawalClaims(ctx, req)
+	if err != nil {
+		h.logger.Error("list rollup withdrawal claims failed", "user_id", req.UserID, "wallet_address", req.WalletAddress, "err", err)
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "list rollup withdrawal claims failed"})
+		return
+	}
+	writeCollectionResponse(ctx, http.StatusOK, items)
+}
+
 func (h *OrderHandler) GetRollupFreezeState(ctx *gin.Context) {
 	if h.store == nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})

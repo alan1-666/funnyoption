@@ -86,11 +86,13 @@ func BuildAcceptedReplaySnapshot(batches []StoredBatch) (AcceptedReplaySnapshot,
 	}
 
 	return AcceptedReplaySnapshot{
-		BatchID:   latestBatchID,
-		Roots:     roots,
-		Balances:  exportAcceptedBalances(latestBatchID, state.balances),
-		Positions: exportAcceptedPositions(latestBatchID, state.positions, settledByPosition),
-		Payouts:   exportAcceptedPayouts(payoutOrder, payoutByEventID),
+		BatchID:                latestBatchID,
+		Roots:                  roots,
+		Balances:               exportAcceptedBalances(latestBatchID, state.balances),
+		Positions:              exportAcceptedPositions(latestBatchID, state.positions, settledByPosition),
+		Payouts:                exportAcceptedPayouts(payoutOrder, payoutByEventID),
+		EscapeCollateralRoot:   AcceptedEscapeCollateralRootRecord{},
+		EscapeCollateralLeaves: []AcceptedEscapeCollateralLeafRecord{},
 	}, nil
 }
 

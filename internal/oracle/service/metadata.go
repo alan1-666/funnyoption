@@ -91,14 +91,25 @@ type Observation struct {
 }
 
 type Evidence struct {
-	Version        int                  `json:"version"`
-	ResolutionMode string               `json:"resolution_mode"`
-	Source         EvidenceSource       `json:"source"`
-	Rule           EvidenceRule         `json:"rule"`
-	Window         EvidenceWindow       `json:"window"`
-	Observation    *EvidenceObservation `json:"observation,omitempty"`
-	Retry          EvidenceRetry        `json:"retry"`
-	Dispatch       *EvidenceDispatch    `json:"dispatch,omitempty"`
+	Version        int                    `json:"version"`
+	ResolutionMode string                 `json:"resolution_mode"`
+	Source         EvidenceSource         `json:"source"`
+	Rule           EvidenceRule           `json:"rule"`
+	Window         EvidenceWindow         `json:"window"`
+	Observation    *EvidenceObservation   `json:"observation,omitempty"`
+	Attestation    *EvidenceAttestation   `json:"attestation,omitempty"`
+	Retry          EvidenceRetry          `json:"retry"`
+	Dispatch       *EvidenceDispatch      `json:"dispatch,omitempty"`
+}
+
+type EvidenceAttestation struct {
+	Version       int    `json:"version"`
+	AssetPair     string `json:"asset_pair"`
+	Price         string `json:"price"`
+	Timestamp     int64  `json:"timestamp"`
+	Provider      string `json:"provider"`
+	Signature     string `json:"signature"`
+	SignerAddress string `json:"signer_address"`
 }
 
 type EvidenceSource struct {
@@ -254,7 +265,7 @@ func (c *Contract) NormalizeObservedPrice(value string) (*big.Int, string, error
 	return normalizeDecimal(value, c.Metadata.Oracle.Price.Scale)
 }
 
-func BuildEvidence(contract *Contract, resolveAt int64, observation *Observation, previous json.RawMessage, attemptCount int, nextRetryAt int64, lastErrorCode string, resolvedOutcome string) json.RawMessage {
+func BuildEvidence(contract *Contract, resolveAt int64, observation *Observation, previous json.RawMessage, attemptCount int, nextRetryAt int64, lastErrorCode string, resolvedOutcome string, attestation *EvidenceAttestation) json.RawMessage {
 	if contract == nil {
 		return previous
 	}
@@ -300,6 +311,7 @@ func BuildEvidence(contract *Contract, resolveAt int64, observation *Observation
 			RawPayloadHash:  observation.RawPayloadHash,
 			RawPayload:      observation.RawPayload,
 		}
+		evidence.Attestation = attestation
 		evidence.Retry.LastAttemptAt = observation.FetchedAt
 		evidence.Retry.NextRetryAt = 0
 		evidence.Retry.LastErrorCode = lastErrorCode

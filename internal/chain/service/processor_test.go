@@ -12,19 +12,20 @@ import (
 )
 
 type fakeDepositStore struct {
-	deposit          chainmodel.Deposit
-	withdrawal       chainmodel.Withdrawal
-	lastDeposit      chainmodel.Deposit
-	lastWithdrawal   chainmodel.Withdrawal
-	upsertErr        error
-	markCreditedID   string
-	markDebitedID    string
-	walletUsers      map[string]int64
-	scanCursor       uint64
-	hasScanCursor    bool
-	savedScanCursors []uint64
-	claimTasks       []claimmodel.ClaimTask
-	confirmedClaimTx string
+	deposit                chainmodel.Deposit
+	withdrawal             chainmodel.Withdrawal
+	lastDeposit            chainmodel.Deposit
+	lastWithdrawal         chainmodel.Withdrawal
+	upsertErr              error
+	markCreditedID         string
+	markDebitedID          string
+	walletUsers            map[string]int64
+	scanCursor             uint64
+	hasScanCursor          bool
+	savedScanCursors       []uint64
+	claimTasks             []claimmodel.ClaimTask
+	confirmedClaimTx       string
+	confirmedEscapeClaimID string
 }
 
 func (f *fakeDepositStore) UpsertDeposit(ctx context.Context, deposit chainmodel.Deposit) (chainmodel.Deposit, error) {
@@ -115,6 +116,13 @@ func (f *fakeDepositStore) MarkClaimFailed(ctx context.Context, id int64, errMsg
 func (f *fakeDepositStore) MarkClaimConfirmedByTxHash(ctx context.Context, txHash string) error {
 	_ = ctx
 	f.confirmedClaimTx = txHash
+	return nil
+}
+
+func (f *fakeDepositStore) MarkAcceptedEscapeClaimConfirmed(ctx context.Context, claimID, txHash string) error {
+	_ = ctx
+	_ = txHash
+	f.confirmedEscapeClaimID = claimID
 	return nil
 }
 

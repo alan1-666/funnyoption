@@ -2,23 +2,29 @@ package service
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+
+	oraclecore "funnyoption/internal/oracle"
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
 
 type Worker struct {
-	logger       *slog.Logger
-	store        MarketStore
-	provider     priceProvider
-	publisher    sharedkafka.Publisher
-	topics       sharedkafka.Topics
-	pollInterval time.Duration
-	batchSize    int
+	logger         *slog.Logger
+	store          MarketStore
+	provider       priceProvider
+	publisher      sharedkafka.Publisher
+	topics         sharedkafka.Topics
+	pollInterval   time.Duration
+	batchSize      int
+	signerKey      *ecdsa.PrivateKey
+	trustedSigners []common.Address
 }
 
 func NewWorker(logger *slog.Logger, store MarketStore, provider priceProvider, publisher sharedkafka.Publisher, topics sharedkafka.Topics, pollInterval time.Duration) *Worker {
@@ -37,6 +43,14 @@ func NewWorker(logger *slog.Logger, store MarketStore, provider priceProvider, p
 		pollInterval: pollInterval,
 		batchSize:    20,
 	}
+}
+
+func (w *Worker) SetSignerKey(key *ecdsa.PrivateKey) {
+	w.signerKey = key
+}
+
+func (w *Worker) SetTrustedSigners(signers []common.Address) {
+	w.trustedSigners = signers
 }
 
 func (w *Worker) Start(ctx context.Context) {
@@ -149,6 +163,30 @@ func (w *Worker) processMarket(ctx context.Context, now int64, market EligibleMa
 		return w.writeTerminalResolution(ctx, market, contract, ErrorCodeUnsupportedRule)
 	}
 
+	var attestation *EvidenceAttestation
+	if w.signerKey != nil {
+		att, attErr := oraclecore.BuildOracleAttestation(
+			contract.Metadata.Oracle.Instrument.Symbol,
+			observation.ObservedPrice,
+			observation.EffectiveAt,
+			contract.Metadata.Oracle.ProviderKey,
+			w.signerKey,
+		)
+		if attErr != nil {
+			w.logger.Warn("failed to build oracle attestation", "market_id", market.MarketID, "err", attErr)
+		} else {
+			attestation = &EvidenceAttestation{
+				Version:       att.Version,
+				AssetPair:     att.AssetPair,
+				Price:         att.Price,
+				Timestamp:     att.Timestamp,
+				Provider:      att.Provider,
+				Signature:     att.Signature,
+				SignerAddress:  att.SignerAddress,
+			}
+		}
+	}
+
 	update := ResolutionUpdate{
 		MarketID:        market.MarketID,
 		Status:          "OBSERVED",
@@ -164,6 +202,7 @@ func (w *Worker) processMarket(ctx context.Context, now int64, market EligibleMa
 			0,
 			"",
 			resolvedOutcome,
+			attestation,
 		),
 	}
 	if err := w.store.UpsertResolution(ctx, update); err != nil {
@@ -203,6 +242,7 @@ func (w *Worker) writeObservationError(ctx context.Context, now int64, market El
 			nextRetryAt,
 			providerErr.Code,
 			"",
+			nil,
 		),
 	})
 }
@@ -223,6 +263,7 @@ func (w *Worker) writeTerminalResolution(ctx context.Context, market EligibleMar
 			0,
 			errorCode,
 			"",
+			nil,
 		),
 	})
 }

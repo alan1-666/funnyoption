@@ -6,6 +6,7 @@ import (
 )
 
 const DefaultCollateralDisplayDigits = 2
+const DefaultCollateralChainDecimals = 6
 
 func AccountingDigits(asset string) int {
 	switch NormalizeAsset(asset) {
@@ -14,6 +15,23 @@ func AccountingDigits(asset string) int {
 	default:
 		return 0
 	}
+}
+
+func ChainDecimals(asset string) int {
+	switch NormalizeAsset(asset) {
+	case DefaultCollateralAsset:
+		return DefaultCollateralChainDecimals
+	default:
+		return AccountingDigits(asset)
+	}
+}
+
+func AccountingToAssetChainAmount(asset string, accountingAmount int64) (int64, error) {
+	return AccountingToChainAmount(accountingAmount, ChainDecimals(asset), AccountingDigits(asset))
+}
+
+func ChainToAssetAccountingAmount(asset string, chainAmount int64) (int64, error) {
+	return ChainToAccountingAmount(chainAmount, ChainDecimals(asset), AccountingDigits(asset))
 }
 
 func ChainToAccountingAmount(rawAmount int64, chainDecimals int, accountingDigits int) (int64, error) {

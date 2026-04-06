@@ -109,6 +109,10 @@ func ZeroWithdrawalsRoot() string {
 	return hashStrings("shadow", "withdrawals", "empty")
 }
 
+func ZeroConservationHash() string {
+	return hashStrings("shadow", "conservation", "empty")
+}
+
 func ZeroStateRoot() string {
 	return hashStrings("shadow", "state", "v1", ZeroBalancesRoot(), hashStrings("shadow", "orders", ZeroNonceRoot(), ZeroOpenOrdersRoot()), hashStrings("shadow", "positions_funding", hashStrings("shadow", "positions", "leafs", "empty"), ZeroMarketFundingRoot(), ZeroInsuranceRoot()), ZeroWithdrawalsRoot())
 }

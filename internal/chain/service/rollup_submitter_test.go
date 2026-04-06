@@ -28,6 +28,7 @@ type fakeRollupSubmissionStore struct {
 	materializeErr       error
 	materializedByIDCall []string
 	frozen               bool
+	escapeRoots          []rollup.AcceptedEscapeCollateralRootRecord
 }
 
 func (f *fakeRollupSubmissionStore) ListSubmissions(ctx context.Context) ([]rollup.StoredSubmission, error) {
@@ -81,6 +82,73 @@ func (f *fakeRollupSubmissionStore) MaterializeAcceptedSubmission(ctx context.Co
 func (f *fakeRollupSubmissionStore) RollupFrozen(ctx context.Context) (bool, error) {
 	_ = ctx
 	return f.frozen, nil
+}
+
+func (f *fakeRollupSubmissionStore) NextEscapeCollateralRootForAnchor(ctx context.Context) (rollup.AcceptedEscapeCollateralRootRecord, bool, error) {
+	_ = ctx
+	for _, root := range f.escapeRoots {
+		switch root.AnchorStatus {
+		case rollup.EscapeCollateralAnchorStatusReady, rollup.EscapeCollateralAnchorStatusSubmitted, rollup.EscapeCollateralAnchorStatusFailed:
+			return root, true, nil
+		}
+	}
+	return rollup.AcceptedEscapeCollateralRootRecord{}, false, nil
+}
+
+func (f *fakeRollupSubmissionStore) MarkEscapeCollateralRootSubmitted(ctx context.Context, batchID int64, txHash string) (rollup.AcceptedEscapeCollateralRootRecord, error) {
+	_ = ctx
+	for i := range f.escapeRoots {
+		if f.escapeRoots[i].BatchID == batchID {
+			f.escapeRoots[i].AnchorStatus = rollup.EscapeCollateralAnchorStatusSubmitted
+			f.escapeRoots[i].AnchorTxHash = txHash
+			f.escapeRoots[i].LastError = ""
+			f.escapeRoots[i].LastErrorAt = 0
+			return f.escapeRoots[i], nil
+		}
+	}
+	return rollup.AcceptedEscapeCollateralRootRecord{}, errors.New("escape root not found")
+}
+
+func (f *fakeRollupSubmissionStore) MarkEscapeCollateralRootAnchored(ctx context.Context, batchID int64) (rollup.AcceptedEscapeCollateralRootRecord, error) {
+	_ = ctx
+	for i := range f.escapeRoots {
+		if f.escapeRoots[i].BatchID == batchID {
+			f.escapeRoots[i].AnchorStatus = rollup.EscapeCollateralAnchorStatusAnchored
+			return f.escapeRoots[i], nil
+		}
+	}
+	return rollup.AcceptedEscapeCollateralRootRecord{}, errors.New("escape root not found")
+}
+
+func (f *fakeRollupSubmissionStore) MarkEscapeCollateralRootFailed(ctx context.Context, batchID int64, errMsg string) (rollup.AcceptedEscapeCollateralRootRecord, error) {
+	_ = ctx
+	for i := range f.escapeRoots {
+		if f.escapeRoots[i].BatchID == batchID {
+			f.escapeRoots[i].AnchorStatus = rollup.EscapeCollateralAnchorStatusFailed
+			f.escapeRoots[i].LastError = errMsg
+			return f.escapeRoots[i], nil
+		}
+	}
+	return rollup.AcceptedEscapeCollateralRootRecord{}, errors.New("escape root not found")
+}
+
+func (f *fakeRollupSubmissionStore) MarkSubmissionPublishSubmitted(ctx context.Context, submissionID, txHash string) (rollup.StoredSubmission, error) {
+	_ = ctx
+	return f.update(submissionID, func(item *rollup.StoredSubmission) {
+		item.Status = rollup.SubmissionStatusPublishSubmitted
+		item.PublishTxHash = txHash
+		item.LastError = ""
+		item.LastErrorAt = 0
+	})
+}
+
+func (f *fakeRollupSubmissionStore) MarkSubmissionDataPublished(ctx context.Context, submissionID string) (rollup.StoredSubmission, error) {
+	_ = ctx
+	return f.update(submissionID, func(item *rollup.StoredSubmission) {
+		item.Status = rollup.SubmissionStatusDataPublished
+		item.LastError = ""
+		item.LastErrorAt = 0
+	})
 }
 
 func (f *fakeRollupSubmissionStore) MarkSubmissionRecordSubmitted(ctx context.Context, submissionID, txHash string) (rollup.StoredSubmission, error) {
@@ -336,9 +404,9 @@ func TestRollupSubmissionProcessorPollOnceWaitsForRecordReconciliation(t *testin
 	}
 }
 
-func TestRollupSubmissionProcessorPollOnceAdvancesAccept(t *testing.T) {
+func TestRollupSubmissionProcessorPollOnceAdvancesPublish(t *testing.T) {
 	key := mustGenerateKey(t)
-	submission := mustTestStoredSubmission(t, "rsub_3", 3, rollup.SubmissionStatusRecordSubmitted)
+	submission := mustTestStoredSubmission(t, "rsub_3a", 3, rollup.SubmissionStatusRecordSubmitted)
 	expected := mustExpectedSubmissionState(t, submission)
 	recordTxHash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	store := &fakeRollupSubmissionStore{
@@ -354,6 +422,46 @@ func TestRollupSubmissionProcessorPollOnceAdvancesAccept(t *testing.T) {
 		receipts: map[string]*types.Receipt{
 			recordTxHash: {Status: types.ReceiptStatusSuccessful, BlockNumber: big.NewInt(9)},
 		},
+		callResults: map[string][]byte{
+			mustPackRollupCoreCallData(t, "latestBatchId"):   mustPackRollupCoreCallOutput(t, "latestBatchId", expected.BatchID),
+			mustPackRollupCoreCallData(t, "latestStateRoot"): mustPackRollupCoreCallOutput(t, "latestStateRoot", expected.NextStateRoot),
+			mustPackRollupCoreCallData(t, "batchMetadata", expected.BatchID): mustPackRollupCoreCallOutput(
+				t, "batchMetadata", expected.BatchDataHash, expected.PrevStateRoot, expected.NextStateRoot,
+			),
+		},
+	}
+	processor := newTestRollupSubmissionProcessor(t, key, store, sender)
+
+	progress, err := processor.PollOnce(context.Background())
+	if err != nil {
+		t.Fatalf("PollOnce returned error: %v", err)
+	}
+	if progress.Action != RollupSubmissionActionPublishSubmitted {
+		t.Fatalf("action = %s, want %s", progress.Action, RollupSubmissionActionPublishSubmitted)
+	}
+	if progress.Submission.Status != rollup.SubmissionStatusPublishSubmitted {
+		t.Fatalf("status = %s, want %s", progress.Submission.Status, rollup.SubmissionStatusPublishSubmitted)
+	}
+	if progress.Submission.PublishTxHash == "" {
+		t.Fatalf("expected publish tx hash")
+	}
+	if len(sender.sentTxs) != 1 {
+		t.Fatalf("sent tx count = %d, want 1", len(sender.sentTxs))
+	}
+}
+
+func TestRollupSubmissionProcessorPollOnceAdvancesAccept(t *testing.T) {
+	key := mustGenerateKey(t)
+	submission := mustTestStoredSubmission(t, "rsub_3", 3, rollup.SubmissionStatusDataPublished)
+	expected := mustExpectedSubmissionState(t, submission)
+	store := &fakeRollupSubmissionStore{
+		submissions: []rollup.StoredSubmission{submission},
+	}
+	sender := &fakeRollupTxSender{
+		nonce:    9,
+		chainID:  big.NewInt(97),
+		gasPrice: big.NewInt(1_000_000_000),
+		estimate: 120000,
 		callResults: map[string][]byte{
 			mustPackRollupCoreCallData(t, "latestBatchId"):   mustPackRollupCoreCallOutput(t, "latestBatchId", expected.BatchID),
 			mustPackRollupCoreCallData(t, "latestStateRoot"): mustPackRollupCoreCallOutput(t, "latestStateRoot", expected.NextStateRoot),
@@ -541,6 +649,9 @@ func TestRollupSubmissionProcessorRunUntilIdle(t *testing.T) {
 			if store.submissions[0].RecordTxHash == normalized {
 				return &types.Receipt{Status: types.ReceiptStatusSuccessful, BlockNumber: big.NewInt(21)}, nil
 			}
+			if store.submissions[0].PublishTxHash == normalized {
+				return &types.Receipt{Status: types.ReceiptStatusSuccessful, BlockNumber: big.NewInt(21)}, nil
+			}
 			if store.submissions[0].AcceptTxHash == normalized {
 				return &types.Receipt{Status: types.ReceiptStatusSuccessful, BlockNumber: big.NewInt(22)}, nil
 			}
@@ -570,6 +681,15 @@ func TestRollupSubmissionProcessorRunUntilIdle(t *testing.T) {
 				return mustPackRollupCoreCallOutput(t, "batchMetadata", expected.BatchDataHash, expected.PrevStateRoot, expected.NextStateRoot), nil
 			}
 			return mustPackRollupCoreCallOutput(t, "batchMetadata", common.Hash{}, common.Hash{}, common.Hash{}), nil
+		case mustPackRollupCoreCallData(t, "batchDataPublished", expected.BatchID):
+			publishTxHash := ""
+			if len(store.submissions) > 0 {
+				publishTxHash = store.submissions[0].PublishTxHash
+			}
+			if publishTxHash != "" {
+				return mustPackRollupCoreCallOutput(t, "batchDataPublished", true), nil
+			}
+			return mustPackRollupCoreCallOutput(t, "batchDataPublished", false), nil
 		case mustPackRollupCoreCallData(t, "latestAcceptedBatchId"):
 			if acceptTxHash != "" {
 				return mustPackRollupCoreCallOutput(t, "latestAcceptedBatchId", expected.BatchID), nil
@@ -625,8 +745,8 @@ func TestRollupSubmissionProcessorRunUntilIdle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunUntilIdle returned error: %v", err)
 	}
-	if len(run.Steps) < 4 {
-		t.Fatalf("expected multiple progress steps, got %d", len(run.Steps))
+	if len(run.Steps) < 5 {
+		t.Fatalf("expected multiple progress steps (record+publish+accept+reconcile), got %d", len(run.Steps))
 	}
 	last := run.Steps[len(run.Steps)-1]
 	if last.Action != RollupSubmissionActionNoop {
@@ -704,6 +824,7 @@ func mustTestStoredSubmission(
 		BatchID:          batchID,
 		Status:           status,
 		RecordCalldata:   "0x1111",
+		PublishCalldata:  "0x3333",
 		AcceptCalldata:   "0x2222",
 		BatchDataHash:    "0x" + strings.Repeat("11", 32),
 		NextStateRoot:    "0x" + strings.Repeat("77", 32),

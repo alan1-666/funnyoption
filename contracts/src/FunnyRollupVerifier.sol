@@ -16,6 +16,7 @@ library FunnyRollupVerifierTypes {
         bytes32 positionsFundingRoot;
         bytes32 withdrawalsRoot;
         bytes32 nextStateRoot;
+        bytes32 conservationHash;
     }
 
     struct VerifierContext {
@@ -54,12 +55,12 @@ contract FunnyRollupVerifier is IFunnyRollupBatchVerifier {
     bytes32 public constant PROOF_DATA_SCHEMA_V1_HASH = keccak256("funny-rollup-proof-data-v1");
     bytes32 public constant PLACEHOLDER_PROOF_V1_HASH = keccak256("funny-rollup-proof-placeholder-v1");
     // The first planned cryptographic lane keeps proofData-v1 and uses
-    // proofBytes = abi.encode(uint256[2] a, uint256[2][2] b, uint256[2] c),
+    // proofBytes = abi.encode(bytes32 transitionWitnessHash, uint256[2] a, uint256[2][2] b, uint256[2] c),
     // while proofTypeHash fixes the full verifier-facing contract: proving
     // system/curve, bytes32 signal lifting, exact circuit/vk, and byte codec.
     bytes32 public constant GROTH16_BN254_2X128_SHADOW_STATE_ROOT_GATE_V1_HASH =
         keccak256("funny-rollup-proof-groth16-bn254-2x128-shadow-state-root-gate-v1");
-    uint256 internal constant GROTH16_TUPLE_LENGTH = 0x100;
+    uint256 internal constant GROTH16_PROOF_BYTES_LENGTH = 0x1A0;
 
     FunnyRollupGroth16Backend public immutable groth16Backend;
 
@@ -129,17 +130,31 @@ contract FunnyRollupVerifier is IFunnyRollupBatchVerifier {
             return false;
         }
 
-        (uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c, bool decodedTupleOk) =
-            _decodeGroth16ProofTuple(proofData.proofBytes);
+        bytes32 transitionWitnessHash = _hashTransitionWitness(context);
+        (
+            bytes32 proofTransitionWitnessHash,
+            uint256[2] memory a,
+            uint256[2][2] memory b,
+            uint256[2] memory c,
+            uint256[2] memory commitments,
+            uint256[2] memory commitmentPok,
+            bool decodedTupleOk
+        ) = _decodeGroth16ProofTuple(proofData.proofBytes);
         if (!decodedTupleOk) {
             return false;
         }
+        if (proofTransitionWitnessHash != transitionWitnessHash) {
+            return false;
+        }
 
-        uint256[6] memory publicInputs = deriveGroth16PublicInputs(
-            publicSignals.batchEncodingHash, publicSignals.authProofHash, publicSignals.verifierGateHash
+        uint256[8] memory publicInputs = deriveGroth16PublicInputs(
+            publicSignals.batchEncodingHash,
+            publicSignals.authProofHash,
+            publicSignals.verifierGateHash,
+            transitionWitnessHash
         );
 
-        return groth16Backend.verifyTupleProof(a, b, c, publicInputs);
+        return groth16Backend.verifyTupleProofWithCommitments(a, b, c, commitments, commitmentPok, publicInputs);
     }
 
     function hashVerifierGate(FunnyRollupVerifierTypes.VerifierContext calldata context)
@@ -150,14 +165,28 @@ contract FunnyRollupVerifier is IFunnyRollupBatchVerifier {
         return _hashVerifierGate(context);
     }
 
-    function deriveGroth16PublicInputs(bytes32 batchEncodingHash, bytes32 authProofHash, bytes32 verifierGateHash)
+    function hashTransitionWitness(FunnyRollupVerifierTypes.VerifierContext calldata context)
+        external
+        pure
+        returns (bytes32)
+    {
+        return _hashTransitionWitness(context);
+    }
+
+    function deriveGroth16PublicInputs(
+        bytes32 batchEncodingHash,
+        bytes32 authProofHash,
+        bytes32 verifierGateHash,
+        bytes32 transitionWitnessHash
+    )
         public
         pure
-        returns (uint256[6] memory inputs)
+        returns (uint256[8] memory inputs)
     {
         (inputs[0], inputs[1]) = _splitBytes32(batchEncodingHash);
         (inputs[2], inputs[3]) = _splitBytes32(authProofHash);
         (inputs[4], inputs[5]) = _splitBytes32(verifierGateHash);
+        (inputs[6], inputs[7]) = _splitBytes32(transitionWitnessHash);
     }
 
     function _hashVerifierGate(FunnyRollupVerifierTypes.VerifierContext calldata context)
@@ -179,6 +208,32 @@ contract FunnyRollupVerifier is IFunnyRollupBatchVerifier {
                 context.publicInputs.positionsFundingRoot,
                 context.publicInputs.withdrawalsRoot,
                 context.publicInputs.nextStateRoot,
+                context.publicInputs.conservationHash,
+                context.authProofHash
+            )
+        );
+    }
+
+    function _hashTransitionWitness(FunnyRollupVerifierTypes.VerifierContext calldata context)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return sha256(
+            abi.encode(
+                context.batchEncodingHash,
+                context.publicInputs.batchId,
+                context.publicInputs.firstSequenceNo,
+                context.publicInputs.lastSequenceNo,
+                context.publicInputs.entryCount,
+                context.publicInputs.batchDataHash,
+                context.publicInputs.prevStateRoot,
+                context.publicInputs.balancesRoot,
+                context.publicInputs.ordersRoot,
+                context.publicInputs.positionsFundingRoot,
+                context.publicInputs.withdrawalsRoot,
+                context.publicInputs.nextStateRoot,
+                context.publicInputs.conservationHash,
                 context.authProofHash
             )
         );
@@ -280,13 +335,23 @@ contract FunnyRollupVerifier is IFunnyRollupBatchVerifier {
     function _decodeGroth16ProofTuple(bytes memory proofBytes)
         internal
         pure
-        returns (uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c, bool ok)
+        returns (
+            bytes32 transitionWitnessHash,
+            uint256[2] memory a,
+            uint256[2][2] memory b,
+            uint256[2] memory c,
+            uint256[2] memory commitments,
+            uint256[2] memory commitmentPok,
+            bool ok
+        )
     {
-        if (proofBytes.length != GROTH16_TUPLE_LENGTH) {
-            return (a, b, c, false);
+        if (proofBytes.length != GROTH16_PROOF_BYTES_LENGTH) {
+            return (bytes32(0), a, b, c, commitments, commitmentPok, false);
         }
-        (a, b, c) = abi.decode(proofBytes, (uint256[2], uint256[2][2], uint256[2]));
-        return (a, b, c, true);
+        (transitionWitnessHash, a, b, c, commitments, commitmentPok) = abi.decode(
+            proofBytes, (bytes32, uint256[2], uint256[2][2], uint256[2], uint256[2], uint256[2])
+        );
+        return (transitionWitnessHash, a, b, c, commitments, commitmentPok, true);
     }
 
     function _splitBytes32(bytes32 value) internal pure returns (uint256 hi, uint256 lo) {

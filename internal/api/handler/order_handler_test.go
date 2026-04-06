@@ -205,6 +205,8 @@ type fakeQueryStore struct {
 	listWithdrawErr               error
 	listRollupForcedWithdrawResp  []dto.RollupForcedWithdrawalResponse
 	listRollupForcedWithdrawErr   error
+	listRollupEscapeClaimsResp    []dto.RollupEscapeCollateralClaimResponse
+	listRollupEscapeClaimsErr     error
 	getRollupFreezeResp           dto.RollupFreezeStateResponse
 	getRollupFreezeErr            error
 	listChainTxResp               []dto.ChainTransactionResponse
@@ -538,6 +540,18 @@ func (f *fakeQueryStore) ListRollupForcedWithdrawals(ctx context.Context, req dt
 	_ = ctx
 	_ = req
 	return f.listRollupForcedWithdrawResp, f.listRollupForcedWithdrawErr
+}
+
+func (f *fakeQueryStore) ListRollupEscapeCollateralClaims(ctx context.Context, req dto.ListRollupEscapeCollateralClaimsRequest) ([]dto.RollupEscapeCollateralClaimResponse, error) {
+	_ = ctx
+	_ = req
+	return f.listRollupEscapeClaimsResp, f.listRollupEscapeClaimsErr
+}
+
+func (f *fakeQueryStore) ListRollupWithdrawalClaims(ctx context.Context, req dto.ListRollupWithdrawalClaimsRequest) ([]dto.RollupWithdrawalClaimResponse, error) {
+	_ = ctx
+	_ = req
+	return nil, nil
 }
 
 func (f *fakeQueryStore) GetRollupFreezeState(ctx context.Context) (dto.RollupFreezeStateResponse, error) {

@@ -15,18 +15,40 @@ import (
 	shareddb "funnyoption/internal/shared/db"
 
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
+const rollupEscapeCollateralRootABIJSON = `[{
+  "type":"function",
+  "name":"recordEscapeCollateralRoot",
+  "stateMutability":"nonpayable",
+  "inputs":[
+    {"name":"batchId","type":"uint64"},
+    {"name":"merkleRoot","type":"bytes32"},
+    {"name":"leafCount","type":"uint64"},
+    {"name":"totalAmount","type":"uint256"}
+  ],
+  "outputs":[]
+}]`
+
+var rollupEscapeCollateralRootABI = mustEscapeCollateralRootABI(rollupEscapeCollateralRootABIJSON)
+
 const (
 	RollupSubmissionActionNoop            = "NOOP"
 	RollupSubmissionActionFrozen          = "FROZEN"
+	RollupSubmissionActionEscapeRootSubmitted = "ESCAPE_ROOT_SUBMITTED"
+	RollupSubmissionActionEscapeRootPending   = "ESCAPE_ROOT_PENDING"
+	RollupSubmissionActionEscapeRootAnchored  = "ESCAPE_ROOT_ANCHORED"
+	RollupSubmissionActionEscapeRootFailed    = "ESCAPE_ROOT_FAILED"
 	RollupSubmissionActionBlockedAuth     = "BLOCKED_AUTH"
 	RollupSubmissionActionFailedBlocked   = "FAILED_BLOCKED"
 	RollupSubmissionActionRecordSubmitted = "RECORD_SUBMITTED"
 	RollupSubmissionActionRecordPending   = "RECORD_PENDING"
+	RollupSubmissionActionPublishSubmitted = "PUBLISH_SUBMITTED"
+	RollupSubmissionActionPublishPending   = "PUBLISH_PENDING"
 	RollupSubmissionActionAcceptSubmitted = "ACCEPT_SUBMITTED"
 	RollupSubmissionActionAcceptPending   = "ACCEPT_PENDING"
 	RollupSubmissionActionAccepted        = "ACCEPTED"
@@ -37,9 +59,15 @@ type rollupSubmissionStore interface {
 	ListSubmissions(ctx context.Context) ([]rollup.StoredSubmission, error)
 	MaterializeAcceptedSubmissions(ctx context.Context) ([]rollup.AcceptedSubmissionMaterialization, error)
 	MaterializeAcceptedSubmission(ctx context.Context, submissionID string) (rollup.AcceptedSubmissionMaterialization, error)
+	NextEscapeCollateralRootForAnchor(ctx context.Context) (rollup.AcceptedEscapeCollateralRootRecord, bool, error)
+	MarkEscapeCollateralRootSubmitted(ctx context.Context, batchID int64, txHash string) (rollup.AcceptedEscapeCollateralRootRecord, error)
+	MarkEscapeCollateralRootAnchored(ctx context.Context, batchID int64) (rollup.AcceptedEscapeCollateralRootRecord, error)
+	MarkEscapeCollateralRootFailed(ctx context.Context, batchID int64, errMsg string) (rollup.AcceptedEscapeCollateralRootRecord, error)
 	RollupFrozen(ctx context.Context) (bool, error)
 	PrepareNextSubmission(ctx context.Context, limit int) (rollup.PreparedShadowSubmission, error)
 	MarkSubmissionRecordSubmitted(ctx context.Context, submissionID, txHash string) (rollup.StoredSubmission, error)
+	MarkSubmissionPublishSubmitted(ctx context.Context, submissionID, txHash string) (rollup.StoredSubmission, error)
+	MarkSubmissionDataPublished(ctx context.Context, submissionID string) (rollup.StoredSubmission, error)
 	MarkSubmissionAcceptSubmitted(ctx context.Context, submissionID, txHash string) (rollup.StoredSubmission, error)
 	MarkSubmissionAccepted(ctx context.Context, submissionID string) (rollup.StoredSubmission, error)
 	MarkSubmissionFailed(ctx context.Context, submissionID, errMsg string) (rollup.StoredSubmission, error)
@@ -60,6 +88,7 @@ type RollupSubmissionProgress struct {
 	Action     string                  `json:"action"`
 	Prepared   bool                    `json:"prepared"`
 	Submission rollup.StoredSubmission `json:"submission"`
+	EscapeRoot rollup.AcceptedEscapeCollateralRootRecord `json:"escape_root"`
 	TxHash     string                  `json:"tx_hash,omitempty"`
 	Note       string                  `json:"note,omitempty"`
 }
@@ -210,14 +239,19 @@ func (p *RollupSubmissionProcessor) RunUntilIdle(ctx context.Context) (RollupSub
 		switch progress.Action {
 		case RollupSubmissionActionNoop,
 			RollupSubmissionActionFrozen,
+			RollupSubmissionActionEscapeRootFailed,
 			RollupSubmissionActionBlockedAuth,
 			RollupSubmissionActionFailedBlocked,
 			RollupSubmissionActionFailed:
 			return run, nil
-		case RollupSubmissionActionAccepted:
+		case RollupSubmissionActionAccepted, RollupSubmissionActionEscapeRootAnchored:
 			continue
 		case RollupSubmissionActionRecordSubmitted,
 			RollupSubmissionActionRecordPending,
+			RollupSubmissionActionPublishSubmitted,
+			RollupSubmissionActionPublishPending,
+			RollupSubmissionActionEscapeRootSubmitted,
+			RollupSubmissionActionEscapeRootPending,
 			RollupSubmissionActionAcceptSubmitted,
 			RollupSubmissionActionAcceptPending:
 			if err := sleepWithContext(ctx, p.pollInterval); err != nil {
@@ -242,6 +276,24 @@ func (p *RollupSubmissionProcessor) PollOnce(ctx context.Context) (RollupSubmiss
 			Action: RollupSubmissionActionFrozen,
 			Note:   "rollup core is frozen; submission runtime is idle",
 		}, nil
+	}
+	escapeRoot, hasEscapeRoot, err := p.store.NextEscapeCollateralRootForAnchor(ctx)
+	if err != nil {
+		return RollupSubmissionProgress{}, err
+	}
+	if hasEscapeRoot {
+		switch escapeRoot.AnchorStatus {
+		case rollup.EscapeCollateralAnchorStatusReady:
+			return p.submitEscapeRootAnchor(ctx, escapeRoot)
+		case rollup.EscapeCollateralAnchorStatusSubmitted:
+			return p.advanceAfterEscapeRootReceipt(ctx, escapeRoot)
+		case rollup.EscapeCollateralAnchorStatusFailed:
+			return RollupSubmissionProgress{
+				Action:     RollupSubmissionActionEscapeRootFailed,
+				EscapeRoot: escapeRoot,
+				Note:       "earliest accepted escape root is in FAILED state and blocks later roots",
+			}, nil
+		}
 	}
 	submission, prepared, err := p.nextSubmission(ctx)
 	if err != nil {
@@ -273,6 +325,10 @@ func (p *RollupSubmissionProcessor) PollOnce(ctx context.Context) (RollupSubmiss
 		return p.submitRecordLeg(ctx, submission, prepared)
 	case rollup.SubmissionStatusRecordSubmitted:
 		return p.advanceAfterRecordReceipt(ctx, submission)
+	case rollup.SubmissionStatusDataPublished:
+		return p.submitAcceptLeg(ctx, submission)
+	case rollup.SubmissionStatusPublishSubmitted:
+		return p.advanceAfterPublishReceipt(ctx, submission)
 	case rollup.SubmissionStatusAcceptSubmitted:
 		return p.advanceAfterAcceptReceipt(ctx, submission)
 	case rollup.SubmissionStatusAccepted:
@@ -300,6 +356,8 @@ func (p *RollupSubmissionProcessor) nextSubmission(ctx context.Context) (rollup.
 			rollup.SubmissionStatusFailed,
 			rollup.SubmissionStatusReady,
 			rollup.SubmissionStatusRecordSubmitted,
+			rollup.SubmissionStatusPublishSubmitted,
+			rollup.SubmissionStatusDataPublished,
 			rollup.SubmissionStatusAcceptSubmitted:
 			return submission, false, nil
 		default:
@@ -312,6 +370,78 @@ func (p *RollupSubmissionProcessor) nextSubmission(ctx context.Context) (rollup.
 		return rollup.StoredSubmission{}, false, err
 	}
 	return prepared.StoredSubmission, true, nil
+}
+
+func (p *RollupSubmissionProcessor) submitEscapeRootAnchor(
+	ctx context.Context,
+	root rollup.AcceptedEscapeCollateralRootRecord,
+) (RollupSubmissionProgress, error) {
+	txHash, err := p.submitCalldata(ctx, mustPackEscapeCollateralRootCalldata(root))
+	if err != nil {
+		_, _ = p.store.MarkEscapeCollateralRootFailed(ctx, root.BatchID, err.Error())
+		return RollupSubmissionProgress{}, err
+	}
+	updated, err := p.store.MarkEscapeCollateralRootSubmitted(ctx, root.BatchID, txHash)
+	if err != nil {
+		return RollupSubmissionProgress{}, err
+	}
+	return RollupSubmissionProgress{
+		Action:     RollupSubmissionActionEscapeRootSubmitted,
+		EscapeRoot: updated,
+		TxHash:     updated.AnchorTxHash,
+	}, nil
+}
+
+func (p *RollupSubmissionProcessor) advanceAfterEscapeRootReceipt(
+	ctx context.Context,
+	root rollup.AcceptedEscapeCollateralRootRecord,
+) (RollupSubmissionProgress, error) {
+	receipt, err := p.lookupReceipt(ctx, root.AnchorTxHash)
+	if err != nil {
+		_, _ = p.store.MarkEscapeCollateralRootFailed(ctx, root.BatchID, err.Error())
+		return RollupSubmissionProgress{}, err
+	}
+	if receipt == nil {
+		return RollupSubmissionProgress{
+			Action:     RollupSubmissionActionEscapeRootPending,
+			EscapeRoot: root,
+			TxHash:     root.AnchorTxHash,
+			Note:       "recordEscapeCollateralRoot tx is still pending",
+		}, nil
+	}
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		updated, updateErr := p.store.MarkEscapeCollateralRootFailed(ctx, root.BatchID, "recordEscapeCollateralRoot tx reverted onchain")
+		if updateErr != nil {
+			return RollupSubmissionProgress{}, updateErr
+		}
+		return RollupSubmissionProgress{
+			Action:     RollupSubmissionActionEscapeRootFailed,
+			EscapeRoot: updated,
+			TxHash:     updated.AnchorTxHash,
+		}, nil
+	}
+	observed, err := p.loadEscapeCollateralRootState(ctx, resolveReceiptBlockNumber(receipt), uint64(root.BatchID))
+	if err != nil {
+		return RollupSubmissionProgress{}, err
+	}
+	if observed.LatestEscapeCollateralBatchID != uint64(root.BatchID) ||
+		observed.MerkleRoot != common.HexToHash(root.MerkleRoot) {
+		return RollupSubmissionProgress{
+			Action:     RollupSubmissionActionEscapeRootPending,
+			EscapeRoot: root,
+			TxHash:     root.AnchorTxHash,
+			Note:       "escape collateral root receipt succeeded but onchain anchor state has not reconciled yet",
+		}, nil
+	}
+	updated, err := p.store.MarkEscapeCollateralRootAnchored(ctx, root.BatchID)
+	if err != nil {
+		return RollupSubmissionProgress{}, err
+	}
+	return RollupSubmissionProgress{
+		Action:     RollupSubmissionActionEscapeRootAnchored,
+		EscapeRoot: updated,
+		TxHash:     updated.AnchorTxHash,
+	}, nil
 }
 
 func (p *RollupSubmissionProcessor) submitRecordLeg(
@@ -382,6 +512,87 @@ func (p *RollupSubmissionProcessor) advanceAfterRecordReceipt(
 		}, nil
 	}
 
+	return p.submitPublishDataLeg(ctx, submission)
+}
+
+func (p *RollupSubmissionProcessor) submitPublishDataLeg(
+	ctx context.Context,
+	submission rollup.StoredSubmission,
+) (RollupSubmissionProgress, error) {
+	txHash, err := p.submitCalldata(ctx, submission.PublishCalldata)
+	if err != nil {
+		_, _ = p.store.RecordSubmissionError(ctx, submission.SubmissionID, err.Error())
+		return RollupSubmissionProgress{}, err
+	}
+	updated, err := p.store.MarkSubmissionPublishSubmitted(ctx, submission.SubmissionID, txHash)
+	if err != nil {
+		return RollupSubmissionProgress{}, err
+	}
+	return RollupSubmissionProgress{
+		Action:     RollupSubmissionActionPublishSubmitted,
+		Submission: updated,
+		TxHash:     updated.PublishTxHash,
+	}, nil
+}
+
+func (p *RollupSubmissionProcessor) advanceAfterPublishReceipt(
+	ctx context.Context,
+	submission rollup.StoredSubmission,
+) (RollupSubmissionProgress, error) {
+	receipt, err := p.lookupReceipt(ctx, submission.PublishTxHash)
+	if err != nil {
+		_, _ = p.store.RecordSubmissionError(ctx, submission.SubmissionID, err.Error())
+		return RollupSubmissionProgress{}, err
+	}
+	if receipt == nil {
+		return RollupSubmissionProgress{
+			Action:     RollupSubmissionActionPublishPending,
+			Submission: submission,
+			TxHash:     submission.PublishTxHash,
+			Note:       "publishBatchData tx is still pending",
+		}, nil
+	}
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		updated, updateErr := p.store.MarkSubmissionFailed(
+			ctx,
+			submission.SubmissionID,
+			fmt.Sprintf("publishBatchData tx reverted: %s", submission.PublishTxHash),
+		)
+		if updateErr != nil {
+			return RollupSubmissionProgress{}, updateErr
+		}
+		return RollupSubmissionProgress{
+			Action:     RollupSubmissionActionFailed,
+			Submission: updated,
+			TxHash:     submission.PublishTxHash,
+		}, nil
+	}
+
+	reconciled, err := p.reconcilePublishDataState(ctx, submission, receipt)
+	if err != nil {
+		_, _ = p.store.RecordSubmissionError(ctx, submission.SubmissionID, err.Error())
+		return RollupSubmissionProgress{}, err
+	}
+	if !reconciled {
+		return RollupSubmissionProgress{
+			Action:     RollupSubmissionActionPublishPending,
+			Submission: submission,
+			TxHash:     submission.PublishTxHash,
+			Note:       "publishBatchData receipt succeeded; waiting for visible onchain DA reconciliation",
+		}, nil
+	}
+
+	updated, err := p.store.MarkSubmissionDataPublished(ctx, submission.SubmissionID)
+	if err != nil {
+		return RollupSubmissionProgress{}, err
+	}
+	return p.submitAcceptLeg(ctx, updated)
+}
+
+func (p *RollupSubmissionProcessor) submitAcceptLeg(
+	ctx context.Context,
+	submission rollup.StoredSubmission,
+) (RollupSubmissionProgress, error) {
 	txHash, err := p.submitCalldata(ctx, submission.AcceptCalldata)
 	if err != nil {
 		_, _ = p.store.RecordSubmissionError(ctx, submission.SubmissionID, err.Error())
@@ -522,6 +733,32 @@ func (p *RollupSubmissionProcessor) submitCalldata(ctx context.Context, calldata
 		return "", err
 	}
 	return normalizeChainTxHash(signedTx.Hash().Hex()), nil
+}
+
+func mustEscapeCollateralRootABI(raw string) abi.ABI {
+	parsed, err := abi.JSON(strings.NewReader(raw))
+	if err != nil {
+		panic(err)
+	}
+	return parsed
+}
+
+func mustPackEscapeCollateralRootCalldata(root rollup.AcceptedEscapeCollateralRootRecord) string {
+	method := rollupEscapeCollateralRootABI.Methods["recordEscapeCollateralRoot"]
+	data, err := method.Inputs.Pack(
+		uint64(root.BatchID),
+		common.HexToHash(root.MerkleRoot),
+		uint64(root.LeafCount),
+		big.NewInt(root.TotalAmount),
+	)
+	if err != nil {
+		panic(err)
+	}
+	return "0x" + hexEncodeWithSelector(method.ID, data)
+}
+
+func hexEncodeWithSelector(selector []byte, args []byte) string {
+	return common.Bytes2Hex(append(append([]byte(nil), selector...), args...))
 }
 
 type expectedRollupSubmissionState struct {

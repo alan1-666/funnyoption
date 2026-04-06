@@ -35,8 +35,10 @@ const (
 
 	SubmissionStatusReady           = "READY"
 	SubmissionStatusBlockedAuth     = "BLOCKED_AUTH"
-	SubmissionStatusRecordSubmitted = "RECORD_SUBMITTED"
-	SubmissionStatusAcceptSubmitted = "ACCEPT_SUBMITTED"
+	SubmissionStatusRecordSubmitted  = "RECORD_SUBMITTED"
+	SubmissionStatusPublishSubmitted = "PUBLISH_SUBMITTED"
+	SubmissionStatusDataPublished    = "DATA_PUBLISHED"
+	SubmissionStatusAcceptSubmitted  = "ACCEPT_SUBMITTED"
 	SubmissionStatusAccepted        = "ACCEPTED"
 	SubmissionStatusFailed          = "FAILED"
 
@@ -107,27 +109,30 @@ type StoredBatch struct {
 }
 
 type StoredSubmission struct {
-	SubmissionID      string
-	BatchID           int64
-	EncodingVersion   string
-	Status            string
-	BatchDataHash     string
-	NextStateRoot     string
-	AuthProofHash     string
-	VerifierGateHash  string
-	RecordCalldata    string
-	AcceptCalldata    string
-	SubmissionData    string
-	SubmissionHash    string
-	RecordTxHash      string
-	AcceptTxHash      string
-	RecordSubmittedAt int64
-	AcceptSubmittedAt int64
-	AcceptedAt        int64
-	LastError         string
-	LastErrorAt       int64
-	CreatedAt         int64
-	UpdatedAt         int64
+	SubmissionID       string
+	BatchID            int64
+	EncodingVersion    string
+	Status             string
+	BatchDataHash      string
+	NextStateRoot      string
+	AuthProofHash      string
+	VerifierGateHash   string
+	RecordCalldata     string
+	PublishCalldata    string
+	AcceptCalldata     string
+	SubmissionData     string
+	SubmissionHash     string
+	RecordTxHash       string
+	PublishTxHash      string
+	AcceptTxHash       string
+	RecordSubmittedAt  int64
+	PublishSubmittedAt int64
+	AcceptSubmittedAt  int64
+	AcceptedAt         int64
+	LastError          string
+	LastErrorAt        int64
+	CreatedAt          int64
+	UpdatedAt          int64
 }
 
 type AcceptedBatchRecord struct {
@@ -149,6 +154,43 @@ type AcceptedBatchRecord struct {
 	AcceptedAt           int64  `json:"accepted_at"`
 	CreatedAt            int64  `json:"created_at"`
 	UpdatedAt            int64  `json:"updated_at"`
+}
+
+type AcceptedEscapeCollateralRootRecord struct {
+	BatchID            int64  `json:"batch_id"`
+	StateRoot          string `json:"state_root"`
+	CollateralAsset    string `json:"collateral_asset"`
+	MerkleRoot         string `json:"merkle_root"`
+	LeafCount          int64  `json:"leaf_count"`
+	TotalAmount        int64  `json:"total_amount"`
+	AnchorStatus       string `json:"anchor_status"`
+	AnchorTxHash       string `json:"anchor_tx_hash"`
+	AnchorSubmittedAt  int64  `json:"anchor_submitted_at"`
+	AnchoredAt         int64  `json:"anchored_at"`
+	LastError          string `json:"last_error"`
+	LastErrorAt        int64  `json:"last_error_at"`
+	CreatedAt          int64  `json:"created_at"`
+	UpdatedAt          int64  `json:"updated_at"`
+}
+
+type AcceptedEscapeCollateralLeafRecord struct {
+	BatchID           int64    `json:"batch_id"`
+	AccountID         int64    `json:"account_id"`
+	WalletAddress     string   `json:"wallet_address"`
+	CollateralAsset   string   `json:"collateral_asset"`
+	ClaimAmount       int64    `json:"claim_amount"`
+	LeafIndex         int64    `json:"leaf_index"`
+	LeafHash          string   `json:"leaf_hash"`
+	ProofHashes       []string `json:"proof_hashes"`
+	ClaimID           string   `json:"claim_id"`
+	ClaimStatus       string   `json:"claim_status"`
+	ClaimTxHash       string   `json:"claim_tx_hash"`
+	ClaimSubmittedAt  int64    `json:"claim_submitted_at"`
+	ClaimedAt         int64    `json:"claimed_at"`
+	LastError         string   `json:"last_error"`
+	LastErrorAt       int64    `json:"last_error_at"`
+	CreatedAt         int64    `json:"created_at"`
+	UpdatedAt         int64    `json:"updated_at"`
 }
 
 type AcceptedWithdrawalRecord struct {
@@ -216,20 +258,26 @@ type AcceptedPayoutRecord struct {
 }
 
 type AcceptedReplaySnapshot struct {
-	BatchID   int64                    `json:"batch_id"`
-	Roots     RootSet                  `json:"roots"`
-	Balances  []AcceptedBalanceRecord  `json:"balances"`
-	Positions []AcceptedPositionRecord `json:"positions"`
-	Payouts   []AcceptedPayoutRecord   `json:"payouts"`
+	BatchID                 int64                               `json:"batch_id"`
+	Roots                   RootSet                             `json:"roots"`
+	Balances                []AcceptedBalanceRecord             `json:"balances"`
+	Positions               []AcceptedPositionRecord            `json:"positions"`
+	Payouts                 []AcceptedPayoutRecord              `json:"payouts"`
+	EscapeCollateralRoot    AcceptedEscapeCollateralRootRecord  `json:"escape_collateral_root"`
+	EscapeCollateralLeaves  []AcceptedEscapeCollateralLeafRecord `json:"escape_collateral_leaves"`
 }
 
 type AcceptedSubmissionMaterialization struct {
-	Batch               AcceptedBatchRecord        `json:"batch"`
-	AcceptedWithdrawals []AcceptedWithdrawalRecord `json:"accepted_withdrawals"`
-	AcceptedBalances    []AcceptedBalanceRecord    `json:"accepted_balances"`
-	AcceptedPositions   []AcceptedPositionRecord   `json:"accepted_positions"`
-	AcceptedPayouts     []AcceptedPayoutRecord     `json:"accepted_payouts"`
-	QueuedClaimRefs     []string                   `json:"queued_claim_refs"`
+	Batch                    AcceptedBatchRecord                 `json:"batch"`
+	AcceptedWithdrawals      []AcceptedWithdrawalRecord          `json:"accepted_withdrawals"`
+	AcceptedBalances         []AcceptedBalanceRecord             `json:"accepted_balances"`
+	AcceptedPositions        []AcceptedPositionRecord            `json:"accepted_positions"`
+	AcceptedPayouts          []AcceptedPayoutRecord              `json:"accepted_payouts"`
+	EscapeCollateralRoot     AcceptedEscapeCollateralRootRecord  `json:"escape_collateral_root"`
+	EscapeCollateralLeaves   []AcceptedEscapeCollateralLeafRecord `json:"escape_collateral_leaves"`
+	WithdrawalRoot           AcceptedWithdrawalRootRecord         `json:"withdrawal_root"`
+	WithdrawalLeaves         []AcceptedWithdrawalLeafRecord       `json:"withdrawal_leaves"`
+	QueuedClaimRefs          []string                            `json:"queued_claim_refs"`
 }
 
 type SubmissionBatchSummary struct {
@@ -245,6 +293,7 @@ type SubmissionBatchSummary struct {
 	PositionsFundingRoot string `json:"positions_funding_root"`
 	WithdrawalsRoot      string `json:"withdrawals_root"`
 	NextStateRoot        string `json:"next_state_root"`
+	ConservationHash     string `json:"conservation_hash"`
 }
 
 type RollupContractCall struct {
@@ -263,6 +312,7 @@ type ShadowBatchSubmissionBundle struct {
 	ShadowBatchContract     ShadowBatchContract    `json:"shadow_batch_contract"`
 	VerifierArtifactBundle  VerifierArtifactBundle `json:"verifier_artifact_bundle"`
 	RecordBatchMetadataCall RollupContractCall     `json:"record_batch_metadata_call"`
+	PublishBatchDataCall    RollupContractCall     `json:"publish_batch_data_call"`
 	AcceptVerifiedBatchCall RollupContractCall     `json:"accept_verified_batch_call"`
 	Blockers                []string               `json:"blockers,omitempty"`
 	Limitations             []string               `json:"limitations"`
@@ -307,6 +357,7 @@ type ShadowBatchPublicInputs struct {
 	PositionsFundingRoot string `json:"positions_funding_root"`
 	WithdrawalsRoot      string `json:"withdrawals_root"`
 	NextStateRoot        string `json:"next_state_root"`
+	ConservationHash     string `json:"conservation_hash"`
 }
 
 type L1BatchMetadata struct {
@@ -402,6 +453,7 @@ type SolidityVerifierPublicInputs struct {
 	PositionsFundingRoot string `json:"positions_funding_root"`
 	WithdrawalsRoot      string `json:"withdrawals_root"`
 	NextStateRoot        string `json:"next_state_root"`
+	ConservationHash     string `json:"conservation_hash"`
 }
 
 type SolidityL1BatchMetadata struct {
@@ -631,12 +683,23 @@ type WithdrawalRequestedPayload struct {
 }
 
 type MarketResolvedPayload struct {
-	MarketID         int64  `json:"market_id"`
-	ResolvedOutcome  string `json:"resolved_outcome"`
-	ResolverType     string `json:"resolver_type"`
-	ResolverRef      string `json:"resolver_ref"`
-	EvidenceHash     string `json:"evidence_hash"`
-	OccurredAtMillis int64  `json:"occurred_at_millis"`
+	MarketID             int64                      `json:"market_id"`
+	ResolvedOutcome      string                     `json:"resolved_outcome"`
+	ResolverType         string                     `json:"resolver_type"`
+	ResolverRef          string                     `json:"resolver_ref"`
+	EvidenceHash         string                     `json:"evidence_hash"`
+	OccurredAtMillis     int64                      `json:"occurred_at_millis"`
+	OracleAttestation    *OracleAttestationWitness  `json:"oracle_attestation,omitempty"`
+}
+
+type OracleAttestationWitness struct {
+	Version       int    `json:"version"`
+	AssetPair     string `json:"asset_pair"`
+	Price         string `json:"price"`
+	Timestamp     int64  `json:"timestamp"`
+	Provider      string `json:"provider"`
+	Signature     string `json:"signature"`
+	SignerAddress string `json:"signer_address"`
 }
 
 type SettlementPayoutPayload struct {

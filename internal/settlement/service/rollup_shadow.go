@@ -18,12 +18,13 @@ func buildMarketResolvedEntry(input ResolveMarketInput, record resolutionRecord)
 		SourceRef:        fmt.Sprintf("%d", input.MarketID),
 		OccurredAtMillis: input.OccurredAtMillis,
 		Payload: rollup.MarketResolvedPayload{
-			MarketID:         input.MarketID,
-			ResolvedOutcome:  input.ResolvedOutcome,
-			ResolverType:     strings.ToUpper(strings.TrimSpace(record.ResolverType)),
-			ResolverRef:      strings.TrimSpace(record.ResolverRef),
-			EvidenceHash:     hashResolutionEvidence(record.Evidence),
-			OccurredAtMillis: input.OccurredAtMillis,
+			MarketID:          input.MarketID,
+			ResolvedOutcome:   input.ResolvedOutcome,
+			ResolverType:      strings.ToUpper(strings.TrimSpace(record.ResolverType)),
+			ResolverRef:       strings.TrimSpace(record.ResolverRef),
+			EvidenceHash:      hashResolutionEvidence(record.Evidence),
+			OccurredAtMillis:  input.OccurredAtMillis,
+			OracleAttestation: extractOracleAttestation(record.Evidence),
 		},
 	}
 }
@@ -70,6 +71,22 @@ func buildSettlementPayoutEntry(event sharedkafka.SettlementCompletedEvent) roll
 			OccurredAtMillis: event.OccurredAtMillis,
 		},
 	}
+}
+
+func extractOracleAttestation(raw json.RawMessage) *rollup.OracleAttestationWitness {
+	if len(raw) == 0 {
+		return nil
+	}
+	var envelope struct {
+		Attestation *rollup.OracleAttestationWitness `json:"attestation"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil
+	}
+	if envelope.Attestation == nil || envelope.Attestation.Signature == "" {
+		return nil
+	}
+	return envelope.Attestation
 }
 
 func hashResolutionEvidence(raw json.RawMessage) string {

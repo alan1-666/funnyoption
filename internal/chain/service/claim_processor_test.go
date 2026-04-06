@@ -19,13 +19,14 @@ import (
 )
 
 type fakeClaimStore struct {
-	tasks           []chainmodel.ClaimTask
-	submittedTasks  []chainmodel.ClaimTask
-	submittedID     int64
-	submittedTxHash string
-	confirmedTxHash string
-	failedID        int64
-	failedError     string
+	tasks                  []chainmodel.ClaimTask
+	submittedTasks         []chainmodel.ClaimTask
+	submittedID            int64
+	submittedTxHash        string
+	confirmedTxHash        string
+	failedID               int64
+	failedError            string
+	confirmedEscapeClaimID string
 }
 
 func (f *fakeClaimStore) ListPendingClaims(ctx context.Context, limit int) ([]chainmodel.ClaimTask, error) {
@@ -57,6 +58,13 @@ func (f *fakeClaimStore) MarkClaimFailed(ctx context.Context, id int64, errMsg s
 func (f *fakeClaimStore) MarkClaimConfirmedByTxHash(ctx context.Context, txHash string) error {
 	_ = ctx
 	f.confirmedTxHash = txHash
+	return nil
+}
+
+func (f *fakeClaimStore) MarkAcceptedEscapeClaimConfirmed(ctx context.Context, claimID, txHash string) error {
+	_ = ctx
+	_ = txHash
+	f.confirmedEscapeClaimID = claimID
 	return nil
 }
 

@@ -340,7 +340,12 @@ func (l *DepositListener) handleClaimProcessedLog(ctx context.Context, logEntry 
 	if len(logEntry.Data) < 64 {
 		return fmt.Errorf("claim processed log payload is too short")
 	}
-	return l.store.MarkClaimConfirmedByTxHash(ctx, normalizeChainTxHash(logEntry.TxHash.Hex()))
+	claimID := strings.ToLower(common.BytesToHash(logEntry.Topics[1].Bytes()).Hex())
+	txHash := normalizeChainTxHash(logEntry.TxHash.Hex())
+	if err := l.store.MarkClaimConfirmedByTxHash(ctx, txHash); err != nil {
+		return err
+	}
+	return l.store.MarkAcceptedEscapeClaimConfirmed(ctx, claimID, txHash)
 }
 
 func confirmedHead(head uint64, confirmations uint64) (uint64, bool) {

@@ -43,6 +43,12 @@ func BuildShadowBatchPublicInputs(batch StoredBatch) ShadowBatchPublicInputs {
 	if encodingVersion == "" {
 		encodingVersion = BatchEncodingVersion
 	}
+	conservationHash := ZeroConservationHash()
+	if input, err := DecodeBatchInput(batch.InputData); err == nil {
+		if record, err := BuildConservationRecord(batch.BatchID, input.Entries); err == nil {
+			conservationHash = record.ConservationHash
+		}
+	}
 	return ShadowBatchPublicInputs{
 		EncodingVersion:      encodingVersion,
 		BatchID:              batch.BatchID,
@@ -56,6 +62,7 @@ func BuildShadowBatchPublicInputs(batch StoredBatch) ShadowBatchPublicInputs {
 		PositionsFundingRoot: defaultComponentRoot(batch.PositionsFundingRoot, hashStrings("shadow", "positions_funding", hashStrings("shadow", "positions", "leafs", "empty"), ZeroMarketFundingRoot(), ZeroInsuranceRoot())),
 		WithdrawalsRoot:      defaultComponentRoot(batch.WithdrawalsRoot, ZeroWithdrawalsRoot()),
 		NextStateRoot:        defaultStateRoot(batch.StateRoot),
+		ConservationHash:     conservationHash,
 	}
 }
 

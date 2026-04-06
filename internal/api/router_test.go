@@ -774,6 +774,18 @@ func (s *testQueryStore) ListRollupForcedWithdrawals(ctx context.Context, req dt
 	return nil, nil
 }
 
+func (s *testQueryStore) ListRollupEscapeCollateralClaims(ctx context.Context, req dto.ListRollupEscapeCollateralClaimsRequest) ([]dto.RollupEscapeCollateralClaimResponse, error) {
+	_ = ctx
+	_ = req
+	return nil, nil
+}
+
+func (s *testQueryStore) ListRollupWithdrawalClaims(ctx context.Context, req dto.ListRollupWithdrawalClaimsRequest) ([]dto.RollupWithdrawalClaimResponse, error) {
+	_ = ctx
+	_ = req
+	return nil, nil
+}
+
 func (s *testQueryStore) GetRollupFreezeState(ctx context.Context) (dto.RollupFreezeStateResponse, error) {
 	_ = ctx
 	return dto.RollupFreezeStateResponse{}, nil

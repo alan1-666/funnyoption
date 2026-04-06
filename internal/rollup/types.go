@@ -175,9 +175,60 @@ type AcceptedWithdrawalRecord struct {
 	UpdatedAt        int64  `json:"updated_at"`
 }
 
+type AcceptedBalanceRecord struct {
+	BatchID    int64  `json:"batch_id"`
+	AccountID  int64  `json:"account_id"`
+	Asset      string `json:"asset"`
+	Available  int64  `json:"available"`
+	Frozen     int64  `json:"frozen"`
+	SequenceNo int64  `json:"sequence_no"`
+	CreatedAt  int64  `json:"created_at"`
+	UpdatedAt  int64  `json:"updated_at"`
+}
+
+type AcceptedPositionRecord struct {
+	BatchID          int64  `json:"batch_id"`
+	AccountID        int64  `json:"account_id"`
+	MarketID         int64  `json:"market_id"`
+	Outcome          string `json:"outcome"`
+	PositionAsset    string `json:"position_asset"`
+	Quantity         int64  `json:"quantity"`
+	SettledQuantity  int64  `json:"settled_quantity"`
+	SettlementStatus string `json:"settlement_status"`
+	SequenceNo       int64  `json:"sequence_no"`
+	CreatedAt        int64  `json:"created_at"`
+	UpdatedAt        int64  `json:"updated_at"`
+}
+
+type AcceptedPayoutRecord struct {
+	EventID         string `json:"event_id"`
+	BatchID         int64  `json:"batch_id"`
+	MarketID        int64  `json:"market_id"`
+	UserID          int64  `json:"user_id"`
+	WinningOutcome  string `json:"winning_outcome"`
+	PositionAsset   string `json:"position_asset"`
+	SettledQuantity int64  `json:"settled_quantity"`
+	PayoutAsset     string `json:"payout_asset"`
+	PayoutAmount    int64  `json:"payout_amount"`
+	Status          string `json:"status"`
+	CreatedAt       int64  `json:"created_at"`
+	UpdatedAt       int64  `json:"updated_at"`
+}
+
+type AcceptedReplaySnapshot struct {
+	BatchID   int64                    `json:"batch_id"`
+	Roots     RootSet                  `json:"roots"`
+	Balances  []AcceptedBalanceRecord  `json:"balances"`
+	Positions []AcceptedPositionRecord `json:"positions"`
+	Payouts   []AcceptedPayoutRecord   `json:"payouts"`
+}
+
 type AcceptedSubmissionMaterialization struct {
 	Batch               AcceptedBatchRecord        `json:"batch"`
 	AcceptedWithdrawals []AcceptedWithdrawalRecord `json:"accepted_withdrawals"`
+	AcceptedBalances    []AcceptedBalanceRecord    `json:"accepted_balances"`
+	AcceptedPositions   []AcceptedPositionRecord   `json:"accepted_positions"`
+	AcceptedPayouts     []AcceptedPayoutRecord     `json:"accepted_payouts"`
 	QueuedClaimRefs     []string                   `json:"queued_claim_refs"`
 }
 

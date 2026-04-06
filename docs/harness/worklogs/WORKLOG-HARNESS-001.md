@@ -138,6 +138,34 @@
   - `WORKLOG-CICD-002.md`
   - `.github/workflows/staging-deploy.yml`
   - `scripts/deploy-staging.sh`
+
+### 2026-04-07 00:20 Asia/Shanghai
+
+- read:
+  - `TASK-CHAIN-029.md`
+  - `HANDSHAKE-CHAIN-029.md`
+  - `WORKLOG-CHAIN-029.md`
+  - `TASK-CHAIN-030.md`
+  - `HANDSHAKE-CHAIN-030.md`
+  - `WORKLOG-CHAIN-030.md`
+  - `docs/architecture/mode-b-zk-rollup.md`
+  - `docs/sql/schema.md`
+- changed:
+  - marked `TASK-CHAIN-030` complete in `PLAN.md` and the active master plan
+  - recorded the accepted-read-truth extension in architecture/schema docs
+- validated:
+  - `go test ./internal/rollup ./internal/api/handler ./internal/chain/service ./internal/api`
+  - `forge test --offline --match-path contracts/test/FunnyRollupCore.t.sol`
+  - live local API verification now shows accepted snapshot rows for:
+    - balances
+    - positions
+    - payouts
+- blockers:
+  - mutable backend write truth has not yet switched
+  - forced-withdraw / freeze / escape hatch still not implemented
+- next:
+  - continue from accepted read truth into forced-withdraw and fuller
+    accepted-root-first mutable truth boundaries
   - `docs/deploy/staging-bsc-testnet.md`
 - changed:
   - marked `TASK-CICD-002` as blocked in the active plan because commander review found a remote-script bootstrap ordering bug

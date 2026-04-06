@@ -726,6 +726,31 @@ worker 不必重新决定：
       - current SQL/Kafka balances / settlement truth 没切
       - forced-withdraw / freeze / escape hatch 还没实现
       - prover 仍然不是 full state-transition circuit
+  - `TASK-CHAIN-030` 继续把 accepted lane 从 withdrawal truth 扩到
+    balances / positions / payout read truth，但仍然只切读面，不切 mutable
+    backend 写路径：
+    - [`BuildAcceptedReplaySnapshot(...)`](/Users/zhangza/code/funnyoption/internal/rollup/accepted_snapshot.go)
+      现在会从 ordered accepted batches deterministic 导出：
+      - accepted balances snapshot
+      - accepted positions snapshot
+      - accepted settlement payout snapshot
+    - [`Store.MaterializeAcceptedSubmission(...)`](/Users/zhangza/code/funnyoption/internal/rollup/store.go)
+      现在除了 accepted batch / withdrawal 物化，还会重建：
+      - `rollup_accepted_balances`
+      - `rollup_accepted_positions`
+      - `rollup_accepted_payouts`
+    - `/api/v1/balances`、`/api/v1/positions`、`/api/v1/payouts`
+      在 accepted batch 可见时，都会优先读 accepted snapshot tables
+    - 本地 live API 已验证：
+      - `GET /api/v1/balances?user_id=1001&limit=20`
+      - `GET /api/v1/positions?user_id=1001&limit=20`
+      - `GET /api/v1/payouts?user_id=1001&limit=20`
+      都会直接反映 accepted snapshot rows
+    - 但这仍然不是完整 production truth switch：
+      - matching / account / settlement 的 mutable backend writes 仍未改成
+        accepted-root first
+      - forced-withdraw / freeze / escape hatch 仍未实现
+      - prover 仍然不是 full state-transition circuit
 
 因此边界明确分成三层：
 

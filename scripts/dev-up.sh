@@ -314,6 +314,9 @@ DELETE FROM chain_deposits
  WHERE chain_name = 'anvil'
    AND network_name = 'local';
 TRUNCATE rollup_accepted_withdrawals,
+         rollup_accepted_payouts,
+         rollup_accepted_positions,
+         rollup_accepted_balances,
          rollup_accepted_batches,
          rollup_shadow_submissions,
          rollup_shadow_batches,

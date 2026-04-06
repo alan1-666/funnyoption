@@ -208,6 +208,11 @@ set +a
 - `chain_listener_cursors` 里对应本地 vault 的扫描 cursor
 - `chain_deposits` / `chain_withdrawals` 的本地 anvil 记录
 - `rollup_shadow_*` / `rollup_accepted_*` 的本地 shadow / accepted lane
+  - 包括 `rollup_accepted_balances`
+  - `rollup_accepted_positions`
+  - `rollup_accepted_payouts`
+  - `rollup_accepted_withdrawals`
+  - `rollup_accepted_batches`
 
 这样本地链重启后，不会再出现“数据库还记着旧链的 accepted batch / cursor，
 但新链 head 已经从零附近重新开始”的假状态。

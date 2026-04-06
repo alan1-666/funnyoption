@@ -1063,6 +1063,14 @@ func (s *SQLStore) ListTrades(ctx context.Context, req dto.ListTradesRequest) ([
 }
 
 func (s *SQLStore) ListBalances(ctx context.Context, req dto.ListBalancesRequest) ([]dto.BalanceResponse, error) {
+	acceptedVisible, err := s.acceptedReadTruthVisible(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if acceptedVisible {
+		return s.listAcceptedBalances(ctx, req)
+	}
+
 	var (
 		args    []any
 		filters []string
@@ -1103,6 +1111,14 @@ func (s *SQLStore) ListBalances(ctx context.Context, req dto.ListBalancesRequest
 }
 
 func (s *SQLStore) ListPositions(ctx context.Context, req dto.ListPositionsRequest) ([]dto.PositionResponse, error) {
+	acceptedVisible, err := s.acceptedReadTruthVisible(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if acceptedVisible {
+		return s.listAcceptedPositions(ctx, req)
+	}
+
 	var (
 		args    []any
 		filters []string
@@ -1156,6 +1172,14 @@ func (s *SQLStore) ListPositions(ctx context.Context, req dto.ListPositionsReque
 }
 
 func (s *SQLStore) ListPayouts(ctx context.Context, req dto.ListPayoutsRequest) ([]dto.PayoutResponse, error) {
+	acceptedVisible, err := s.acceptedReadTruthVisible(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if acceptedVisible {
+		return s.listAcceptedPayouts(ctx, req)
+	}
+
 	var (
 		args    []any
 		filters []string
@@ -1164,6 +1188,167 @@ func (s *SQLStore) ListPayouts(ctx context.Context, req dto.ListPayoutsRequest) 
 		SELECT event_id, market_id, user_id, winning_outcome, position_asset, settled_quantity,
 		       payout_asset, payout_amount, status, created_at, updated_at
 		FROM settlement_payouts
+	`
+
+	args = append(args, req.UserID)
+	filters = append(filters, fmt.Sprintf("user_id = $%d", len(args)))
+	if req.MarketID > 0 {
+		args = append(args, req.MarketID)
+		filters = append(filters, fmt.Sprintf("market_id = $%d", len(args)))
+	}
+	query += " WHERE " + strings.Join(filters, " AND ")
+	args = append(args, normalizeLimit(req.Limit))
+	query += fmt.Sprintf(" ORDER BY created_at DESC, event_id DESC LIMIT $%d", len(args))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var payouts []dto.PayoutResponse
+	for rows.Next() {
+		var item dto.PayoutResponse
+		if err := rows.Scan(
+			&item.EventID,
+			&item.MarketID,
+			&item.UserID,
+			&item.WinningOutcome,
+			&item.PositionAsset,
+			&item.SettledQuantity,
+			&item.PayoutAsset,
+			&item.PayoutAmount,
+			&item.Status,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		payouts = append(payouts, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return normalizeCollectionItems(payouts), nil
+}
+
+func (s *SQLStore) acceptedReadTruthVisible(ctx context.Context) (bool, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM rollup_accepted_batches
+			LIMIT 1
+		)
+	`)
+	var visible bool
+	if err := row.Scan(&visible); err != nil {
+		return false, err
+	}
+	return visible, nil
+}
+
+func (s *SQLStore) listAcceptedBalances(ctx context.Context, req dto.ListBalancesRequest) ([]dto.BalanceResponse, error) {
+	var (
+		args    []any
+		filters []string
+	)
+	query := `
+		SELECT account_id, asset, available, frozen, created_at, updated_at
+		FROM rollup_accepted_balances
+	`
+
+	args = append(args, req.UserID)
+	filters = append(filters, fmt.Sprintf("account_id = $%d", len(args)))
+	if asset := normalizeOptional(req.Asset); asset != "" {
+		args = append(args, asset)
+		filters = append(filters, fmt.Sprintf("asset = $%d", len(args)))
+	}
+	query += " WHERE " + strings.Join(filters, " AND ")
+	args = append(args, normalizeLimit(req.Limit))
+	query += fmt.Sprintf(" ORDER BY asset ASC LIMIT $%d", len(args))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var balances []dto.BalanceResponse
+	for rows.Next() {
+		var item dto.BalanceResponse
+		if err := rows.Scan(&item.UserID, &item.Asset, &item.Available, &item.Frozen, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		balances = append(balances, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return normalizeCollectionItems(balances), nil
+}
+
+func (s *SQLStore) listAcceptedPositions(ctx context.Context, req dto.ListPositionsRequest) ([]dto.PositionResponse, error) {
+	var (
+		args    []any
+		filters []string
+	)
+	query := `
+		SELECT market_id, account_id, outcome, position_asset, quantity, settled_quantity, created_at, updated_at
+		FROM rollup_accepted_positions
+	`
+
+	args = append(args, req.UserID)
+	filters = append(filters, fmt.Sprintf("account_id = $%d", len(args)))
+	if req.MarketID > 0 {
+		args = append(args, req.MarketID)
+		filters = append(filters, fmt.Sprintf("market_id = $%d", len(args)))
+	}
+	if outcome := normalizeOptional(req.Outcome); outcome != "" {
+		args = append(args, outcome)
+		filters = append(filters, fmt.Sprintf("outcome = $%d", len(args)))
+	}
+	query += " WHERE " + strings.Join(filters, " AND ")
+	args = append(args, normalizeLimit(req.Limit))
+	query += fmt.Sprintf(" ORDER BY updated_at DESC, market_id DESC LIMIT $%d", len(args))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var positions []dto.PositionResponse
+	for rows.Next() {
+		var item dto.PositionResponse
+		if err := rows.Scan(
+			&item.MarketID,
+			&item.UserID,
+			&item.Outcome,
+			&item.PositionAsset,
+			&item.Quantity,
+			&item.SettledQuantity,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		positions = append(positions, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return normalizeCollectionItems(positions), nil
+}
+
+func (s *SQLStore) listAcceptedPayouts(ctx context.Context, req dto.ListPayoutsRequest) ([]dto.PayoutResponse, error) {
+	var (
+		args    []any
+		filters []string
+	)
+	query := `
+		SELECT event_id, market_id, user_id, winning_outcome, position_asset, settled_quantity,
+		       payout_asset, payout_amount, status, created_at, updated_at
+		FROM rollup_accepted_payouts
 	`
 
 	args = append(args, req.UserID)

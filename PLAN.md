@@ -213,6 +213,11 @@ Detailed execution lives in `docs/harness/plans/active/`.
     (`CLAIMABLE` / `CLAIM_SUBMITTED` / `CLAIMED` / `CLAIM_FAILED`), and the
     current local lane has been proven end-to-end with real batch broadcasts,
     accepted roots, and one confirmed withdrawal claim
+  - `TASK-CHAIN-030` is complete: widen the accepted lane from withdrawal
+    truth into balances / positions / settlement payout read truth by
+    materializing accepted replay snapshots into durable tables and switching
+    the local read surfaces to those accepted mirrors when onchain-accepted
+    state exists
   - `TASK-API-006` is paused: narrow the repo-structure cleanup to
     `internal/api`, splitting routes/handlers/store concerns into clearer
     module-owned packages without widening into a full repo directory

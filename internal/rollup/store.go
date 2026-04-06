@@ -387,6 +387,30 @@ func (s *Store) MaterializeAcceptedSubmission(ctx context.Context, submissionID 
 		acceptedWithdrawals = append(acceptedWithdrawals, storedWithdrawal)
 	}
 
+	replayBatches, err := s.listAcceptedBatchesForReplay(ctx, tx)
+	if err != nil {
+		return AcceptedSubmissionMaterialization{}, err
+	}
+	snapshot, err := BuildAcceptedReplaySnapshot(replayBatches)
+	if err != nil {
+		return AcceptedSubmissionMaterialization{}, err
+	}
+	latestAccepted, err := s.latestAcceptedBatch(ctx, tx)
+	if err != nil {
+		return AcceptedSubmissionMaterialization{}, err
+	}
+	if latestAccepted.BatchID > 0 {
+		if snapshot.BatchID != latestAccepted.BatchID {
+			return AcceptedSubmissionMaterialization{}, fmt.Errorf("accepted replay batch mismatch: have %d want %d", snapshot.BatchID, latestAccepted.BatchID)
+		}
+		if snapshot.Roots.StateRoot != latestAccepted.NextStateRoot {
+			return AcceptedSubmissionMaterialization{}, fmt.Errorf("accepted replay state_root mismatch: have %s want %s", snapshot.Roots.StateRoot, latestAccepted.NextStateRoot)
+		}
+	}
+	if err := s.replaceAcceptedReadTruth(ctx, tx, snapshot, latestAccepted.AcceptedAt); err != nil {
+		return AcceptedSubmissionMaterialization{}, err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return AcceptedSubmissionMaterialization{}, err
 	}
@@ -394,6 +418,9 @@ func (s *Store) MaterializeAcceptedSubmission(ctx context.Context, submissionID 
 	return AcceptedSubmissionMaterialization{
 		Batch:               acceptedBatch,
 		AcceptedWithdrawals: acceptedWithdrawals,
+		AcceptedBalances:    snapshot.Balances,
+		AcceptedPositions:   snapshot.Positions,
+		AcceptedPayouts:     snapshot.Payouts,
 		QueuedClaimRefs:     queuedClaimRefs,
 	}, nil
 }
@@ -481,6 +508,86 @@ func (s *Store) loadBatchByID(ctx context.Context, q sqlQueryer, batchID int64) 
 		return StoredBatch{}, err
 	}
 	return batch, nil
+}
+
+func (s *Store) listAcceptedBatchesForReplay(ctx context.Context, q sqlQueryer) ([]StoredBatch, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT b.batch_id, b.encoding_version, b.first_sequence_no, b.last_sequence_no,
+		       b.entry_count, b.input_data, b.input_hash, b.prev_state_root,
+		       b.balances_root, b.orders_root, b.positions_funding_root,
+		       b.withdrawals_root, b.state_root, b.created_at
+		FROM rollup_shadow_batches b
+		INNER JOIN rollup_accepted_batches ab ON ab.batch_id = b.batch_id
+		ORDER BY b.batch_id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var batches []StoredBatch
+	for rows.Next() {
+		var batch StoredBatch
+		if err := rows.Scan(
+			&batch.BatchID,
+			&batch.EncodingVersion,
+			&batch.FirstSequence,
+			&batch.LastSequence,
+			&batch.EntryCount,
+			&batch.InputData,
+			&batch.InputHash,
+			&batch.PrevStateRoot,
+			&batch.BalancesRoot,
+			&batch.OrdersRoot,
+			&batch.PositionsFundingRoot,
+			&batch.WithdrawalsRoot,
+			&batch.StateRoot,
+			&batch.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		batches = append(batches, batch)
+	}
+	return batches, rows.Err()
+}
+
+func (s *Store) latestAcceptedBatch(ctx context.Context, q sqlQueryer) (AcceptedBatchRecord, error) {
+	row := q.QueryRowContext(ctx, `
+		SELECT batch_id, submission_id, encoding_version, first_sequence_no, last_sequence_no,
+		       entry_count, batch_data_hash, prev_state_root, balances_root, orders_root,
+		       positions_funding_root, withdrawals_root, next_state_root, record_tx_hash,
+		       accept_tx_hash, accepted_at, created_at, updated_at
+		FROM rollup_accepted_batches
+		ORDER BY batch_id DESC
+		LIMIT 1
+	`)
+	var item AcceptedBatchRecord
+	if err := row.Scan(
+		&item.BatchID,
+		&item.SubmissionID,
+		&item.EncodingVersion,
+		&item.FirstSequence,
+		&item.LastSequence,
+		&item.EntryCount,
+		&item.BatchDataHash,
+		&item.PrevStateRoot,
+		&item.BalancesRoot,
+		&item.OrdersRoot,
+		&item.PositionsFundingRoot,
+		&item.WithdrawalsRoot,
+		&item.NextStateRoot,
+		&item.RecordTxHash,
+		&item.AcceptTxHash,
+		&item.AcceptedAt,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AcceptedBatchRecord{}, nil
+		}
+		return AcceptedBatchRecord{}, err
+	}
+	return item, nil
 }
 
 func (s *Store) loadJournalEntriesAfter(ctx context.Context, afterSequence int64, limit int) ([]JournalEntry, error) {
@@ -837,6 +944,53 @@ func (s *Store) upsertAcceptedWithdrawal(ctx context.Context, q sqlQueryer, with
 		return AcceptedWithdrawalRecord{}, false, err
 	}
 	return stored, rowsAffected > 0, nil
+}
+
+func (s *Store) replaceAcceptedReadTruth(ctx context.Context, q sqlQueryer, snapshot AcceptedReplaySnapshot, acceptedAt int64) error {
+	if _, err := q.ExecContext(ctx, `DELETE FROM rollup_accepted_balances`); err != nil {
+		return err
+	}
+	if _, err := q.ExecContext(ctx, `DELETE FROM rollup_accepted_positions`); err != nil {
+		return err
+	}
+	if _, err := q.ExecContext(ctx, `DELETE FROM rollup_accepted_payouts`); err != nil {
+		return err
+	}
+
+	for _, item := range snapshot.Balances {
+		if _, err := q.ExecContext(ctx, `
+			INSERT INTO rollup_accepted_balances (
+				batch_id, account_id, asset, available, frozen, sequence_no, created_at, updated_at
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+		`, snapshot.BatchID, item.AccountID, item.Asset, item.Available, item.Frozen, item.SequenceNo, acceptedAt); err != nil {
+			return err
+		}
+	}
+	for _, item := range snapshot.Positions {
+		if _, err := q.ExecContext(ctx, `
+			INSERT INTO rollup_accepted_positions (
+				batch_id, account_id, market_id, outcome, position_asset,
+				quantity, settled_quantity, settlement_status, sequence_no, created_at, updated_at
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+		`, snapshot.BatchID, item.AccountID, item.MarketID, item.Outcome, item.PositionAsset, item.Quantity, item.SettledQuantity, item.SettlementStatus, item.SequenceNo, acceptedAt); err != nil {
+			return err
+		}
+	}
+	for _, item := range snapshot.Payouts {
+		if _, err := q.ExecContext(ctx, `
+			INSERT INTO rollup_accepted_payouts (
+				event_id, batch_id, market_id, user_id, winning_outcome,
+				position_asset, settled_quantity, payout_asset, payout_amount,
+				status, created_at, updated_at
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
+		`, item.EventID, item.BatchID, item.MarketID, item.UserID, item.WinningOutcome, item.PositionAsset, item.SettledQuantity, item.PayoutAsset, item.PayoutAmount, item.Status, acceptedAt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type rowScanner interface {

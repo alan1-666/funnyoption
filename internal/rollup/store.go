@@ -1454,7 +1454,7 @@ func (s *Store) lookupAcceptedWallets(ctx context.Context, q sqlQueryer, balance
 		SELECT user_id, wallet_address
 		FROM user_profiles
 		WHERE user_id IN (`+strings.Join(placeholders, ", ")+`)
-	`)
+	`, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -893,11 +893,10 @@ func buildExpectedSubmissionState(submission rollup.StoredSubmission) (expectedR
 	}, nil
 }
 
-func resolveReceiptBlockNumber(receipt *types.Receipt) *big.Int {
-	if receipt == nil || receipt.BlockNumber == nil {
-		return nil
-	}
-	return new(big.Int).Set(receipt.BlockNumber)
+func resolveReceiptBlockNumber(_ *types.Receipt) *big.Int {
+	// Always query at latest block; archive state is not available
+	// on many public testnet RPCs (BSC testnet, etc.).
+	return nil
 }
 
 func sleepWithContext(ctx context.Context, delay time.Duration) error {

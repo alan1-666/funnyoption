@@ -87,6 +87,7 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
 | TASK-CHAIN-028 | completed | commander+worker | TASK-CHAIN-027 | require visible `FunnyRollupCore` onchain state before promoting persisted submission runtime state, and add one `submit-until-idle` command path without changing production truth |
 | TASK-CHAIN-029 | completed | commander+worker | TASK-CHAIN-028 | materialize accepted submissions into durable accepted-batch / accepted-withdrawal mirrors, queue slow-withdraw claims only from accepted leaves, switch withdrawal read surfaces to accepted-claim truth, and prove one real local pending-submission broadcast through to accepted onchain state |
 | TASK-CHAIN-030 | completed | commander+worker | TASK-CHAIN-029 | materialize accepted balances / positions / settlement-payout snapshots from accepted batches and switch read surfaces to that accepted truth while keeping mutable backend writes unchanged |
+| TASK-CHAIN-031 | completed | commander+worker | TASK-CHAIN-030 | default the local full-flow harness to the verifier-eligible trading-key oracle path, run rollup submission after settlement, and verify accepted read truth through live local API readbacks |
 
 ## Risks
 

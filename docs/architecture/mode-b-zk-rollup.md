@@ -738,6 +738,10 @@ worker 不必重新决定：
       现在除了 accepted batch / withdrawal 物化，还会重建：
       - `rollup_accepted_balances`
       - `rollup_accepted_positions`
+  - `TASK-CHAIN-031` 把本地 full-flow acceptance 默认切到 verifier-eligible
+    trading-key oracle path，并在 payout 后直接驱动 rollup submission /
+    accepted readback，所以 accepted lane 已经可以通过真实本地 flow 验证，
+    不再需要手工 seed mirrors
       - `rollup_accepted_payouts`
     - `/api/v1/balances`、`/api/v1/positions`、`/api/v1/payouts`
       在 accepted batch 可见时，都会优先读 accepted snapshot tables

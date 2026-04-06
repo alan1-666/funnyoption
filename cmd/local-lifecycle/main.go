@@ -199,12 +199,12 @@ func main() {
 	cfg := config.Load("chain")
 	apiCfg := config.Load("api")
 
-	flow := flag.String("flow", "legacy", "lifecycle flow to run: legacy or trading-key-oracle")
+	flow := flag.String("flow", "trading-key-oracle", "lifecycle flow to run: trading-key-oracle (default) or legacy")
 	baseURLFlag := flag.String("base-url", httpBaseURL(apiCfg.HTTPAddr), "API base URL")
 	depositAmount := flag.Int64("deposit-amount", 50000000, "listener-driven deposit amount in chain base units (for example 50000000 = 50.00 USDT)")
 	price := flag.Int64("price", 58, "limit price in cents")
 	quantity := flag.Int64("quantity", 40, "trade quantity")
-	timeout := flag.Duration("timeout", 30*time.Second, "overall lifecycle timeout")
+	timeout := flag.Duration("timeout", 90*time.Second, "overall lifecycle timeout")
 	flag.Parse()
 
 	if *depositAmount <= 0 || *price <= 0 || *quantity <= 0 {

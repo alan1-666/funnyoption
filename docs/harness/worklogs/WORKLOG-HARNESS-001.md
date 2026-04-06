@@ -2478,3 +2478,52 @@
 - next:
   - move into forced-withdrawal foundations and broader truth-switch design,
     rather than reopening the accepted slow-withdraw lane again
+
+### 2026-04-07 01:13 CST
+
+- thread: COMMANDER
+- scope:
+  - opened `TASK-CHAIN-031`
+  - prioritized one verifier-eligible local full-flow acceptance tranche
+    before jumping into forced-withdrawal runtime
+- changed:
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+    - `docs/harness/tasks/TASK-CHAIN-031.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-031.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-031.md`
+- validated:
+  - task boundary stays explicit:
+    - keep current Groth16/verifier lane unchanged
+    - keep mutable backend write truth unchanged
+    - use the local harness to prove accepted read truth without hand-seeding
+- next:
+  - switch the default local lifecycle to the trading-key oracle flow
+  - run post-settlement rollup submission from the harness
+  - verify accepted balances / positions / payouts via live local API
+
+### 2026-04-07 02:00 CST
+
+- thread: COMMANDER
+- scope:
+  - accepted and closed `TASK-CHAIN-031`
+  - the repo now has one default verifier-eligible local full-flow that proves
+    accepted read truth without hand-seeding
+- changed:
+  - updated:
+    - `docs/operations/local-full-flow-acceptance.md`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-031.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-031.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+- validated:
+  - local full-flow now defaults to the trading-key oracle path
+  - `./scripts/local-full-flow.sh` passed end-to-end
+  - accepted batches advanced from baseline `0` to `3`
+  - accepted balances / positions / payouts were re-read successfully after
+    rollup submission
+- next:
+  - move into forced-withdrawal / freeze foundations with this local proof path
+    kept as the regression harness

@@ -11,6 +11,7 @@ Run one repeatable local acceptance flow that stitches together:
 5. order placement and matching
 6. oracle auto settlement
 7. payout and terminal readback verification
+8. rollup acceptance and accepted-state readback
 
 ## Required environment
 
@@ -69,6 +70,7 @@ versus what is still a harness substitute:
 | User order | Real `ED25519` trading-key signature, generated inside the harness process rather than stored in browser IndexedDB |
 | Oracle settlement | No wallet signature; a local fake Binance HTTP fixture drives the real oracle worker |
 | Payout/readback | No signature; verification is API plus SQL readback |
+| Rollup acceptance | No end-user signature; the harness drives `recordBatchMetadata(...)` / `acceptVerifiedBatch(...)` and then re-reads accepted mirrors |
 
 ## What the runner does
 
@@ -84,7 +86,9 @@ versus what is still a harness substitute:
    crossing `BUY`
 10. waits for trade match, oracle auto settlement, payout creation, and final
     readback
-11. prints a JSON summary with pass/fail evidence and ids
+11. runs rollup submission until the accepted lane reaches an idle state
+12. verifies accepted balances / positions / payouts through the live API
+13. prints a JSON summary with pass/fail evidence and ids
 
 ## Residual blind spots
 
@@ -95,4 +99,5 @@ it still does not prove:
 - hardware wallet or smart-contract-wallet signature quirks
 - browser `localStorage` / IndexedDB loss, restore, and hydration behavior
 - live external oracle provider behavior, throttling, or outage handling
-- end-user payout claim transaction submission and browser claim UX
+- slow-withdraw claim execution and browser claim UX
+- forced-withdrawal / freeze / escape-hatch runtime

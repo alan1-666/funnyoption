@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"funnyoption/internal/api/dto"
+	chainservice "funnyoption/internal/chain/service"
 	oracleservice "funnyoption/internal/oracle/service"
 	sharedauth "funnyoption/internal/shared/auth"
 	"funnyoption/internal/shared/config"
@@ -123,6 +124,14 @@ type localFullFlowSummary struct {
 		ObservedPrice  string `json:"observed_price"`
 		FixtureBaseURL string `json:"fixture_base_url"`
 	} `json:"oracle"`
+	Rollup struct {
+		BaselineAcceptedBatchID int64    `json:"baseline_accepted_batch_id"`
+		AcceptedBatchCount      int64    `json:"accepted_batch_count"`
+		LatestAcceptedBatchID   int64    `json:"latest_accepted_batch_id"`
+		LatestAcceptedStateRoot string   `json:"latest_accepted_state_root"`
+		LatestSubmissionStatus  string   `json:"latest_submission_status"`
+		SubmissionActions       []string `json:"submission_actions"`
+	} `json:"rollup"`
 	ReadbackCommands []string `json:"readback_commands"`
 	BlindSpots       []string `json:"residual_blind_spots"`
 }
@@ -142,9 +151,19 @@ type localOracleHarness struct {
 	db        *sql.DB
 }
 
+type acceptedBatchReadback struct {
+	AcceptedBatchCount      int64
+	LatestAcceptedBatchID   int64
+	LatestAcceptedStateRoot string
+	LatestSubmissionStatus  string
+}
+
 func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cfg, apiCfg config.ServiceConfig, buyer, maker, operator walletIdentity) error {
 	if !shouldUsePersistentLocalChain(cfg) {
 		return fmt.Errorf("flow %q requires FUNNYOPTION_LOCAL_CHAIN_MODE=anvil with .run/dev/local-chain.env sourced so trading-key auth and deposits share one configured vault", tradingKeyOracleFlowName)
+	}
+	if strings.TrimSpace(cfg.RollupCoreAddress) == "" {
+		return fmt.Errorf("flow %q requires FUNNYOPTION_ROLLUP_CORE_ADDRESS so the harness can drive rollup submission through FunnyRollupCore", tradingKeyOracleFlowName)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
@@ -173,7 +192,7 @@ func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cf
 			"trading-key wallet authorization is signed by local deterministic test EOAs, not a browser wallet popup or hardware wallet",
 			"truthful restore is verified through in-process metadata plus GET /api/v1/trading-keys readback, not real localStorage/IndexedDB/React hydration behavior",
 			"oracle settlement uses a local fake Binance HTTP fixture, not the live external provider network path",
-			"the flow stops at payout/readback and does not cover end-user claim transaction submission or browser claim UX",
+			"the flow now drives local rollup acceptance and accepted readback, but it still does not cover slow-withdraw claim execution or forced-withdraw / escape-hatch runtime",
 		},
 	}
 
@@ -269,6 +288,11 @@ func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cf
 		return fmt.Errorf("start local oracle harness: %w", err)
 	}
 	defer oracleHarness.Close()
+	baselineAccepted, err := fetchAcceptedBatchReadback(ctx, oracleHarness.db)
+	if err != nil {
+		return fmt.Errorf("fetch baseline accepted batch readback: %w", err)
+	}
+	summary.Rollup.BaselineAcceptedBatchID = baselineAccepted.LatestAcceptedBatchID
 	summary.Oracle.ProviderKey = oracleservice.OracleProviderKeyBinance
 	summary.Oracle.Symbol = localOracleSymbol
 	summary.Oracle.ThresholdPrice = localOracleThresholdPrice
@@ -524,6 +548,68 @@ func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cf
 		Notes:         fmt.Sprintf("payout=%s settled_yes=%d", buyerPayout.EventID, buyerPosition.SettledQuantity),
 	})
 
+	rollupRun, err := chainservice.RunRollupSubmissionUntilIdle(ctx, logger.With("component", "local-full-flow-rollup"), cfg)
+	if err != nil {
+		return fmt.Errorf("run rollup submission until idle: %w", err)
+	}
+	acceptedAfter, err := fetchAcceptedBatchReadback(ctx, oracleHarness.db)
+	if err != nil {
+		return fmt.Errorf("fetch accepted batch readback after rollup submission: %w", err)
+	}
+	if acceptedAfter.LatestAcceptedBatchID <= baselineAccepted.LatestAcceptedBatchID {
+		return fmt.Errorf(
+			"rollup acceptance did not advance accepted batches: before=%d after=%d actions=%v",
+			baselineAccepted.LatestAcceptedBatchID,
+			acceptedAfter.LatestAcceptedBatchID,
+			rollupRunActions(rollupRun),
+		)
+	}
+
+	acceptedBuyerUSDT, err := client.fetchUSDTBalance(ctx, buyerSession.UserID)
+	if err != nil {
+		return fmt.Errorf("fetch buyer accepted balance readback: %w", err)
+	}
+	acceptedPayouts, err := client.listPayouts(ctx, buyerSession.UserID, market.MarketID)
+	if err != nil {
+		return fmt.Errorf("list accepted payouts: %w", err)
+	}
+	acceptedPositions, err := client.listPositions(ctx, buyerSession.UserID, market.MarketID)
+	if err != nil {
+		return fmt.Errorf("list accepted positions: %w", err)
+	}
+	var acceptedPayout payoutResponse
+	for _, item := range acceptedPayouts {
+		if item.EventID == buyerPayout.EventID {
+			acceptedPayout = item
+			break
+		}
+	}
+	if acceptedPayout.EventID == "" {
+		return fmt.Errorf("accepted payout readback lost event %s after rollup submission", buyerPayout.EventID)
+	}
+	var acceptedPosition positionResponse
+	for _, item := range acceptedPositions {
+		if item.MarketID == market.MarketID && item.Outcome == "YES" {
+			acceptedPosition = item
+			break
+		}
+	}
+	if acceptedPosition.MarketID == 0 {
+		return fmt.Errorf("accepted position readback lost YES position for market %d", market.MarketID)
+	}
+	if acceptedPosition.SettledQuantity < opts.Quantity {
+		return fmt.Errorf("accepted settled quantity = %d, want at least %d", acceptedPosition.SettledQuantity, opts.Quantity)
+	}
+	if acceptedBuyerUSDT != finalBuyerUSDT {
+		return fmt.Errorf("accepted buyer USDT = %d, want %d", acceptedBuyerUSDT, finalBuyerUSDT)
+	}
+	summary.PassFailMatrix = append(summary.PassFailMatrix, flowStepResult{
+		Step:          "8. rollup acceptance + accepted readback",
+		Status:        "PASS",
+		SignatureMode: "no end-user signature; the harness drives record/accept submission to FunnyRollupCore and re-reads balances, positions, and payouts from accepted mirrors",
+		Notes:         fmt.Sprintf("actions=%s latest_accepted_batch=%d", strings.Join(rollupRunActions(rollupRun), " -> "), acceptedAfter.LatestAcceptedBatchID),
+	})
+
 	summary.IDs.PayoutEventID = buyerPayout.EventID
 	summary.Buyer.FinalUSDT = finalBuyerUSDT
 	summary.Buyer.PayoutAmount = buyerPayout.PayoutAmount
@@ -538,6 +624,11 @@ func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cf
 	summary.Market.ResolutionResolverType = resolution.ResolverType
 	summary.Market.OracleDispatchStatus = dispatchStatus
 	summary.Market.OracleDispatchAttempts = dispatchAttempts
+	summary.Rollup.AcceptedBatchCount = acceptedAfter.AcceptedBatchCount
+	summary.Rollup.LatestAcceptedBatchID = acceptedAfter.LatestAcceptedBatchID
+	summary.Rollup.LatestAcceptedStateRoot = acceptedAfter.LatestAcceptedStateRoot
+	summary.Rollup.LatestSubmissionStatus = acceptedAfter.LatestSubmissionStatus
+	summary.Rollup.SubmissionActions = rollupRunActions(rollupRun)
 
 	summary.ReadbackCommands = []string{
 		fmt.Sprintf("curl -sS '%s/api/v1/trading-keys?wallet_address=%s&vault_address=%s&status=ACTIVE&limit=20'", opts.BaseURL, buyerSession.WalletAddress, buyerSession.VaultAddress),
@@ -545,7 +636,12 @@ func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cf
 		fmt.Sprintf("curl -sS '%s/api/v1/orders?user_id=%d&market_id=%d&limit=20'", opts.BaseURL, buyerSession.UserID, market.MarketID),
 		fmt.Sprintf("curl -sS '%s/api/v1/orders?user_id=%d&market_id=%d&limit=20'", opts.BaseURL, makerSession.UserID, market.MarketID),
 		fmt.Sprintf("curl -sS '%s/api/v1/markets/%d'", opts.BaseURL, market.MarketID),
+		fmt.Sprintf("curl -sS '%s/api/v1/balances?user_id=%d&limit=20'", opts.BaseURL, buyerSession.UserID),
+		fmt.Sprintf("curl -sS '%s/api/v1/positions?user_id=%d&market_id=%d&limit=20'", opts.BaseURL, buyerSession.UserID, market.MarketID),
 		fmt.Sprintf("curl -sS '%s/api/v1/payouts?user_id=%d&market_id=%d&limit=20'", opts.BaseURL, buyerSession.UserID, market.MarketID),
+		"go run ./cmd/rollup -mode=submit-until-idle -timeout=20s",
+		fmt.Sprintf("psql '%s' -c \"SELECT batch_id, status, next_state_root FROM rollup_accepted_batches ORDER BY batch_id DESC LIMIT 5;\"", cfg.PostgresDSN),
+		fmt.Sprintf("psql '%s' -c \"SELECT submission_id, batch_id, status, record_tx_hash, accept_tx_hash FROM rollup_shadow_submissions ORDER BY batch_id DESC LIMIT 5;\"", cfg.PostgresDSN),
 		fmt.Sprintf("psql '%s' -c \"SELECT market_id, status, resolved_outcome, resolver_type, resolver_ref FROM market_resolutions WHERE market_id = %d;\"", cfg.PostgresDSN, market.MarketID),
 	}
 
@@ -778,4 +874,46 @@ func decodeOracleDispatch(raw json.RawMessage) (string, int, string) {
 		observationID = evidence.Observation.ObservationID
 	}
 	return dispatchStatus, dispatchAttempts, observationID
+}
+
+func fetchAcceptedBatchReadback(ctx context.Context, db *sql.DB) (acceptedBatchReadback, error) {
+	var item acceptedBatchReadback
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(COUNT(*), 0), COALESCE(MAX(batch_id), 0)
+		FROM rollup_accepted_batches
+	`).Scan(&item.AcceptedBatchCount, &item.LatestAcceptedBatchID); err != nil {
+		return acceptedBatchReadback{}, err
+	}
+	if item.LatestAcceptedBatchID > 0 {
+		if err := db.QueryRowContext(ctx, `
+			SELECT COALESCE(next_state_root, '')
+			FROM rollup_accepted_batches
+			WHERE batch_id = $1
+		`, item.LatestAcceptedBatchID).Scan(&item.LatestAcceptedStateRoot); err != nil {
+			return acceptedBatchReadback{}, err
+		}
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, '')
+		FROM rollup_shadow_submissions
+		ORDER BY batch_id DESC, created_at DESC
+		LIMIT 1
+	`).Scan(&item.LatestSubmissionStatus); err != nil {
+		if err == sql.ErrNoRows {
+			return item, nil
+		}
+		return acceptedBatchReadback{}, err
+	}
+	return item, nil
+}
+
+func rollupRunActions(run chainservice.RollupSubmissionRun) []string {
+	if len(run.Steps) == 0 {
+		return nil
+	}
+	actions := make([]string, 0, len(run.Steps))
+	for _, step := range run.Steps {
+		actions = append(actions, step.Action)
+	}
+	return actions
 }

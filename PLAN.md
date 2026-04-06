@@ -45,6 +45,7 @@ Detailed execution lives in `docs/harness/plans/active/`.
 - Market expiry and resolution lifecycle hardening task: [`docs/harness/tasks/TASK-CHAIN-024.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-024.md)
 - Manual-vs-oracle post-close lifecycle task: [`docs/harness/tasks/TASK-CHAIN-025.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-025.md)
 - Shadow batch onchain-submission pipeline task: [`docs/harness/tasks/TASK-CHAIN-026.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-026.md)
+- Local full-flow verifier-eligible rollup acceptance task: [`docs/harness/tasks/TASK-CHAIN-031.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-031.md)
 
 ## Strategic lanes
 

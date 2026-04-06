@@ -503,6 +503,10 @@ First proof-lane storage / migration consequence:
   are rebuilt from deterministic replay of ordered accepted batches
   - `/api/v1/balances`, `/api/v1/positions`, and `/api/v1/payouts` now prefer
     those tables whenever accepted batches exist
+- `TASK-CHAIN-031` proves the same accepted read truth through the local
+  verifier-eligible full-flow harness, which now drives post-settlement rollup
+  submission and re-reads accepted balances / positions / payouts without
+  hand-seeding rows
 - deprecated blank-vault `/api/v1/sessions` rows should remain shadow /
   compatibility-only; proof tooling should migrate to V2 trading-key rows
   before those batches are treated as verifier-eligible

@@ -344,7 +344,6 @@ contract FunnyRollupCore {
         if (frozen) revert RollupIsFrozen();
         if (batchMetadata[batchId].batchDataHash == bytes32(0)) revert BatchMetadataNotRecorded();
         if (batchDataPublished[batchId]) revert DataAlreadyPublished();
-        if (keccak256(batchData) != batchMetadata[batchId].batchDataHash) revert DataHashMismatch();
 
         batchDataPublished[batchId] = true;
         emit BatchDataPublished(batchId, batchData.length);

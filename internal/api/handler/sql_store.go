@@ -1533,18 +1533,11 @@ func (s *SQLStore) ListPayouts(ctx context.Context, req dto.ListPayoutsRequest) 
 }
 
 func (s *SQLStore) acceptedReadTruthVisible(ctx context.Context) (bool, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM rollup_accepted_batches
-			LIMIT 1
-		)
-	`)
-	var visible bool
-	if err := row.Scan(&visible); err != nil {
-		return false, err
-	}
-	return visible, nil
+	// Accepted read truth is not yet a complete snapshot of all user
+	// balances; it only contains entries from replayed rollup batches.
+	// Keep using account_balances as the primary source until the
+	// replay logic covers every account reliably.
+	return false, nil
 }
 
 func (s *SQLStore) listAcceptedBalances(ctx context.Context, req dto.ListBalancesRequest) ([]dto.BalanceResponse, error) {

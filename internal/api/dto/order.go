@@ -400,6 +400,12 @@ type ListWithdrawalsRequest struct {
 	Limit         int    `form:"limit"`
 }
 
+type ListRollupForcedWithdrawalsRequest struct {
+	WalletAddress string `form:"wallet_address"`
+	Status        string `form:"status"`
+	Limit         int    `form:"limit"`
+}
+
 type DepositResponse struct {
 	DepositID     string `json:"deposit_id"`
 	UserID        int64  `json:"user_id"`
@@ -440,6 +446,35 @@ type WithdrawalResponse struct {
 	DebitedAt        int64  `json:"debited_at"`
 	CreatedAt        int64  `json:"created_at"`
 	UpdatedAt        int64  `json:"updated_at"`
+}
+
+type RollupForcedWithdrawalResponse struct {
+	RequestID               int64  `json:"request_id"`
+	WalletAddress           string `json:"wallet_address"`
+	RecipientAddress        string `json:"recipient_address"`
+	Amount                  int64  `json:"amount"`
+	RequestedAt             int64  `json:"requested_at"`
+	DeadlineAt              int64  `json:"deadline_at"`
+	SatisfiedClaimID        string `json:"satisfied_claim_id"`
+	SatisfiedAt             int64  `json:"satisfied_at"`
+	FrozenAt                int64  `json:"frozen_at"`
+	Status                  string `json:"status"`
+	MatchedWithdrawalID     string `json:"matched_withdrawal_id"`
+	MatchedClaimID          string `json:"matched_claim_id"`
+	SatisfactionStatus      string `json:"satisfaction_status"`
+	SatisfactionTxHash      string `json:"satisfaction_tx_hash"`
+	SatisfactionSubmittedAt int64  `json:"satisfaction_submitted_at"`
+	SatisfactionLastError   string `json:"satisfaction_last_error"`
+	SatisfactionLastErrorAt int64  `json:"satisfaction_last_error_at"`
+	CreatedAt               int64  `json:"created_at"`
+	UpdatedAt               int64  `json:"updated_at"`
+}
+
+type RollupFreezeStateResponse struct {
+	Frozen    bool  `json:"frozen"`
+	FrozenAt  int64 `json:"frozen_at"`
+	RequestID int64 `json:"request_id"`
+	UpdatedAt int64 `json:"updated_at"`
 }
 
 type CreateClaimPayoutRequest struct {

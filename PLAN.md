@@ -46,6 +46,9 @@ Detailed execution lives in `docs/harness/plans/active/`.
 - Manual-vs-oracle post-close lifecycle task: [`docs/harness/tasks/TASK-CHAIN-025.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-025.md)
 - Shadow batch onchain-submission pipeline task: [`docs/harness/tasks/TASK-CHAIN-026.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-026.md)
 - Local full-flow verifier-eligible rollup acceptance task: [`docs/harness/tasks/TASK-CHAIN-031.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-031.md)
+- Forced-withdrawal and freeze foundation task: [`docs/harness/tasks/TASK-CHAIN-032.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-032.md)
+- Forced-withdrawal satisfaction runtime task: [`docs/harness/tasks/TASK-CHAIN-033.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-033.md)
+- Frozen-mode trading gate task: [`docs/harness/tasks/TASK-CHAIN-034.md`](/Users/zhangza/code/funnyoption/docs/harness/tasks/TASK-CHAIN-034.md)
 
 ## Strategic lanes
 
@@ -219,6 +222,16 @@ Detailed execution lives in `docs/harness/plans/active/`.
     materializing accepted replay snapshots into durable tables and switching
     the local read surfaces to those accepted mirrors when onchain-accepted
     state exists
+  - `TASK-CHAIN-032` is complete: rollup contracts now store forced-withdrawal
+    requests plus freeze state, and chain service mirrors that state into
+    durable local SQL without pretending escape claims already exist
+  - `TASK-CHAIN-033` is complete: unambiguous forced-withdrawal requests now
+    auto-satisfy from canonical claimed withdrawals, local tx tracking is
+    durable, and the repo exposes truthful forced-withdraw / freeze read
+    surfaces
+  - `TASK-CHAIN-034` is complete: API ingress and matching runtime now stop
+    treating frozen mode as tradable, so restart/runtime truth no longer says
+    trading is possible after rollup freeze
   - `TASK-API-006` is paused: narrow the repo-structure cleanup to
     `internal/api`, splitting routes/handlers/store concerns into clearer
     module-owned packages without widening into a full repo directory

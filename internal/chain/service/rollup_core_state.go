@@ -71,6 +71,51 @@ const funnyRollupCoreReadABIJSON = `[
       {"name":"authProofHash","type":"bytes32"},
       {"name":"verifierGateHash","type":"bytes32"}
     ]
+  },
+  {
+    "type":"function",
+    "name":"frozen",
+    "stateMutability":"view",
+    "inputs":[],
+    "outputs":[{"name":"","type":"bool"}]
+  },
+  {
+    "type":"function",
+    "name":"frozenAt",
+    "stateMutability":"view",
+    "inputs":[],
+    "outputs":[{"name":"","type":"uint64"}]
+  },
+  {
+    "type":"function",
+    "name":"freezeRequestId",
+    "stateMutability":"view",
+    "inputs":[],
+    "outputs":[{"name":"","type":"uint64"}]
+  },
+  {
+    "type":"function",
+    "name":"forcedWithdrawalRequestCount",
+    "stateMutability":"view",
+    "inputs":[],
+    "outputs":[{"name":"","type":"uint64"}]
+  },
+  {
+    "type":"function",
+    "name":"forcedWithdrawalRequests",
+    "stateMutability":"view",
+    "inputs":[{"name":"","type":"uint64"}],
+    "outputs":[
+      {"name":"wallet","type":"address"},
+      {"name":"recipient","type":"address"},
+      {"name":"amount","type":"uint256"},
+      {"name":"requestedAt","type":"uint64"},
+      {"name":"deadlineAt","type":"uint64"},
+      {"name":"satisfiedClaimId","type":"bytes32"},
+      {"name":"satisfiedAt","type":"uint64"},
+      {"name":"frozenAt","type":"uint64"},
+      {"name":"status","type":"uint8"}
+    ]
   }
 ]`
 
@@ -99,6 +144,25 @@ type rollupCoreAcceptedBatchState struct {
 	NextStateRoot           common.Hash
 	AuthProofHash           common.Hash
 	VerifierGateHash        common.Hash
+}
+
+type rollupCoreFreezeState struct {
+	Frozen          bool
+	FrozenAt        uint64
+	FreezeRequestID uint64
+}
+
+type rollupCoreForcedWithdrawalRequestState struct {
+	RequestID        uint64
+	Wallet           common.Address
+	Recipient        common.Address
+	Amount           int64
+	RequestedAt      uint64
+	DeadlineAt       uint64
+	SatisfiedClaimID common.Hash
+	SatisfiedAt      uint64
+	FrozenAt         uint64
+	Status           uint8
 }
 
 func mustRollupCoreReadABI(raw string) abi.ABI {
@@ -253,6 +317,115 @@ func (p *RollupSubmissionProcessor) loadAcceptedBatchState(
 	}, nil
 }
 
+func (p *RollupSubmissionProcessor) loadFreezeState(
+	ctx context.Context,
+	blockNumber *big.Int,
+) (rollupCoreFreezeState, error) {
+	frozenValues, err := p.callRollupCoreMethod(ctx, blockNumber, "frozen")
+	if err != nil {
+		return rollupCoreFreezeState{}, err
+	}
+	frozen, err := decodeABIBoolValue(frozenValues[0], "frozen")
+	if err != nil {
+		return rollupCoreFreezeState{}, err
+	}
+
+	frozenAtValues, err := p.callRollupCoreMethod(ctx, blockNumber, "frozenAt")
+	if err != nil {
+		return rollupCoreFreezeState{}, err
+	}
+	frozenAt, err := decodeABIUint64Value(frozenAtValues[0], "frozenAt")
+	if err != nil {
+		return rollupCoreFreezeState{}, err
+	}
+
+	freezeRequestIDValues, err := p.callRollupCoreMethod(ctx, blockNumber, "freezeRequestId")
+	if err != nil {
+		return rollupCoreFreezeState{}, err
+	}
+	freezeRequestID, err := decodeABIUint64Value(freezeRequestIDValues[0], "freezeRequestId")
+	if err != nil {
+		return rollupCoreFreezeState{}, err
+	}
+
+	return rollupCoreFreezeState{
+		Frozen:          frozen,
+		FrozenAt:        frozenAt,
+		FreezeRequestID: freezeRequestID,
+	}, nil
+}
+
+func (p *RollupSubmissionProcessor) loadForcedWithdrawalRequestCount(
+	ctx context.Context,
+	blockNumber *big.Int,
+) (uint64, error) {
+	values, err := p.callRollupCoreMethod(ctx, blockNumber, "forcedWithdrawalRequestCount")
+	if err != nil {
+		return 0, err
+	}
+	return decodeABIUint64Value(values[0], "forcedWithdrawalRequestCount")
+}
+
+func (p *RollupSubmissionProcessor) loadForcedWithdrawalRequest(
+	ctx context.Context,
+	blockNumber *big.Int,
+	requestID uint64,
+) (rollupCoreForcedWithdrawalRequestState, error) {
+	values, err := p.callRollupCoreMethod(ctx, blockNumber, "forcedWithdrawalRequests", requestID)
+	if err != nil {
+		return rollupCoreForcedWithdrawalRequestState{}, err
+	}
+	wallet, err := decodeABIAddressValue(values[0], "forcedWithdrawalRequests.wallet")
+	if err != nil {
+		return rollupCoreForcedWithdrawalRequestState{}, err
+	}
+	recipient, err := decodeABIAddressValue(values[1], "forcedWithdrawalRequests.recipient")
+	if err != nil {
+		return rollupCoreForcedWithdrawalRequestState{}, err
+	}
+	amount, err := decodeABIInt64FromUintValue(values[2], "forcedWithdrawalRequests.amount")
+	if err != nil {
+		return rollupCoreForcedWithdrawalRequestState{}, err
+	}
+	requestedAt, err := decodeABIUint64Value(values[3], "forcedWithdrawalRequests.requestedAt")
+	if err != nil {
+		return rollupCoreForcedWithdrawalRequestState{}, err
+	}
+	deadlineAt, err := decodeABIUint64Value(values[4], "forcedWithdrawalRequests.deadlineAt")
+	if err != nil {
+		return rollupCoreForcedWithdrawalRequestState{}, err
+	}
+	satisfiedClaimID, err := decodeABIBytes32Value(values[5], "forcedWithdrawalRequests.satisfiedClaimId")
+	if err != nil {
+		return rollupCoreForcedWithdrawalRequestState{}, err
+	}
+	satisfiedAt, err := decodeABIUint64Value(values[6], "forcedWithdrawalRequests.satisfiedAt")
+	if err != nil {
+		return rollupCoreForcedWithdrawalRequestState{}, err
+	}
+	frozenAt, err := decodeABIUint64Value(values[7], "forcedWithdrawalRequests.frozenAt")
+	if err != nil {
+		return rollupCoreForcedWithdrawalRequestState{}, err
+	}
+	status, err := decodeABIUint8Value(values[8], "forcedWithdrawalRequests.status")
+	if err != nil {
+		return rollupCoreForcedWithdrawalRequestState{}, err
+	}
+
+	return rollupCoreForcedWithdrawalRequestState{
+		RequestID:        requestID,
+		Wallet:           wallet,
+		Recipient:        recipient,
+		Amount:           amount,
+		RequestedAt:      requestedAt,
+		DeadlineAt:       deadlineAt,
+		SatisfiedClaimID: satisfiedClaimID,
+		SatisfiedAt:      satisfiedAt,
+		FrozenAt:         frozenAt,
+		Status:           status,
+	}, nil
+}
+
 func (p *RollupSubmissionProcessor) callRollupCoreMethod(
 	ctx context.Context,
 	blockNumber *big.Int,
@@ -300,6 +473,86 @@ func decodeABIUint64Value(value any, field string) (uint64, error) {
 		return typed.Uint64(), nil
 	default:
 		return 0, fmt.Errorf("%s returned unsupported uint type %T", field, value)
+	}
+}
+
+func decodeABIUint8Value(value any, field string) (uint8, error) {
+	switch typed := value.(type) {
+	case uint8:
+		return typed, nil
+	case uint16:
+		if typed > 0xff {
+			return 0, fmt.Errorf("%s must fit uint8", field)
+		}
+		return uint8(typed), nil
+	case uint32:
+		if typed > 0xff {
+			return 0, fmt.Errorf("%s must fit uint8", field)
+		}
+		return uint8(typed), nil
+	case uint64:
+		if typed > 0xff {
+			return 0, fmt.Errorf("%s must fit uint8", field)
+		}
+		return uint8(typed), nil
+	case *big.Int:
+		if typed.Sign() < 0 || !typed.IsUint64() || typed.Uint64() > 0xff {
+			return 0, fmt.Errorf("%s must fit uint8", field)
+		}
+		return uint8(typed.Uint64()), nil
+	case big.Int:
+		if typed.Sign() < 0 || !typed.IsUint64() || typed.Uint64() > 0xff {
+			return 0, fmt.Errorf("%s must fit uint8", field)
+		}
+		return uint8(typed.Uint64()), nil
+	default:
+		return 0, fmt.Errorf("%s returned unsupported uint8 type %T", field, value)
+	}
+}
+
+func decodeABIInt64FromUintValue(value any, field string) (int64, error) {
+	switch typed := value.(type) {
+	case *big.Int:
+		if typed.Sign() < 0 || !typed.IsInt64() {
+			return 0, fmt.Errorf("%s must fit int64", field)
+		}
+		return typed.Int64(), nil
+	case big.Int:
+		if typed.Sign() < 0 || !typed.IsInt64() {
+			return 0, fmt.Errorf("%s must fit int64", field)
+		}
+		return typed.Int64(), nil
+	case uint64:
+		if typed > uint64(^uint64(0)>>1) {
+			return 0, fmt.Errorf("%s must fit int64", field)
+		}
+		return int64(typed), nil
+	default:
+		return 0, fmt.Errorf("%s returned unsupported uint256 type %T", field, value)
+	}
+}
+
+func decodeABIBoolValue(value any, field string) (bool, error) {
+	typed, ok := value.(bool)
+	if !ok {
+		return false, fmt.Errorf("%s returned unsupported bool type %T", field, value)
+	}
+	return typed, nil
+}
+
+func decodeABIAddressValue(value any, field string) (common.Address, error) {
+	switch typed := value.(type) {
+	case common.Address:
+		return typed, nil
+	case [20]byte:
+		return common.BytesToAddress(typed[:]), nil
+	case []byte:
+		if len(typed) != 20 {
+			return common.Address{}, fmt.Errorf("%s must be 20 bytes, got %d", field, len(typed))
+		}
+		return common.BytesToAddress(typed), nil
+	default:
+		return common.Address{}, fmt.Errorf("%s returned unsupported address type %T", field, value)
 	}
 }
 

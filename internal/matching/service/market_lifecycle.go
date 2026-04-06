@@ -20,3 +20,7 @@ func effectiveMarketStatusAt(status string, closeAt, nowUnix int64) string {
 func marketTradingOpen(status string, closeAt, nowUnix int64) bool {
 	return effectiveMarketStatusAt(status, closeAt, nowUnix) == "OPEN"
 }
+
+func marketTradingEnabled(frozen bool, status string, closeAt, nowUnix int64) bool {
+	return !frozen && marketTradingOpen(status, closeAt, nowUnix)
+}

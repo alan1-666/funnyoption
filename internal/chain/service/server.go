@@ -64,6 +64,28 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 		logger.Info("skip claim processor bootstrap", "reason", "rpc, vault address, or operator private key is empty")
 	}
 
+	var forcedWithdrawalMirror *ForcedWithdrawalMirrorProcessor
+	if rpcPool != nil && strings.TrimSpace(cfg.RollupCoreAddress) != "" {
+		forcedWithdrawalMirror, err = NewForcedWithdrawalMirrorProcessor(logger, cfg, store, rpcPool)
+		if err != nil {
+			return err
+		}
+		go forcedWithdrawalMirror.Start(ctx)
+	} else {
+		logger.Info("skip forced-withdrawal mirror bootstrap", "reason", "rpc or rollup core address is empty")
+	}
+
+	var forcedWithdrawalSatisfier *ForcedWithdrawalSatisfier
+	if rpcPool != nil && strings.TrimSpace(cfg.RollupCoreAddress) != "" && strings.TrimSpace(cfg.ChainOperatorPrivateKey) != "" {
+		forcedWithdrawalSatisfier, err = NewForcedWithdrawalSatisfier(logger, cfg, store, rpcPool)
+		if err != nil {
+			return err
+		}
+		go forcedWithdrawalSatisfier.Start(ctx)
+	} else {
+		logger.Info("skip forced-withdrawal satisfier bootstrap", "reason", "rpc, rollup core address, or operator private key is empty")
+	}
+
 	var rollupSubmissionProcessor *RollupSubmissionProcessor
 	if rpcPool != nil && strings.TrimSpace(cfg.RollupCoreAddress) != "" && strings.TrimSpace(cfg.ChainOperatorPrivateKey) != "" {
 		rollupSubmissionProcessor, err = NewRollupSubmissionProcessor(logger, cfg, rollupStore, rpcPool)
@@ -92,6 +114,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 		"chain_withdraw_topic", cfg.KafkaTopics.ChainWithdraw,
 		"deposit_listener_ready", listener != nil,
 		"claim_processor_ready", claimProcessor != nil,
+		"forced_withdrawal_mirror_ready", forcedWithdrawalMirror != nil,
+		"forced_withdrawal_satisfier_ready", forcedWithdrawalSatisfier != nil,
 		"rollup_submission_ready", rollupSubmissionProcessor != nil,
 		"processor_ready", processor != nil,
 	)

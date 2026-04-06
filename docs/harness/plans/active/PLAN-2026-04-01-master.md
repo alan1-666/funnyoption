@@ -88,6 +88,9 @@ Run FunnyOption with a harness-style operating model and close out the off-chain
 | TASK-CHAIN-029 | completed | commander+worker | TASK-CHAIN-028 | materialize accepted submissions into durable accepted-batch / accepted-withdrawal mirrors, queue slow-withdraw claims only from accepted leaves, switch withdrawal read surfaces to accepted-claim truth, and prove one real local pending-submission broadcast through to accepted onchain state |
 | TASK-CHAIN-030 | completed | commander+worker | TASK-CHAIN-029 | materialize accepted balances / positions / settlement-payout snapshots from accepted batches and switch read surfaces to that accepted truth while keeping mutable backend writes unchanged |
 | TASK-CHAIN-031 | completed | commander+worker | TASK-CHAIN-030 | default the local full-flow harness to the verifier-eligible trading-key oracle path, run rollup submission after settlement, and verify accepted read truth through live local API readbacks |
+| TASK-CHAIN-032 | completed | commander+worker | TASK-CHAIN-031 | land forced-withdrawal request storage, freeze gating, and local SQL mirrors so exit-runtime foundations exist before later escape-hatch claim work |
+| TASK-CHAIN-033 | completed | commander+worker | TASK-CHAIN-032 | auto-satisfy unambiguous forced-withdrawal requests from canonical claimed withdrawals, persist satisfaction tx state, and expose truthful forced-withdraw / freeze read surfaces without pretending full escape-hatch runtime is done |
+| TASK-CHAIN-034 | completed | commander+worker | TASK-CHAIN-033 | stop API/matching from treating frozen mode as tradable by deriving one truthful frozen-mode trading gate from `rollup_freeze_state` without pretending full escape-hatch or full production-truth switching is finished |
 
 ## Risks
 

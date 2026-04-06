@@ -20,8 +20,10 @@ import (
 
 type fakeClaimStore struct {
 	tasks           []chainmodel.ClaimTask
+	submittedTasks  []chainmodel.ClaimTask
 	submittedID     int64
 	submittedTxHash string
+	confirmedTxHash string
 	failedID        int64
 	failedError     string
 }
@@ -30,6 +32,12 @@ func (f *fakeClaimStore) ListPendingClaims(ctx context.Context, limit int) ([]ch
 	_ = ctx
 	_ = limit
 	return f.tasks, nil
+}
+
+func (f *fakeClaimStore) ListSubmittedClaims(ctx context.Context, limit int) ([]chainmodel.ClaimTask, error) {
+	_ = ctx
+	_ = limit
+	return f.submittedTasks, nil
 }
 
 func (f *fakeClaimStore) MarkClaimSubmitted(ctx context.Context, id int64, txHash string) error {
@@ -46,6 +54,12 @@ func (f *fakeClaimStore) MarkClaimFailed(ctx context.Context, id int64, errMsg s
 	return nil
 }
 
+func (f *fakeClaimStore) MarkClaimConfirmedByTxHash(ctx context.Context, txHash string) error {
+	_ = ctx
+	f.confirmedTxHash = txHash
+	return nil
+}
+
 type fakeTxSender struct {
 	nonce    uint64
 	chainID  *big.Int
@@ -53,6 +67,7 @@ type fakeTxSender struct {
 	estimate uint64
 	sendErr  error
 	sentTx   *types.Transaction
+	receipts map[string]*types.Receipt
 }
 
 func (f *fakeTxSender) PendingNonceAt(ctx context.Context, account common.Address) (uint64, error) {
@@ -81,6 +96,18 @@ func (f *fakeTxSender) SendTransaction(ctx context.Context, tx *types.Transactio
 func (f *fakeTxSender) ChainID(ctx context.Context) (*big.Int, error) {
 	_ = ctx
 	return f.chainID, nil
+}
+
+func (f *fakeTxSender) TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
+	_ = ctx
+	if f.receipts == nil {
+		return nil, ethereum.NotFound
+	}
+	receipt, ok := f.receipts[strings.ToLower(strings.TrimPrefix(txHash.Hex(), "0x"))]
+	if !ok {
+		return nil, ethereum.NotFound
+	}
+	return receipt, nil
 }
 
 func TestClaimProcessorPollOnceSubmitsClaim(t *testing.T) {
@@ -203,6 +230,56 @@ func TestClaimProcessorPollOnceFailsInvalidQueuedClaim(t *testing.T) {
 	}
 	if !strings.Contains(store.failedError, "wallet_address must be a valid EVM address") {
 		t.Fatalf("unexpected failed error: %s", store.failedError)
+	}
+}
+
+func TestClaimProcessorPollOnceConfirmsSubmittedClaimReceipt(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey returned error: %v", err)
+	}
+	txHash := "c065a79e5d3c4ceb66a80c554e29ed12b96e4d6ed5e58d575b0a4d2330f5a068"
+	store := &fakeClaimStore{
+		submittedTasks: []chainmodel.ClaimTask{{
+			ID:     42,
+			RefID:  "wd_42",
+			TxHash: txHash,
+			Status: "SUBMITTED",
+		}},
+	}
+	sender := &fakeTxSender{
+		nonce:    7,
+		chainID:  big.NewInt(97),
+		gasPrice: big.NewInt(1_000_000_000),
+		estimate: 120000,
+		receipts: map[string]*types.Receipt{
+			txHash: {Status: types.ReceiptStatusSuccessful},
+		},
+	}
+	cfg := config.ServiceConfig{
+		VaultAddress:            "0x00000000000000000000000000000000000000cc",
+		ChainOperatorPrivateKey: privateKeyHex(key),
+		ChainGasLimit:           250000,
+		CollateralSymbol:        "USDT",
+		CollateralDecimals:      6,
+		CollateralDisplayDigits: 2,
+	}
+	processor, err := NewClaimProcessor(slog.Default(), cfg, store, sender)
+	if err != nil {
+		t.Fatalf("NewClaimProcessor returned error: %v", err)
+	}
+
+	if err := processor.pollOnce(context.Background()); err != nil {
+		t.Fatalf("pollOnce returned error: %v", err)
+	}
+	if store.confirmedTxHash != txHash {
+		t.Fatalf("expected confirmed tx hash %s, got %s", txHash, store.confirmedTxHash)
+	}
+	if store.submittedID != 0 {
+		t.Fatalf("expected no new claim submission, got %d", store.submittedID)
+	}
+	if sender.sentTx != nil {
+		t.Fatalf("expected no new transaction for submitted claim reconciliation")
 	}
 }
 

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -24,8 +25,10 @@ const vaultClaimABI = `[{"inputs":[{"internalType":"bytes32","name":"claimId","t
 
 type claimStore interface {
 	ListPendingClaims(ctx context.Context, limit int) ([]chainmodel.ClaimTask, error)
+	ListSubmittedClaims(ctx context.Context, limit int) ([]chainmodel.ClaimTask, error)
 	MarkClaimSubmitted(ctx context.Context, id int64, txHash string) error
 	MarkClaimFailed(ctx context.Context, id int64, errMsg string) error
+	MarkClaimConfirmedByTxHash(ctx context.Context, txHash string) error
 }
 
 type txSender interface {
@@ -34,6 +37,7 @@ type txSender interface {
 	EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64, error)
 	SendTransaction(ctx context.Context, tx *types.Transaction) error
 	ChainID(ctx context.Context) (*big.Int, error)
+	TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
 }
 
 type ClaimProcessor struct {
@@ -102,6 +106,20 @@ func (p *ClaimProcessor) Start(ctx context.Context) {
 }
 
 func (p *ClaimProcessor) pollOnce(ctx context.Context) error {
+	submitted, err := p.store.ListSubmittedClaims(ctx, 20)
+	if err != nil {
+		return err
+	}
+	for _, task := range submitted {
+		progressed, err := p.reconcileSubmittedClaim(ctx, task)
+		if err != nil {
+			return err
+		}
+		if progressed {
+			return nil
+		}
+	}
+
 	tasks, err := p.store.ListPendingClaims(ctx, 20)
 	if err != nil {
 		return err
@@ -119,6 +137,37 @@ func (p *ClaimProcessor) pollOnce(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (p *ClaimProcessor) reconcileSubmittedClaim(ctx context.Context, task chainmodel.ClaimTask) (bool, error) {
+	normalized := normalizeChainTxHash(task.TxHash)
+	if normalized == "" {
+		if err := p.store.MarkClaimFailed(ctx, task.ID, "submitted claim is missing tx hash"); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
+	receipt, err := p.sender.TransactionReceipt(ctx, common.HexToHash("0x"+normalized))
+	if err != nil {
+		if errors.Is(err, ethereum.NotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	if receipt == nil {
+		return false, nil
+	}
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		if err := p.store.MarkClaimFailed(ctx, task.ID, "claim transaction reverted onchain"); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	if err := p.store.MarkClaimConfirmedByTxHash(ctx, normalized); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (p *ClaimProcessor) submitClaim(ctx context.Context, task chainmodel.ClaimTask) (string, error) {

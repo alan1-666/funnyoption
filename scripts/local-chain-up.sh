@@ -28,6 +28,7 @@ fi
 : "${FUNNYOPTION_LOCAL_CHAIN_OPERATOR_MNEMONIC_INDEX:=0}"
 : "${FUNNYOPTION_LOCAL_CHAIN_BUYER_PRIVATE_KEY:=0x59c6995e998f97a5a004497e5daef0d4f7dcd0cfd5401397dbeed52b21965b1d}"
 : "${FUNNYOPTION_LOCAL_CHAIN_MAKER_PRIVATE_KEY:=0x8b3a350cf5c34c9194ca85829f093d784c2f2c6c3a0eb1f3f3f94a639a6a39d1}"
+: "${FUNNYOPTION_LOCAL_CHAIN_FORCED_WITHDRAWAL_GRACE_PERIOD:=604800}"
 
 RPC_URL="http://${FUNNYOPTION_LOCAL_CHAIN_HOST}:${FUNNYOPTION_LOCAL_CHAIN_PORT}"
 
@@ -106,6 +107,12 @@ contract_exists() {
   [[ -n "${code}" && "${code}" != "0x" ]]
 }
 
+rollup_core_supports_forced_withdrawal() {
+  local address="$1"
+  [[ -n "${address}" ]] || return 1
+  cast call --rpc-url "${RPC_URL}" "${address}" "forcedWithdrawalGracePeriod()(uint64)" >/dev/null 2>&1
+}
+
 read_env_value() {
   local file="$1"
   local key="$2"
@@ -176,6 +183,7 @@ export FUNNYOPTION_CHAIN_POLL_INTERVAL='1s'
 export FUNNYOPTION_CHAIN_CLAIM_POLL_INTERVAL='3s'
 export FUNNYOPTION_ROLLUP_POLL_INTERVAL='3s'
 export FUNNYOPTION_ROLLUP_BATCH_LIMIT='256'
+export FUNNYOPTION_ROLLUP_FORCED_WITHDRAWAL_GRACE_PERIOD='${FUNNYOPTION_LOCAL_CHAIN_FORCED_WITHDRAWAL_GRACE_PERIOD}'
 export FUNNYOPTION_CHAIN_GAS_LIMIT='250000'
 export FUNNYOPTION_COLLATERAL_TOKEN_ADDRESS='${TOKEN_ADDRESS}'
 export FUNNYOPTION_ROLLUP_CORE_ADDRESS='${ROLLUP_CORE_ADDRESS}'
@@ -279,7 +287,7 @@ if ! contract_exists "${TOKEN_ADDRESS}" || ! contract_exists "${VAULT_ADDRESS}";
   mint_token "${MAKER_ADDRESS}" "500000000000"
 fi
 
-if ! contract_exists "${ROLLUP_CORE_ADDRESS}" || ! contract_exists "${ROLLUP_VERIFIER_ADDRESS}"; then
+if ! contract_exists "${ROLLUP_CORE_ADDRESS}" || ! contract_exists "${ROLLUP_VERIFIER_ADDRESS}" || ! rollup_core_supports_forced_withdrawal "${ROLLUP_CORE_ADDRESS}"; then
   compile_contracts
   GENESIS_STATE_ROOT="$(cd "${ROOT_DIR}" && go run ./cmd/rollup -mode=print-genesis-root | sed -n 's/.*"genesis_state_root": *"\([^"]*\)".*/\1/p' | tail -n 1)"
   if [[ -z "${GENESIS_STATE_ROOT}" ]]; then
@@ -288,8 +296,11 @@ if ! contract_exists "${ROLLUP_CORE_ADDRESS}" || ! contract_exists "${ROLLUP_VER
   fi
   ROLLUP_CORE_ADDRESS="$(deploy_contract "contracts/src/FunnyRollupCore.sol:FunnyRollupCore" --constructor-args "${OPERATOR_ADDRESS}" "${GENESIS_STATE_ROOT}")"
   ROLLUP_VERIFIER_ADDRESS="$(deploy_contract "contracts/src/FunnyRollupVerifier.sol:FunnyRollupVerifier")"
-  cast send --rpc-url "${RPC_URL}" --private-key "${OPERATOR_PRIVATE_KEY}" "${ROLLUP_CORE_ADDRESS}" "setVerifier(address)" "${ROLLUP_VERIFIER_ADDRESS}" >/dev/null
 fi
+
+cast send --rpc-url "${RPC_URL}" --private-key "${OPERATOR_PRIVATE_KEY}" "${ROLLUP_CORE_ADDRESS}" "setVerifier(address)" "${ROLLUP_VERIFIER_ADDRESS}" >/dev/null
+cast send --rpc-url "${RPC_URL}" --private-key "${OPERATOR_PRIVATE_KEY}" "${ROLLUP_CORE_ADDRESS}" "setVault(address)" "${VAULT_ADDRESS}" >/dev/null
+cast send --rpc-url "${RPC_URL}" --private-key "${OPERATOR_PRIVATE_KEY}" "${ROLLUP_CORE_ADDRESS}" "setForcedWithdrawalGracePeriod(uint64)" "${FUNNYOPTION_LOCAL_CHAIN_FORCED_WITHDRAWAL_GRACE_PERIOD}" >/dev/null
 
 if (( DEPLOYED_FRESH == 0 )) && [[ -n "${EXISTING_START_BLOCK}" ]]; then
   START_BLOCK="${EXISTING_START_BLOCK}"

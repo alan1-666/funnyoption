@@ -3,6 +3,8 @@ pragma solidity ^0.8.24;
 
 import {FunnyRollupCore} from "../src/FunnyRollupCore.sol";
 import {FunnyRollupVerifier, IFunnyRollupBatchVerifier, FunnyRollupVerifierTypes} from "../src/FunnyRollupVerifier.sol";
+import {FunnyVault} from "../src/FunnyVault.sol";
+import {MockUSDT} from "../src/MockUSDT.sol";
 import {DSTest} from "./DSTest.sol";
 
 abstract contract FunnyRollupArtifactFixtures is DSTest {
@@ -339,6 +341,118 @@ contract FunnyRollupCoreTest is FunnyRollupArtifactFixtures {
         assertEq(verifier.verifyCalls(), 0, "verifier should not be called when recorded metadata mismatches");
         assertEq(uint256(core.latestAcceptedBatchId()), 0, "latestAcceptedBatchId should stay unset");
         assertEqBytes32(core.latestAcceptedStateRoot(), genesisStateRoot, "accepted state root should stay at genesis");
+    }
+
+    function testRequestForcedWithdrawalStoresRequest() public {
+        bytes32 genesisStateRoot = keccak256("genesis_state_root");
+        FunnyRollupCore core = new FunnyRollupCore(address(this), genesisStateRoot);
+        ForcedWithdrawalRequester requester = new ForcedWithdrawalRequester();
+
+        core.setForcedWithdrawalGracePeriod(3600);
+        uint64 requestId = requester.request(core, address(0xBEEF), 1250);
+
+        (
+            address wallet,
+            address recipient,
+            uint256 amount,
+            uint64 requestedAt,
+            uint64 deadlineAt,
+            bytes32 satisfiedClaimId,
+            uint64 satisfiedAt,
+            uint64 frozenRequestAt,
+            FunnyRollupCore.ForcedWithdrawalStatus status
+        ) = core.forcedWithdrawalRequests(requestId);
+
+        assertEq(uint256(requestId), 1, "requestId mismatch");
+        assertEq(uint256(core.forcedWithdrawalRequestCount()), 1, "forcedWithdrawalRequestCount mismatch");
+        assertEq(uint256(uint160(wallet)), uint256(uint160(address(requester))), "wallet mismatch");
+        assertEq(uint256(uint160(recipient)), uint256(uint160(address(0xBEEF))), "recipient mismatch");
+        assertEq(amount, 1250, "amount mismatch");
+        assertTrue(requestedAt > 0, "requestedAt should be set");
+        assertEq(uint256(deadlineAt), uint256(requestedAt) + 3600, "deadlineAt mismatch");
+        assertEqBytes32(satisfiedClaimId, bytes32(0), "satisfiedClaimId should be zero");
+        assertEq(uint256(satisfiedAt), 0, "satisfiedAt should be zero");
+        assertEq(uint256(frozenRequestAt), 0, "frozenAt should be zero");
+        assertEq(
+            uint256(uint8(status)), uint256(uint8(FunnyRollupCore.ForcedWithdrawalStatus.REQUESTED)), "status mismatch"
+        );
+    }
+
+    function testSatisfyForcedWithdrawalMarksRequestSatisfied() public {
+        bytes32 genesisStateRoot = keccak256("genesis_state_root");
+        MockUSDT token = new MockUSDT();
+        FunnyVault vault = new FunnyVault(address(token), address(this));
+        FunnyRollupCore core = new FunnyRollupCore(address(this), genesisStateRoot);
+        ForcedWithdrawalRequester requester = new ForcedWithdrawalRequester();
+
+        core.setVault(address(vault));
+        core.setForcedWithdrawalGracePeriod(3600);
+
+        uint64 requestId = requester.request(core, address(0xCAFE), 900);
+        bytes32 claimId = keccak256("forced_claim_1");
+        token.mint(address(vault), 900);
+        vault.processClaim(claimId, address(requester), 900, address(0xCAFE));
+
+        core.satisfyForcedWithdrawal(requestId, claimId);
+
+        (
+            address wallet,
+            address recipient,
+            uint256 amount,
+            uint64 requestedAt,
+            uint64 deadlineAt,
+            bytes32 satisfiedClaimId,
+            uint64 satisfiedAt,
+            uint64 frozenRequestAt,
+            FunnyRollupCore.ForcedWithdrawalStatus status
+        ) = core.forcedWithdrawalRequests(requestId);
+
+        assertEq(uint256(uint160(wallet)), uint256(uint160(address(requester))), "wallet mismatch");
+        assertEq(uint256(uint160(recipient)), uint256(uint160(address(0xCAFE))), "recipient mismatch");
+        assertEq(amount, 900, "amount mismatch");
+        assertTrue(requestedAt > 0, "requestedAt should stay set");
+        assertTrue(deadlineAt >= requestedAt, "deadlineAt should stay set");
+        assertEqBytes32(satisfiedClaimId, claimId, "satisfiedClaimId mismatch");
+        assertTrue(satisfiedAt > 0, "satisfiedAt should be set");
+        assertEq(uint256(frozenRequestAt), 0, "frozenAt should stay zero");
+        assertEq(
+            uint256(uint8(status)), uint256(uint8(FunnyRollupCore.ForcedWithdrawalStatus.SATISFIED)), "status mismatch"
+        );
+    }
+
+    function testFreezeBlocksBatchAdvancementAfterMissedDeadline() public {
+        bytes32 genesisStateRoot = keccak256("genesis_state_root");
+        FunnyRollupCore core = new FunnyRollupCore(address(this), genesisStateRoot);
+        MockFunnyRollupVerifier verifier = new MockFunnyRollupVerifier();
+        ForcedWithdrawalRequester requester = new ForcedWithdrawalRequester();
+
+        core.setVerifier(address(verifier));
+        core.recordBatchMetadata(1, keccak256("batch_data_1"), genesisStateRoot, keccak256("next_state_root_1"));
+        core.setForcedWithdrawalGracePeriod(0);
+        requester.request(core, address(0xF00D), 777);
+        core.freezeForMissedForcedWithdrawal(1);
+
+        assertTrue(core.escapeHatchEnabled(), "escape hatch should be enabled when frozen");
+        assertEq(uint256(core.freezeRequestId()), 1, "freezeRequestId mismatch");
+        assertTrue(core.frozenAt() > 0, "frozenAt should be set");
+
+        try core.recordBatchMetadata(
+            2, keccak256("batch_data_2"), keccak256("next_state_root_1"), keccak256("next_state_root_2")
+        ) {
+            revert("expected recordBatchMetadata to be frozen");
+        } catch {}
+
+        FunnyRollupCore.VerifierPublicInputs memory publicInputs =
+            buildPublicInputs(genesisStateRoot, keccak256("next_state_root_1"));
+        FunnyRollupCore.L1BatchMetadata memory metadataSubset = buildMetadataSubset(publicInputs);
+        FunnyRollupCore.AuthJoinStatus[] memory authStatuses = new FunnyRollupCore.AuthJoinStatus[](1);
+        authStatuses[0] = FunnyRollupCore.AuthJoinStatus.JOINED;
+        bytes32 verifierGateHash = core.hashVerifierGateBatch(publicInputs, core.hashAuthStatuses(authStatuses));
+        verifier.setVerdict(verifierGateHash, true);
+
+        try core.acceptVerifiedBatch(publicInputs, metadataSubset, authStatuses, hex"1234") {
+            revert("expected acceptVerifiedBatch to be frozen");
+        } catch {}
     }
 
     function buildPublicInputs(bytes32 prevStateRoot, bytes32 nextStateRoot)
@@ -682,6 +796,12 @@ contract BatchRecorderCaller {
     ) external returns (bool, bytes memory) {
         return address(core)
             .call(abi.encodeCall(core.recordBatchMetadata, (batchId, batchDataHash, prevStateRoot, nextStateRoot)));
+    }
+}
+
+contract ForcedWithdrawalRequester {
+    function request(FunnyRollupCore core, address recipient, uint256 amount) external returns (uint64) {
+        return core.requestForcedWithdrawal(recipient, amount);
     }
 }
 

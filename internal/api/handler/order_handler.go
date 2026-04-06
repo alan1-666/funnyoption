@@ -976,6 +976,45 @@ func (h *OrderHandler) ListWithdrawals(ctx *gin.Context) {
 	writeCollectionResponse(ctx, http.StatusOK, items)
 }
 
+func (h *OrderHandler) ListRollupForcedWithdrawals(ctx *gin.Context) {
+	var req dto.ListRollupForcedWithdrawalsRequest
+	if err := ctx.ShouldBindQuery(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.store == nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
+		return
+	}
+
+	items, err := h.store.ListRollupForcedWithdrawals(ctx, req)
+	if err != nil {
+		h.logger.Error("list rollup forced withdrawals failed", "err", err)
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "list rollup forced withdrawals failed"})
+		return
+	}
+	writeCollectionResponse(ctx, http.StatusOK, items)
+}
+
+func (h *OrderHandler) GetRollupFreezeState(ctx *gin.Context) {
+	if h.store == nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
+		return
+	}
+
+	item, err := h.store.GetRollupFreezeState(ctx)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "rollup freeze state not found"})
+			return
+		}
+		h.logger.Error("get rollup freeze state failed", "err", err)
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "get rollup freeze state failed"})
+		return
+	}
+	ctx.JSON(http.StatusOK, item)
+}
+
 func (h *OrderHandler) CreateClaimPayout(ctx *gin.Context) {
 	eventID := strings.TrimSpace(ctx.Param("event_id"))
 	if eventID == "" {
@@ -1195,6 +1234,16 @@ func (h *OrderHandler) CreateOrder(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
 		return
 	}
+	frozen, err := h.rollupTradingFrozen(ctx)
+	if err != nil {
+		h.logger.Error("get rollup freeze state failed", "err", err)
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "get rollup freeze state failed"})
+		return
+	}
+	if frozen {
+		ctx.JSON(http.StatusConflict, gin.H{"error": "rollup is frozen"})
+		return
+	}
 
 	market, err := h.store.GetMarket(ctx, req.MarketID)
 	if err != nil {
@@ -1277,6 +1326,20 @@ func (h *OrderHandler) CreateOrder(ctx *gin.Context) {
 		Topic:     h.topics.OrderCommand,
 		Status:    "QUEUED",
 	})
+}
+
+func (h *OrderHandler) rollupTradingFrozen(ctx context.Context) (bool, error) {
+	if h.store == nil {
+		return false, nil
+	}
+	item, err := h.store.GetRollupFreezeState(ctx)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return item.Frozen, nil
 }
 
 func calculateFreeze(side, orderType string, marketID int64, outcome string, price, quantity int64) (string, int64, error) {

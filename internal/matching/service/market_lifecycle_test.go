@@ -18,3 +18,14 @@ func TestMarketTradingOpenRespectsCloseAtBoundary(t *testing.T) {
 		t.Fatalf("expected waiting-resolution market to remain non-tradable")
 	}
 }
+
+func TestMarketTradingEnabledRespectsFrozenState(t *testing.T) {
+	t.Parallel()
+
+	if !marketTradingEnabled(false, "OPEN", 100, 99) {
+		t.Fatalf("expected unfrozen open market to remain tradable")
+	}
+	if marketTradingEnabled(true, "OPEN", 100, 99) {
+		t.Fatalf("expected frozen rollup to stop trading even before close_at")
+	}
+}

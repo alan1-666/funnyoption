@@ -45,6 +45,14 @@ func (s *SQLStore) MaxTradeSequence(ctx context.Context) (uint64, error) {
 }
 
 func (s *SQLStore) LoadRestingOrders(ctx context.Context) ([]*model.Order, error) {
+	frozen, err := s.rollupFrozen(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if frozen {
+		return []*model.Order{}, nil
+	}
+
 	nowUnix := time.Now().Unix()
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT orders.order_id, orders.client_order_id, orders.user_id, orders.market_id, orders.outcome, orders.side,
@@ -111,6 +119,14 @@ func (s *SQLStore) LoadRestingOrders(ctx context.Context) ([]*model.Order, error
 }
 
 func (s *SQLStore) LoadExpiredRestingOrders(ctx context.Context, nowUnix int64) ([]ExpiredRestingOrder, error) {
+	frozen, err := s.rollupFrozen(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if frozen {
+		return []ExpiredRestingOrder{}, nil
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT orders.order_id, orders.client_order_id, orders.command_id, orders.user_id, orders.market_id, orders.outcome, orders.side,
 		       orders.order_type, orders.time_in_force, orders.collateral_asset, orders.freeze_id, orders.freeze_asset, orders.freeze_amount,
@@ -199,6 +215,10 @@ func (s *SQLStore) LoadExpiredRestingOrders(ctx context.Context, nowUnix int64) 
 }
 
 func (s *SQLStore) MarketIsTradable(ctx context.Context, marketID int64) (bool, error) {
+	frozen, err := s.rollupFrozen(ctx)
+	if err != nil {
+		return false, err
+	}
 	var (
 		status  string
 		closeAt int64
@@ -209,11 +229,27 @@ func (s *SQLStore) MarketIsTradable(ctx context.Context, marketID int64) (bool, 
 		WHERE market_id = $1
 	`, marketID).Scan(&status, &closeAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return true, nil
+			return !frozen, nil
 		}
 		return false, err
 	}
-	return marketTradingOpen(status, closeAt, time.Now().Unix()), nil
+	return marketTradingEnabled(frozen, status, closeAt, time.Now().Unix()), nil
+}
+
+func (s *SQLStore) rollupFrozen(ctx context.Context) (bool, error) {
+	var frozen bool
+	err := s.db.QueryRowContext(ctx, `
+		SELECT frozen
+		FROM rollup_freeze_state
+		WHERE id = TRUE
+	`).Scan(&frozen)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return frozen, nil
 }
 
 func (s *SQLStore) PersistResult(ctx context.Context, command sharedkafka.OrderCommand, result engine.Result) error {

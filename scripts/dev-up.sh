@@ -318,6 +318,8 @@ TRUNCATE rollup_accepted_withdrawals,
          rollup_accepted_positions,
          rollup_accepted_balances,
          rollup_accepted_batches,
+         rollup_forced_withdrawal_requests,
+         rollup_freeze_state,
          rollup_shadow_submissions,
          rollup_shadow_batches,
          rollup_shadow_journal_entries

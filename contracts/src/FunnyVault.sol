@@ -7,11 +7,18 @@ interface IERC20Minimal {
 }
 
 contract FunnyVault {
+    struct ClaimRecord {
+        address wallet;
+        uint256 amount;
+        address recipient;
+    }
+
     IERC20Minimal public immutable collateralToken;
     address public immutable operator;
 
     mapping(address => uint256) public depositedBalance;
     mapping(bytes32 => bool) public processedClaims;
+    mapping(bytes32 => ClaimRecord) public processedClaimRecords;
 
     event Deposited(address indexed wallet, uint256 amount);
     event WithdrawalQueued(bytes32 indexed withdrawalId, address indexed wallet, uint256 amount, address recipient);
@@ -46,6 +53,7 @@ contract FunnyVault {
         if (amount == 0) revert InvalidAmount();
 
         processedClaims[claimId] = true;
+        processedClaimRecords[claimId] = ClaimRecord({wallet: wallet, amount: amount, recipient: recipient});
         require(collateralToken.transfer(recipient, amount), "TRANSFER_FAILED");
         emit ClaimProcessed(claimId, wallet, amount, recipient);
     }

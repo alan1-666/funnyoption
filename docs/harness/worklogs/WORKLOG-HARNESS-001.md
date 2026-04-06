@@ -218,6 +218,37 @@
   - marked `HANDSHAKE-STAGING-001` and the active master plan lane as `active`
 - validated:
   - the existing staging worklog already contains one single-flow E2E pass plus three product follow-up findings
+
+### 2026-04-06 18:10 Asia/Shanghai
+
+- read:
+  - `TASK-CHAIN-032.md`
+  - `HANDSHAKE-CHAIN-032.md`
+  - `WORKLOG-CHAIN-032.md`
+  - `TASK-CHAIN-033.md`
+  - `HANDSHAKE-CHAIN-033.md`
+  - `WORKLOG-CHAIN-033.md`
+  - `docs/architecture/mode-b-zk-rollup.md`
+  - `docs/sql/schema.md`
+- changed:
+  - marked `TASK-CHAIN-032` and `TASK-CHAIN-033` completed in `PLAN.md` and
+    the active master plan
+  - created `TASK-CHAIN-034`, `HANDSHAKE-CHAIN-034`, and `WORKLOG-CHAIN-034`
+    for one narrow frozen-mode trading guard tranche
+  - recorded forced-withdrawal satisfaction runtime plus frozen-mode trading
+    guard boundaries in architecture/schema docs
+- validated:
+  - `go test ./internal/chain/service ./internal/api ./internal/api/handler ./internal/matching/service ./internal/rollup`
+  - `forge test --offline --match-path contracts/test/FunnyRollupCore.t.sol`
+  - local live forced-withdrawal satisfaction:
+    - canonical accepted withdrawal advanced to `CLAIMED`
+    - forced-withdraw request advanced to `SATISFIED`
+- blockers:
+  - full escape-hatch claims still do not exist
+  - global frozen production-truth switching is still follow-up work
+- next:
+  - continue from frozen-mode trading guards toward broader frozen-mode truth
+    behavior and later escape-hatch runtime
   - the new concurrency requirement is scoped to staging validation and explicitly asks for aggregate counters, latency summary, and duplicate-fill / overfill / negative-balance / stale-freeze anomaly evidence
 - blockers:
   - no new commander-level blocker; the worker should stop and report if bounded concurrency starts hitting staging rate limits or transient overload thresholds

@@ -43,6 +43,8 @@ type QueryStore interface {
 	ListSessions(ctx context.Context, req dto.ListSessionsRequest) ([]dto.SessionResponse, error)
 	ListDeposits(ctx context.Context, req dto.ListDepositsRequest) ([]dto.DepositResponse, error)
 	ListWithdrawals(ctx context.Context, req dto.ListWithdrawalsRequest) ([]dto.WithdrawalResponse, error)
+	ListRollupForcedWithdrawals(ctx context.Context, req dto.ListRollupForcedWithdrawalsRequest) ([]dto.RollupForcedWithdrawalResponse, error)
+	GetRollupFreezeState(ctx context.Context) (dto.RollupFreezeStateResponse, error)
 	ListChainTransactions(ctx context.Context, req dto.ListChainTransactionsRequest) ([]dto.ChainTransactionResponse, error)
 	ListOrders(ctx context.Context, req dto.ListOrdersRequest) ([]dto.OrderResponse, error)
 	ListTrades(ctx context.Context, req dto.ListTradesRequest) ([]dto.TradeResponse, error)
@@ -910,6 +912,91 @@ func (s *SQLStore) ListWithdrawals(ctx context.Context, req dto.ListWithdrawalsR
 		return nil, err
 	}
 	return normalizeCollectionItems(items), nil
+}
+
+func (s *SQLStore) ListRollupForcedWithdrawals(ctx context.Context, req dto.ListRollupForcedWithdrawalsRequest) ([]dto.RollupForcedWithdrawalResponse, error) {
+	var (
+		args    []any
+		filters []string
+	)
+	query := `
+		SELECT request_id, wallet_address, recipient_address, amount,
+		       requested_at, deadline_at, satisfied_claim_id, satisfied_at,
+		       frozen_at, status, matched_withdrawal_id, matched_claim_id,
+		       satisfaction_status, satisfaction_tx_hash, satisfaction_submitted_at,
+		       satisfaction_last_error, satisfaction_last_error_at, created_at, updated_at
+		FROM rollup_forced_withdrawal_requests
+	`
+
+	if wallet := normalizeWalletAddress(req.WalletAddress); wallet != "" {
+		args = append(args, wallet)
+		filters = append(filters, fmt.Sprintf("wallet_address = $%d", len(args)))
+	}
+	if status := normalizeOptional(req.Status); status != "" {
+		args = append(args, status)
+		filters = append(filters, fmt.Sprintf("status = $%d", len(args)))
+	}
+	if len(filters) > 0 {
+		query += " WHERE " + strings.Join(filters, " AND ")
+	}
+
+	args = append(args, normalizeLimit(req.Limit))
+	query += fmt.Sprintf(" ORDER BY request_id DESC LIMIT $%d", len(args))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]dto.RollupForcedWithdrawalResponse, 0)
+	for rows.Next() {
+		var item dto.RollupForcedWithdrawalResponse
+		if err := rows.Scan(
+			&item.RequestID,
+			&item.WalletAddress,
+			&item.RecipientAddress,
+			&item.Amount,
+			&item.RequestedAt,
+			&item.DeadlineAt,
+			&item.SatisfiedClaimID,
+			&item.SatisfiedAt,
+			&item.FrozenAt,
+			&item.Status,
+			&item.MatchedWithdrawalID,
+			&item.MatchedClaimID,
+			&item.SatisfactionStatus,
+			&item.SatisfactionTxHash,
+			&item.SatisfactionSubmittedAt,
+			&item.SatisfactionLastError,
+			&item.SatisfactionLastErrorAt,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return normalizeCollectionItems(items), nil
+}
+
+func (s *SQLStore) GetRollupFreezeState(ctx context.Context) (dto.RollupFreezeStateResponse, error) {
+	var item dto.RollupFreezeStateResponse
+	err := s.db.QueryRowContext(ctx, `
+		SELECT frozen, frozen_at, request_id, updated_at
+		FROM rollup_freeze_state
+		WHERE id = TRUE
+	`).Scan(&item.Frozen, &item.FrozenAt, &item.RequestID, &item.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return dto.RollupFreezeStateResponse{}, ErrNotFound
+		}
+		return dto.RollupFreezeStateResponse{}, err
+	}
+	return item, nil
 }
 
 func (s *SQLStore) ListChainTransactions(ctx context.Context, req dto.ListChainTransactionsRequest) ([]dto.ChainTransactionResponse, error) {

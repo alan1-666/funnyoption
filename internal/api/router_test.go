@@ -768,6 +768,17 @@ func (s *testQueryStore) ListWithdrawals(ctx context.Context, req dto.ListWithdr
 	return nil, nil
 }
 
+func (s *testQueryStore) ListRollupForcedWithdrawals(ctx context.Context, req dto.ListRollupForcedWithdrawalsRequest) ([]dto.RollupForcedWithdrawalResponse, error) {
+	_ = ctx
+	_ = req
+	return nil, nil
+}
+
+func (s *testQueryStore) GetRollupFreezeState(ctx context.Context) (dto.RollupFreezeStateResponse, error) {
+	_ = ctx
+	return dto.RollupFreezeStateResponse{}, nil
+}
+
 func (s *testQueryStore) ListChainTransactions(ctx context.Context, req dto.ListChainTransactionsRequest) ([]dto.ChainTransactionResponse, error) {
 	_ = ctx
 	_ = req

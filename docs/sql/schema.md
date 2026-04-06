@@ -26,6 +26,8 @@
 
 `/Users/zhangza/code/funnyoption/migrations/013_wallet_sessions_vault_key_uniqueness.sql` replaces the legacy wallet/public-key uniqueness rule with durable `wallet + chain + vault + public key` uniqueness.
 
+`/Users/zhangza/code/funnyoption/migrations/019_rollup_forced_withdrawal_foundations.sql` adds local mirrors for rollup forced-withdrawal requests and global freeze state.
+
 ## Trading domain
 
 - `markets`: market master data and lifecycle state
@@ -278,6 +280,48 @@ New tables:
     - `FAILED`
   - canonical slow-withdraw `WITHDRAWAL_CLAIM` queue rows are only derived
     from this table, never directly from `chain_withdrawals`
+- `rollup_forced_withdrawal_requests`
+  - durable mirror of `FunnyRollupCore.forcedWithdrawalRequests(requestId)`
+  - current mirrored fields are:
+    - `wallet_address`
+    - `recipient_address`
+    - `amount`
+    - `requested_at`
+    - `deadline_at`
+    - `satisfied_claim_id`
+    - `satisfied_at`
+    - `frozen_at`
+    - `status`
+  - current mirrored `status` is:
+    - `REQUESTED`
+    - `SATISFIED`
+    - `FROZEN`
+  - current local satisfaction/runtime fields are:
+    - `matched_withdrawal_id`
+    - `matched_claim_id`
+    - `satisfaction_status`
+    - `satisfaction_tx_hash`
+    - `satisfaction_submitted_at`
+    - `satisfaction_last_error`
+    - `satisfaction_last_error_at`
+  - current local `satisfaction_status` is:
+    - `NONE`
+    - `READY`
+    - `SUBMITTED`
+    - `FAILED`
+    - `AMBIGUOUS`
+    - `SATISFIED`
+  - current API read surfaces expose:
+    - `GET /api/v1/rollup/forced-withdrawals`
+    - `GET /api/v1/rollup/freeze-state`
+- `rollup_freeze_state`
+  - one-row durable mirror of `FunnyRollupCore.frozen`,
+    `frozenAt`, and `freezeRequestId`
+  - this is still operational read truth for the local/test exit-runtime lane;
+    it is not yet the full escape-hatch claim runtime
+  - current runtime also uses this mirror to stop new trading writes:
+    - API order ingress rejects with `rollup is frozen`
+    - matching runtime and restart treat frozen mode as non-tradable
 
 Current `shadow-batch-v1` contract:
 
@@ -507,6 +551,15 @@ First proof-lane storage / migration consequence:
   verifier-eligible full-flow harness, which now drives post-settlement rollup
   submission and re-reads accepted balances / positions / payouts without
   hand-seeding rows
+- `TASK-CHAIN-032` lands the first forced-withdraw / freeze foundation:
+  - `FunnyRollupCore` now stores forced-withdrawal requests plus a global
+    freeze gate for normal batch advancement
+  - `FunnyVault` now exposes processed-claim metadata so a request can be
+    marked `SATISFIED` against a real vault claim record
+  - chain service mirrors that contract state into:
+    - `rollup_forced_withdrawal_requests`
+    - `rollup_freeze_state`
+  - this still does **not** mean escape-hatch claims are implemented
 - deprecated blank-vault `/api/v1/sessions` rows should remain shadow /
   compatibility-only; proof tooling should migrate to V2 trading-key rows
   before those batches are treated as verifier-eligible

@@ -21,5 +21,7 @@ func registerPublicReadRoutes(api *gin.RouterGroup, orderHandler *handler.OrderH
 	api.GET("/reports/liabilities", orderHandler.GetLiabilityReport)
 	api.GET("/deposits", orderHandler.ListDeposits)
 	api.GET("/withdrawals", orderHandler.ListWithdrawals)
+	api.GET("/rollup/forced-withdrawals", orderHandler.ListRollupForcedWithdrawals)
+	api.GET("/rollup/freeze-state", orderHandler.GetRollupFreezeState)
 	api.GET("/chain-transactions", orderHandler.ListChainTransactions)
 }

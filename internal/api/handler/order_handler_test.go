@@ -203,6 +203,10 @@ type fakeQueryStore struct {
 	listDepositsErr               error
 	listWithdrawResp              []dto.WithdrawalResponse
 	listWithdrawErr               error
+	listRollupForcedWithdrawResp  []dto.RollupForcedWithdrawalResponse
+	listRollupForcedWithdrawErr   error
+	getRollupFreezeResp           dto.RollupFreezeStateResponse
+	getRollupFreezeErr            error
 	listChainTxResp               []dto.ChainTransactionResponse
 	listChainTxErr                error
 	listOrdersResp                []dto.OrderResponse
@@ -528,6 +532,17 @@ func (f *fakeQueryStore) ListWithdrawals(ctx context.Context, req dto.ListWithdr
 	_ = ctx
 	_ = req
 	return f.listWithdrawResp, f.listWithdrawErr
+}
+
+func (f *fakeQueryStore) ListRollupForcedWithdrawals(ctx context.Context, req dto.ListRollupForcedWithdrawalsRequest) ([]dto.RollupForcedWithdrawalResponse, error) {
+	_ = ctx
+	_ = req
+	return f.listRollupForcedWithdrawResp, f.listRollupForcedWithdrawErr
+}
+
+func (f *fakeQueryStore) GetRollupFreezeState(ctx context.Context) (dto.RollupFreezeStateResponse, error) {
+	_ = ctx
+	return f.getRollupFreezeResp, f.getRollupFreezeErr
 }
 
 func (f *fakeQueryStore) ListChainTransactions(ctx context.Context, req dto.ListChainTransactionsRequest) ([]dto.ChainTransactionResponse, error) {
@@ -1530,6 +1545,60 @@ func TestCreateOrderRejectsPastCloseAtMarketBeforeFreeze(t *testing.T) {
 	}
 }
 
+func TestCreateOrderRejectsFrozenRollupBeforeFreeze(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	account := &fakeAccountClient{
+		freezeResp: accountclient.FreezeRecord{
+			FreezeID: "frz_should_not_exist",
+			UserID:   1001,
+			Asset:    "USDT",
+			RefType:  "ORDER",
+			RefID:    "ord_x",
+			Amount:   200,
+		},
+	}
+	reqBody := dto.CreateOrderRequest{
+		UserID:      1001,
+		MarketID:    88,
+		Outcome:     "yes",
+		Side:        "sell",
+		Type:        "limit",
+		TimeInForce: "gtc",
+		Price:       10,
+		Quantity:    20,
+	}
+	wallet := attachSignedBootstrapOrderOperator(t, &reqBody)
+	handler := NewOrderHandler(Dependencies{
+		Logger:        slog.Default(),
+		KafkaTopics:   kafka.NewTopics("funnyoption."),
+		AccountClient: account,
+		QueryStore: &fakeQueryStore{
+			getRollupFreezeResp: dto.RollupFreezeStateResponse{Frozen: true},
+		},
+		OperatorWallets: []string{wallet},
+	})
+
+	raw, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = req
+
+	handler.CreateOrder(ctx)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "rollup is frozen") {
+		t.Fatalf("expected frozen rollup error, got %s", w.Body.String())
+	}
+	if account.preFreezeCalled {
+		t.Fatalf("expected no pre-freeze attempt for frozen rollup")
+	}
+}
+
 func TestCreateMarketReturnsCreatedMarket(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -2384,6 +2453,64 @@ func TestListChainTransactionsReturnsEmptyArrayForNilSlice(t *testing.T) {
 	}
 	if len(resp.Items) != 0 {
 		t.Fatalf("expected empty items slice, got %+v", resp.Items)
+	}
+}
+
+func TestListRollupForcedWithdrawalsReturnsItems(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := &fakeQueryStore{
+		listRollupForcedWithdrawResp: []dto.RollupForcedWithdrawalResponse{
+			{RequestID: 1, Status: "REQUESTED", SatisfactionStatus: "READY"},
+		},
+	}
+	handler := NewOrderHandler(Dependencies{
+		Logger:     slog.Default(),
+		QueryStore: store,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/rollup/forced-withdrawals?limit=5", nil)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = req
+
+	handler.ListRollupForcedWithdrawals(ctx)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "\"request_id\":1") {
+		t.Fatalf("expected request payload, got %s", w.Body.String())
+	}
+}
+
+func TestGetRollupFreezeStateReturnsObject(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewOrderHandler(Dependencies{
+		Logger: slog.Default(),
+		QueryStore: &fakeQueryStore{
+			getRollupFreezeResp: dto.RollupFreezeStateResponse{
+				Frozen:    true,
+				FrozenAt:  1234,
+				RequestID: 7,
+				UpdatedAt: 1235,
+			},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/rollup/freeze-state", nil)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = req
+
+	handler.GetRollupFreezeState(ctx)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "\"frozen\":true") {
+		t.Fatalf("expected frozen response, got %s", w.Body.String())
 	}
 }
 

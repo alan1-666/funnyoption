@@ -755,6 +755,58 @@ worker 不必重新决定：
         accepted-root first
       - forced-withdraw / freeze / escape hatch 仍未实现
       - prover 仍然不是 full state-transition circuit
+  - `TASK-CHAIN-032` 把 exit-runtime foundations 往前推进了一步，但仍然
+    truthfully 停在 foundation 阶段：
+    - [`FunnyRollupCore`](/Users/zhangza/code/funnyoption/contracts/src/FunnyRollupCore.sol)
+      现在已经持有：
+      - forced-withdrawal request storage
+      - deadline / grace-period contract
+      - global `frozen` gate
+    - 正常 batch advancement 现在在 frozen 状态下会被拒绝：
+      - `recordBatchMetadata(...)`
+      - `acceptVerifiedBatch(...)`
+    - [`FunnyVault`](/Users/zhangza/code/funnyoption/contracts/src/FunnyVault.sol)
+      现在会把 processed claim metadata 持久化出来，所以
+      forced-withdrawal request 可以被一个真实 vault claim 标记为
+      `SATISFIED`
+    - chain service 现在会 mirror：
+      - `rollup_forced_withdrawal_requests`
+      - `rollup_freeze_state`
+    - 这条 lane 的边界仍然必须说清楚：
+      - 还没有 escape-hatch Merkle proof claim runtime
+      - 还没有 full exit guarantee
+      - 还没有把 production truth 切到 frozen / escape mode
+  - `TASK-CHAIN-033` 继续把 exit runtime 从 foundation 推到第一条真实
+    satisfaction lane：
+    - chain service 现在会把一个 unambiguous canonical claimed withdrawal
+      自动匹配并提交
+      `FunnyRollupCore.satisfyForcedWithdrawal(requestId, claimId)`
+    - `rollup_forced_withdrawal_requests` 现在除了 onchain mirror，还会持有
+      local satisfaction runtime 状态：
+      - `NONE`
+      - `READY`
+      - `SUBMITTED`
+      - `FAILED`
+      - `AMBIGUOUS`
+      - `SATISFIED`
+    - repo 现在有两条 truthful read surfaces：
+      - `GET /api/v1/rollup/forced-withdrawals`
+      - `GET /api/v1/rollup/freeze-state`
+    - local live validation 已经证明：
+      - canonical accepted withdrawal claim can become `CLAIMED`
+      - matching forced-withdraw request can then become `SATISFIED`
+    - 但这仍然不是完整 escape hatch：
+      - full Merkle-proof collateral claims are still missing
+      - global frozen production-truth switching is still missing
+  - `TASK-CHAIN-034` 把 frozen-mode runtime truth 也往前收了一步：
+    - `/api/v1/orders` 现在在 mirrored freeze state 下会直接拒绝：
+      - `rollup is frozen`
+    - matching runtime 现在不再把 frozen mode 当成可交易：
+      - command-side tradability check returns false
+      - restart no longer restores resting orders as live book state
+    - 这仍然只是 first-cut frozen truth：
+      - deposits / mutable backend writes are not globally switched yet
+      - escape-hatch proof claims are still follow-up work
 
 因此边界明确分成三层：
 

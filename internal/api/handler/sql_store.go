@@ -1359,61 +1359,36 @@ func (s *SQLStore) ListTrades(ctx context.Context, req dto.ListTradesRequest) ([
 }
 
 func (s *SQLStore) ListBalances(ctx context.Context, req dto.ListBalancesRequest) ([]dto.BalanceResponse, error) {
-	useAcceptedTruth, err := s.acceptedFinancialTruthVisible(ctx)
+	frozen, err := s.rollupFrozen(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if useAcceptedTruth {
+	if frozen {
 		return s.listAcceptedBalances(ctx, req)
 	}
 	return s.listMergedBalances(ctx, req)
 }
 
 func (s *SQLStore) ListPositions(ctx context.Context, req dto.ListPositionsRequest) ([]dto.PositionResponse, error) {
-	useAcceptedTruth, err := s.acceptedFinancialTruthVisible(ctx)
+	frozen, err := s.rollupFrozen(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if useAcceptedTruth {
+	if frozen {
 		return s.listAcceptedPositions(ctx, req)
 	}
 	return s.listMergedPositions(ctx, req)
 }
 
 func (s *SQLStore) ListPayouts(ctx context.Context, req dto.ListPayoutsRequest) ([]dto.PayoutResponse, error) {
-	useAcceptedTruth, err := s.acceptedFinancialTruthVisible(ctx)
+	frozen, err := s.rollupFrozen(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if useAcceptedTruth {
+	if frozen {
 		return s.listAcceptedPayouts(ctx, req)
 	}
 	return s.listMergedPayouts(ctx, req)
-}
-
-func (s *SQLStore) acceptedFinancialTruthVisible(ctx context.Context) (bool, error) {
-	frozen, err := s.rollupFrozen(ctx)
-	if err != nil {
-		return false, err
-	}
-	if frozen {
-		return true, nil
-	}
-	return s.acceptedReadTruthVisible(ctx)
-}
-
-func (s *SQLStore) acceptedReadTruthVisible(ctx context.Context) (bool, error) {
-	var visible bool
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM rollup_accepted_batches
-			LIMIT 1
-		)
-	`).Scan(&visible); err != nil {
-		return false, err
-	}
-	return visible, nil
 }
 
 func (s *SQLStore) rollupFrozen(ctx context.Context) (bool, error) {
@@ -1943,11 +1918,11 @@ func (s *SQLStore) ListLedgerPostings(ctx context.Context, entryID string) ([]dt
 }
 
 func (s *SQLStore) BuildLiabilityReport(ctx context.Context) ([]dto.LiabilityReportLine, error) {
-	useAcceptedTruth, err := s.acceptedFinancialTruthVisible(ctx)
+	frozen, err := s.rollupFrozen(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if useAcceptedTruth {
+	if frozen {
 		return s.buildAcceptedLiabilityReport(ctx)
 	}
 
@@ -2566,7 +2541,7 @@ func (s *SQLStore) loadMarketRuntime(ctx context.Context, marketIDs []int64) (ma
 		return nil, err
 	}
 
-	useAcceptedTruth, err := s.acceptedFinancialTruthVisible(ctx)
+	frozenForRuntime, err := s.rollupFrozen(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2589,7 +2564,7 @@ func (s *SQLStore) loadMarketRuntime(ctx context.Context, marketIDs []int64) (ma
 		  AND sp.market_id = ANY($1)
 		GROUP BY sp.market_id
 	`
-	if useAcceptedTruth {
+	if frozenForRuntime {
 		payoutQuery = `
 			SELECT market_id,
 			       COUNT(*) AS payout_count,

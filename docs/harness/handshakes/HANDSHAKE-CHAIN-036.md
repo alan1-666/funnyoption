@@ -86,6 +86,15 @@
   - prover/backend is still repo-local first cut, not a production proving fleet
   - the repo is closer to `Mode B`, but not every live truth boundary is fully replaced by accepted roots
 
+## Post-completion hotfix (2026-04-07)
+
+- `acceptedFinancialTruthVisible` conflated frozen-mode and
+  accepted-batches-exist into one boolean; the public API dropped all
+  live-but-not-yet-accepted data once any accepted batch existed
+- fix: `ListBalances`/`ListPositions`/`ListPayouts` now check
+  `rollupFrozen` only; accepted-only path reserved for frozen lockdown,
+  merged path used otherwise
+
 ## Status
 
-- completed
+- completed (with hotfix)

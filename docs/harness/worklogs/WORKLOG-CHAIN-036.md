@@ -84,3 +84,39 @@
   - prover/backend is still repo-local first cut, not a production proving fleet
   - the repo is materially closer to `Mode B`, but not every live truth
     boundary is yet fully replaced by accepted roots
+
+### 2026-04-07 19:30 CST (hotfix)
+
+- thread: manual review
+- bug found:
+  - staging E2E (`staging-concurrency-orders.mjs`) failed because the
+    `acceptedFinancialTruthVisible` gate returned `true` whenever
+    `rollup_accepted_batches` had any rows, even when the rollup was
+    **not frozen**
+  - this caused `ListBalances`, `ListPositions`, and `ListPayouts` to
+    use accepted-only queries (`listAccepted*`), which dropped all
+    live-but-not-yet-accepted data—new positions from recent trades, new
+    balances from recent deposits, and new payouts from recent
+    settlements were invisible through the public API
+  - root cause: the two distinct intents "rollup is frozen" and "accepted
+    batches exist" were conflated into one boolean; the accepted-only path
+    is only correct under freeze (safety lockdown), while normal
+    operation needs the merged path that unions accepted and live data
+- changed:
+  - `internal/api/handler/sql_store.go`:
+    - `ListBalances`, `ListPositions`, `ListPayouts` now call
+      `rollupFrozen` directly; accepted-only queries are used only when
+      `frozen = true`, otherwise the merged queries run
+    - `BuildLiabilityReport` and market runtime payout stats also
+      switched from `acceptedFinancialTruthVisible` to `rollupFrozen`
+    - removed unused `acceptedFinancialTruthVisible` and
+      `acceptedReadTruthVisible` helpers
+- impact:
+  - when not frozen: API shows the best-available merged view
+    (accepted data takes precedence for existing keys; live data fills in
+    for anything not yet accepted)
+  - when frozen: API shows only accepted data (unchanged, correct for
+    safety lockdown mode)
+- validated:
+  - `go build ./internal/api/...` passes
+  - staging E2E pending rerun after deploy

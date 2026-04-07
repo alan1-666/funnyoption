@@ -3,8 +3,9 @@ package service
 import (
 	"context"
 	"log/slog"
+	"time"
 
-	"funnyoption/internal/matching/engine"
+	"funnyoption/internal/matching/pipeline"
 	"funnyoption/internal/rollup"
 	"funnyoption/internal/shared/config"
 	shareddb "funnyoption/internal/shared/db"
@@ -21,7 +22,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	defer dbConn.Close()
 
 	store := NewSQLStore(dbConn).WithRollup(rollup.NewStore(dbConn))
-	matcher := engine.NewAsync(logger, 2048)
+	cachedStore := NewCachedCommandStore(store)
+
 	sequence, err := store.MaxTradeSequence(ctx)
 	if err != nil {
 		return err
@@ -30,30 +32,44 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	if err != nil {
 		return err
 	}
-	if err := matcher.Restore(sequence, restingOrders); err != nil {
-		return err
-	}
-	matcher.Start(ctx)
+
 	publisher := sharedkafka.NewJSONPublisher(logger, cfg.KafkaBrokers)
 	defer publisher.Close()
 
-	cachedStore := NewCachedCommandStore(store)
-	processor := NewCommandProcessor(logger, matcher, publisher, cfg.KafkaTopics, cachedStore)
-	processor.feeSchedule = fee.Schedule{TakerFeeBps: cfg.TakerFeeBps, MakerFeeBps: cfg.MakerFeeBps}
-	expirySweeper := newOrderExpirySweeper(logger, matcher, store, publisher, cfg.KafkaTopics)
-	expirySweeper.Start(ctx)
-	consumer := sharedkafka.NewJSONConsumer(
+	feeSched := fee.Schedule{TakerFeeBps: cfg.TakerFeeBps, MakerFeeBps: cfg.MakerFeeBps}
+
+	candles := NewCandleBook(defaultCandleIntervalMillis, defaultCandleHistoryLimit)
+
+	pipe := pipeline.New(
 		logger,
 		cfg.KafkaBrokers,
 		cfg.KafkaTopics.OrderCommand,
 		"funnyoption-matching",
-		processor.HandleOrderCommand,
+		cachedStore,
+		cachedStore,
+		publisher,
+		cfg.KafkaTopics,
+		feeSched,
+		candles,
+		pipeline.Config{
+			InputRBSize:  8192,
+			OutputRBSize: 8192,
+		},
 	)
-	consumer.Start(ctx)
-	defer consumer.Close()
+
+	if err := pipe.Restore(sequence, restingOrders); err != nil {
+		return err
+	}
+
+	pipe.Start(ctx)
+	pipe.StartStatsReporter(ctx, logger, 10*time.Second)
+	defer pipe.Close()
+
+	expirySweeper := newOrderExpirySweeper(logger, pipe, store, publisher, cfg.KafkaTopics)
+	expirySweeper.Start(ctx)
 
 	logger.Info(
-		"matching service bootstrapped",
+		"matching service bootstrapped (pipeline mode)",
 		"ingress", "kafka",
 		"grpc_addr", cfg.GRPCAddr,
 		"kafka_brokers", cfg.KafkaBrokers,
@@ -66,7 +82,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 		"postgres_dsn", cfg.PostgresDSN,
 		"restored_trade_sequence", sequence,
 		"restored_resting_orders", len(restingOrders),
-		"book_count", matcher.BookCount(),
+		"input_rb_size", 8192,
+		"output_rb_size", 8192,
 	)
 
 	return grpcx.Run(ctx, logger, cfg.Name, cfg.GRPCAddr, nil)

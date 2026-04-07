@@ -2,12 +2,12 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
 
 	"funnyoption/internal/matching/engine"
 	"funnyoption/internal/matching/model"
+	"funnyoption/internal/matching/pipeline"
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
 
@@ -18,26 +18,33 @@ type orderExpiryStore interface {
 	PersistResult(ctx context.Context, command sharedkafka.OrderCommand, result engine.Result) error
 }
 
+// CancelSubmitter is the interface for submitting cancel commands to the pipeline.
+type CancelSubmitter interface {
+	SubmitCancel(cmd pipeline.MatchCommand) bool
+}
+
 type orderExpirySweeper struct {
 	logger    *slog.Logger
-	matcher   *engine.AsyncEngine
 	store     orderExpiryStore
-	processor *CommandProcessor
+	submitter CancelSubmitter
+	publisher sharedkafka.Publisher
+	topics    sharedkafka.Topics
 	interval  time.Duration
 }
 
 func newOrderExpirySweeper(
 	logger *slog.Logger,
-	matcher *engine.AsyncEngine,
+	submitter CancelSubmitter,
 	store orderExpiryStore,
 	publisher sharedkafka.Publisher,
 	topics sharedkafka.Topics,
 ) *orderExpirySweeper {
 	return &orderExpirySweeper{
 		logger:    logger,
-		matcher:   matcher,
 		store:     store,
-		processor: NewCommandProcessor(logger, matcher, publisher, topics, nil),
+		submitter: submitter,
+		publisher: publisher,
+		topics:    topics,
 		interval:  defaultOrderExpirySweepInterval,
 	}
 }
@@ -69,52 +76,38 @@ func (s *orderExpirySweeper) sweepOnce(ctx context.Context, now time.Time) error
 		return nil
 	}
 
-	orders := make([]*model.Order, 0, len(items))
-	byOrderID := make(map[string]ExpiredRestingOrder, len(items))
+	submitted := 0
 	for _, item := range items {
 		if item.Order == nil {
 			continue
 		}
-		orders = append(orders, item.Order)
-		byOrderID[item.Order.OrderID] = item
-	}
-	if len(orders) == 0 {
-		return nil
-	}
+		order := item.Order
 
-	cancelled, err := s.matcher.CancelOrders(ctx, orders, model.CancelReasonMarketClosed)
-	if err != nil {
-		return err
-	}
-	if len(cancelled.Orders) == 0 {
-		return nil
-	}
-
-	for _, order := range cancelled.Orders {
-		item, ok := byOrderID[order.OrderID]
-		if !ok {
-			continue
-		}
-		command := item.Command
-		command.TraceID = fmt.Sprintf("market_close:%d", order.MarketID)
-		command.RequestedAtMillis = order.UpdatedAtMillis
-
-		if err := s.store.PersistResult(ctx, command, engine.Result{
-			Affected: []*model.Order{order},
-		}); err != nil {
-			return err
-		}
-		if err := s.processor.publishOrderEvent(ctx, command, order); err != nil {
-			return err
+		if s.submitter != nil {
+			cmd := pipeline.MatchCommand{
+				Action:        pipeline.ActionCancel,
+				OrderID:       order.OrderID,
+				MarketID:      order.MarketID,
+				Outcome:       order.Outcome,
+				BookKey:       model.BuildBookKey(order.MarketID, order.Outcome),
+				Side:          pipeline.SideFlagFrom(order.Side),
+				Price:         order.Price,
+				CommandID:     item.Command.CommandID,
+				TraceID:       "market_close_sweep",
+				CollateralAsset: item.Command.CollateralAsset,
+				FreezeID:      item.Command.FreezeID,
+				FreezeAsset:   item.Command.FreezeAsset,
+				FreezeAmount:  item.Command.FreezeAmount,
+				CancelReason:  pipeline.CancelReasonMarketClosed,
+			}
+			if s.submitter.SubmitCancel(cmd) {
+				submitted++
+			}
 		}
 	}
 
-	for _, book := range cancelled.Books {
-		if err := s.processor.publishQuoteEvents(ctx, "market_close_sweep", engine.Result{Book: book}); err != nil {
-			return err
-		}
+	if submitted > 0 {
+		s.logger.Info("matching submitted cancel commands for expired orders", "count", submitted, "total", len(items))
 	}
-
-	s.logger.Info("matching cancelled expired resting orders", "count", len(cancelled.Orders))
 	return nil
 }

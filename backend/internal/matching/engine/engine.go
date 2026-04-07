@@ -79,6 +79,20 @@ func New(logger *slog.Logger) *Engine {
 	}
 }
 
+func (e *Engine) SetSequence(seq uint64) {
+	atomic.StoreUint64(e.sequence, seq)
+}
+
+func (e *Engine) BookCount() int {
+	count := 0
+	for _, book := range e.books {
+		if len(book.OrderMap) > 0 {
+			count++
+		}
+	}
+	return count
+}
+
 func newEngineWithSequence(logger *slog.Logger, sequence *uint64) *Engine {
 	return &Engine{
 		logger:   logger,

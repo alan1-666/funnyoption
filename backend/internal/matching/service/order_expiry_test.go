@@ -9,6 +9,7 @@ import (
 
 	"funnyoption/internal/matching/engine"
 	"funnyoption/internal/matching/model"
+	"funnyoption/internal/matching/pipeline"
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
 
@@ -28,18 +29,29 @@ func (s *expiryStoreStub) PersistResult(_ context.Context, command sharedkafka.O
 	return nil
 }
 
-type publishCall struct {
-	topic   string
-	key     string
-	payload any
+type captureCancelSubmitter struct {
+	commands []pipeline.MatchCommand
+}
+
+func (c *captureCancelSubmitter) SubmitCancel(cmd pipeline.MatchCommand) bool {
+	c.commands = append(c.commands, cmd)
+	return true
 }
 
 type capturePublisherMulti struct {
-	calls []publishCall
+	calls []struct {
+		topic   string
+		key     string
+		payload any
+	}
 }
 
 func (p *capturePublisherMulti) PublishJSON(_ context.Context, topic, key string, payload any) error {
-	p.calls = append(p.calls, publishCall{topic: topic, key: key, payload: payload})
+	p.calls = append(p.calls, struct {
+		topic   string
+		key     string
+		payload any
+	}{topic: topic, key: key, payload: payload})
 	return nil
 }
 
@@ -54,9 +66,9 @@ func (p *capturePublisherMulti) PublishJSONBatch(ctx context.Context, items []sh
 
 func (p *capturePublisherMulti) Close() error { return nil }
 
-func TestOrderExpirySweeperCancelsPastCloseRestingOrders(t *testing.T) {
+func TestOrderExpirySweeperSubmitsCancelCommands(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	matcher := engine.NewAsync(logger, 8)
+
 	resting := &model.Order{
 		OrderID:         "ord_close_1",
 		ClientOrderID:   "client_close_1",
@@ -72,13 +84,6 @@ func TestOrderExpirySweeperCancelsPastCloseRestingOrders(t *testing.T) {
 		CreatedAtMillis: 1000,
 		UpdatedAtMillis: 1000,
 	}
-	if err := matcher.Restore(0, []*model.Order{resting}); err != nil {
-		t.Fatalf("restore resting order: %v", err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	matcher.Start(ctx)
 
 	store := &expiryStoreStub{
 		items: []ExpiredRestingOrder{{
@@ -103,45 +108,34 @@ func TestOrderExpirySweeperCancelsPastCloseRestingOrders(t *testing.T) {
 			Order: resting,
 		}},
 	}
-	publisher := &capturePublisherMulti{}
-	sweeper := newOrderExpirySweeper(logger, matcher, store, publisher, sharedkafka.NewTopics("funnyoption."))
 
+	submitter := &captureCancelSubmitter{}
+	publisher := &capturePublisherMulti{}
+	sweeper := newOrderExpirySweeper(logger, submitter, store, publisher, sharedkafka.NewTopics("funnyoption."))
+
+	ctx := context.Background()
 	if err := sweeper.sweepOnce(ctx, time.Unix(123, 0)); err != nil {
 		t.Fatalf("sweepOnce returned error: %v", err)
 	}
 
-	if len(store.persisted) != 1 {
-		t.Fatalf("expected one persisted cancellation, got %d", len(store.persisted))
-	}
-	if len(store.persisted[0].Affected) != 1 {
-		t.Fatalf("expected one affected order, got %+v", store.persisted[0])
-	}
-	cancelled := store.persisted[0].Affected[0]
-	if cancelled.Status != model.OrderStatusCancelled {
-		t.Fatalf("expected cancelled order status, got %s", cancelled.Status)
-	}
-	if cancelled.CancelReason != model.CancelReasonMarketClosed {
-		t.Fatalf("expected market closed cancel reason, got %s", cancelled.CancelReason)
+	if len(submitter.commands) != 1 {
+		t.Fatalf("expected 1 cancel command submitted, got %d", len(submitter.commands))
 	}
 
-	if len(publisher.calls) != 3 {
-		t.Fatalf("expected order + depth + ticker events, got %d calls", len(publisher.calls))
+	cmd := submitter.commands[0]
+	if cmd.Action != pipeline.ActionCancel {
+		t.Fatalf("expected ActionCancel, got %d", cmd.Action)
 	}
-	orderEvent, ok := publisher.calls[0].payload.(sharedkafka.OrderEvent)
-	if !ok {
-		t.Fatalf("expected first payload to be order event, got %T", publisher.calls[0].payload)
+	if cmd.OrderID != "ord_close_1" {
+		t.Fatalf("expected order_id ord_close_1, got %s", cmd.OrderID)
 	}
-	if orderEvent.Status != "CANCELLED" || orderEvent.CancelReason != "MARKET_CLOSED" {
-		t.Fatalf("unexpected lifecycle cancel event: %+v", orderEvent)
+	if cmd.MarketID != 77 {
+		t.Fatalf("expected market_id 77, got %d", cmd.MarketID)
 	}
-	if orderEvent.FreezeID != "frz_close_1" || orderEvent.FreezeAmount != 500 {
-		t.Fatalf("expected freeze metadata to survive lifecycle cancel, got %+v", orderEvent)
+	if cmd.CancelReason != pipeline.CancelReasonMarketClosed {
+		t.Fatalf("expected CancelReasonMarketClosed, got %d", cmd.CancelReason)
 	}
-	depthEvent, ok := publisher.calls[1].payload.(sharedkafka.QuoteDepthEvent)
-	if !ok {
-		t.Fatalf("expected second payload to be depth event, got %T", publisher.calls[1].payload)
-	}
-	if len(depthEvent.Bids) != 0 || len(depthEvent.Asks) != 0 {
-		t.Fatalf("expected empty depth after sweep, got %+v", depthEvent)
+	if cmd.FreezeID != "frz_close_1" {
+		t.Fatalf("expected freeze metadata, got %s", cmd.FreezeID)
 	}
 }

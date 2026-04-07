@@ -547,13 +547,16 @@ Ph1: Consumer → InputRB → Match → OutputRB → [DB+Kafka async] → Commit
 - 多 book 完全并行，无 mutex 竞争
 - 单 book 吞吐量达到 50K+ orders/sec
 
-### Phase 4: OrderBook 数据结构优化 (1 week)
+### Phase 4: OrderBook 数据结构优化 (1-2 weeks)
 
-**目标**：为深度 order book 场景准备
+**目标**：exchange-core2 级别的 OrderBook 实现
 
-1. 将 `[]DepthLevel` + `sort.Search` 替换为跳表(skiplist)或侵入式红黑树
-2. 实现增量 depth diff
-3. 预分配 Order 对象池(sync.Pool 或 arena)
+1. 将 `[]DepthLevel` + `sort.Search` 替换为 `[100]*Bucket` 直接数组索引（预测市场价格 1-99）
+2. 将 `[]*Order` per-level 替换为侵入式双向链表（`DirectOrder.prev/next`）
+3. 维护 `bestAsk`/`bestBid` 直接指针，O(1) 最优价格访问
+4. 实现 `OrderPool`（slab + free list），热路径零 GC
+5. 实现增量 depth diff
+6. 全局 trade sequence 改为 `bookKey + localSeq` 确定性复合 ID
 
 ### Phase 5: Primary-Standby HA (2-3 weeks)
 
@@ -602,29 +605,251 @@ Ph1: Consumer → InputRB → Match → OutputRB → [DB+Kafka async] → Commit
 
 ---
 
-## 10. Open Questions
+## 10. Design Decisions (Finalized)
 
-| # | 问题 | 候选方案 | 建议 |
-|---|------|---------|------|
-| Q1 | Ring Buffer 满时的反压策略 | a) 阻塞 Kafka consumer b) 返回 REJECT c) 溢出到磁盘队列 | **a) 阻塞**，让 Kafka 自然反压 |
-| Q2 | DB 异步持久化失败时的恢复 | a) 重放 Kafka b) WAL 文件 c) Output RB checkpoint | **a) Kafka 重放** (确定性保证) |
-| Q3 | 跨 book 操作(如组合单) | a) 不支持 b) 两阶段协调 c) 全局撮合线程 | **a) V2 不支持**，后续版本规划 |
-| Q4 | 全局 trade sequence 在多实例下 | a) atomic per process + instance prefix b) 中心化 sequence server c) 时间戳+实例ID | **a) instance prefix**，保证全局唯一 |
-| Q5 | OrderBook 跳表 vs 红黑树 vs B+树 | a) 跳表(无锁实现简单) b) 红黑树(确定性好) c) 保持 sorted slice | **a) 跳表**，Go 实现成熟且性能好 |
+### D1. 反压策略：Pause Partition
+
+**决策**：Ring Buffer 满时，Input Gateway **暂停 Kafka partition 消费**（stop polling），而非在 gateway 内部死循环重试。
+
+**为什么不是 "gateway 里 sleep + retry"**：
+- 死等重试会让 Input Gateway goroutine 占住 CPU 做无用功，且无法响应 shutdown 信号
+- Kafka consumer 的 `max.poll.interval.ms` 会超时触发 rebalance，导致 partition 丢失
+
+**实现方式**：
+```go
+// Input Gateway 核心循环
+for {
+    if inputRB.IsFull() {
+        consumer.Pause(partition)          // 暂停拉取，Kafka 端不 commit
+        idleStrategy.Idle(0)               // 短暂让出 CPU
+        if !inputRB.IsFull() {
+            consumer.Resume(partition)      // 水位下降后恢复
+        }
+        continue
+    }
+    msg := consumer.Poll()                 // 正常拉取
+    cmd := decode(msg)
+    inputRB.TryPublish(cmd)
+}
+```
+
+**效果**：
+- Kafka broker 自动反压 producer（API 层的 PublishJSON 会变慢）
+- Ring Buffer 内存有严格上界（64K × 128B = 8MB）
+- 语义最简单：不丢消息、不拒绝、不溢出到磁盘
 
 ---
 
-## 11. 与 Aeron 设计的对比总结
+### D2. DB 异步持久化失败恢复：Kafka Canonical Log + 幂等下游
 
-| Aeron 设计 | 我们的适配 | 差异原因 |
-|-----------|-----------|---------|
-| Java `sun.misc.Unsafe` 直接内存操作 | Go `atomic.Uint64` + cache line padding | Go 无 Unsafe，atomic 已足够 |
-| Aeron Media Driver (shared memory IPC) | 进程内 Ring Buffer (同一进程) | 我们不需要跨进程 IPC |
-| Aeron Archive (persistent stream) | Kafka retention + topic replay | Kafka 已经提供了等效的持久化流 |
+**决策**：DB 写入失败时，不 panic，不重试到死。标记 offset 未 commit，服务重启后从 Kafka 重放。
+
+**前提条件（必须满足）**：
+
+| 条件 | 当前状态 | 需要补的 |
+|------|---------|---------|
+| Kafka 是 canonical log，消息不可变 | ✅ `order.command` 已是 source of truth | — |
+| Trade identity 确定性生成 | ⚠️ 当前用 atomic counter | 改用 `bookKey + localSeq`（见 D4） |
+| Order event ID 确定性 | ✅ `order_id + status` | — |
+| Account 服务幂等 | ⚠️ 部分幂等（freeze idempotent key） | 需要补全 trade 消费幂等 |
+| Ledger 服务幂等 | ✅ `event_id` 去重 | — |
+| Settlement 服务幂等 | ✅ `event_id` 去重 | — |
+
+**关键补充**：
+
+```
+replay 安全公式:
+  ∀ downstream consumer:
+    consume(event) 是幂等的
+    ⟺ 相同 event_id 第二次消费 = no-op
+
+replay 时撮合引擎:
+  相同输入序列 → 相同 (trade_id, order_event) 输出
+  ⟺ trade_id 由确定性函数生成，不依赖 wall clock 或 random
+```
+
+如果上述任何一条不满足，replay 会导致 account/ledger 被"打重"。这是最需要在 Phase 1 之前验证的不变式。
+
+---
+
+### D3. 跨 book 操作：V2 不支持，API 层拒绝
+
+**决策**：不支持组合单（cross-book atomic order）。
+
+**理由**：
+- 单写者模型是撮合引擎正确性和性能的根基
+- 跨 book 原子操作需要两阶段提交或全局序列化，会把吞吐量打回到 V1 甚至更差
+- 预测市场场景下，用户买 YES 和 NO 是在同一 market 的不同 book，但不需要原子关联
+
+**实现**：API 层在 `order.Service.SubmitOrder` 中校验，如果请求包含跨 book 语义（当前不存在这种 API），直接返回 400。
+
+---
+
+### D4. Trade Identity：放弃全局递增整数，改用确定性复合 ID
+
+**决策**：不用 `instance prefix + atomic counter`，也不用中心化 sequence server。改为 **`bookKey + localSeq`** 复合 ID。
+
+**为什么 instance prefix 不好**：
+- 多实例 failover 后 prefix 变了，下游无法判断"这是 replay 还是新 trade"
+- 用户看到的 trade ID 不连续、不可排序，体验差
+- prefix 本身需要协调分配（又一个中心点）
+
+**为什么中心化 sequence server 不好**：
+- 网络往返 ~0.5-1ms，直接抵消 Ring Buffer 带来的 μs 级收益
+- 成为新的单点故障和延迟瓶颈
+- 违反 "撮合线程不做 I/O" 的核心原则
+
+**V2 方案**：
+
+```go
+// Trade ID = bookKey + per-book monotonic sequence
+// 格式: "BTC:YES:00000042"
+type TradeIdentity struct {
+    BookKey  string  // partition-scoped, 同一 partition 内唯一
+    LocalSeq uint64  // per-book 单调递增，确定性（相同输入 → 相同序号）
+}
+
+func (id TradeIdentity) String() string {
+    return fmt.Sprintf("%s:%08d", id.BookKey, id.LocalSeq)
+}
+```
+
+**确定性保证**：
+- `LocalSeq` 是 per-book 的 counter，只被该 book 的 matching goroutine 操作
+- 相同的命令序列 → 相同的 `LocalSeq` → Standby replay 产生完全一致的 trade identity
+- 下游幂等消费用 `TradeIdentity.String()` 作为 dedup key
+
+**排序需求**：如果业务上需要"跨 book 全局时间排序"，用 `(timestamp, bookKey, localSeq)` 三元组排序，不需要全局递增整数。
+
+---
+
+### D5. OrderBook 数据结构：参考 exchange-core2 的 ART + 侵入式双向链表
+
+**参考**：[exchange-core2 OrderBookDirectImpl](https://github.com/exchange-core/exchange-core/blob/master/src/main/java/exchange/core2/core/orderbook/OrderBookDirectImpl.java)
+
+exchange-core2 的 Direct 实现是工业级 OrderBook 的标杆设计，核心思路：
+
+```
+askPriceBuckets: LongAdaptiveRadixTreeMap<Bucket>   ← 价格 → 桶
+bidPriceBuckets: LongAdaptiveRadixTreeMap<Bucket>   ← 价格 → 桶
+orderIdIndex:    LongAdaptiveRadixTreeMap<DirectOrder> ← orderId → 订单
+
+Bucket {
+    tail:     *DirectOrder      // 指向该价位最新的订单
+    volume:   int64             // 该价位总剩余量
+    numOrders: int              // 该价位订单数
+}
+
+DirectOrder {
+    orderId, price, size, filled, uid, timestamp
+    parent:  *Bucket            // 所属桶
+    prev:    *DirectOrder       // 全局链表 prev（更差价格方向）
+    next:    *DirectOrder       // 全局链表 next（更优价格方向）
+}
+
+bestAskOrder → 直接指针，O(1) 获取最优卖价
+bestBidOrder → 直接指针，O(1) 获取最优买价
+
+撮合时: 从 bestAskOrder/bestBidOrder 开始，沿 prev 链遍历
+插入时: ART tree 找到或创建 Bucket，append 到 bucket.tail 链表末尾
+删除时: 双向链表 O(1) 摘除 + ART tree 删除空桶
+```
+
+**关键设计亮点**：
+
+| 特性 | exchange-core2 做法 | 收益 |
+|------|-------------------|------|
+| 价格索引 | Adaptive Radix Tree (ART) | O(k) lookup (k=key 字节长度，固定)，比红黑树 cache 更友好 |
+| 同价位队列 | 侵入式双向链表 | O(1) 追加、O(1) 删除，无数组 shift |
+| 全局遍历 | 跨桶的 prev/next 链 | 撮合遍历不需要"找下一个价位"，直接跟指针 |
+| Best price | 直接指针 `bestAskOrder` / `bestBidOrder` | O(1)，不需要 tree.min() |
+| 内存管理 | ObjectsPool (pre-allocated) | 热路径零 GC |
+
+**Go 适配方案**：
+
+```go
+// 价格桶索引：Go 没有 ART 库，用 B-tree (google/btree) 或自实现 radix tree
+// 对于预测市场（价格范围 1-99 cents），用 [100]*Bucket 直接数组索引更快 ← O(1)
+type PriceBuckets struct {
+    buckets [100]*Bucket  // 价格 1-99，index = price
+    // 如果需要支持更大范围，fallback 到 btree
+}
+
+// 侵入式双向链表：直接移植
+type DirectOrder struct {
+    OrderID   [48]byte
+    Price     int64
+    Size      int64
+    Filled    int64
+    UserID    int64
+    Timestamp int64
+    Side      uint8
+
+    parent *Bucket
+    prev   *DirectOrder  // toward worse prices
+    next   *DirectOrder  // toward better prices
+}
+
+type Bucket struct {
+    Tail      *DirectOrder
+    Volume    int64
+    NumOrders int32
+}
+
+type OrderBook struct {
+    askBuckets   PriceBuckets
+    bidBuckets   PriceBuckets
+    orderIndex   map[string]*DirectOrder  // orderId → order
+    bestAsk      *DirectOrder
+    bestBid      *DirectOrder
+    pool         *OrderPool               // pre-allocated
+}
+```
+
+**预测市场的特殊优化**：价格范围固定为 1-99 cents（二元市场），可以用 `[100]*Bucket` 数组做 O(1) 价格定位，比 ART/B-tree 还快。这是 exchange-core2 通用设计之上的场景优化。
+
+**OrderPool（零 GC）**：
+```go
+type OrderPool struct {
+    orders []DirectOrder  // pre-allocated slab
+    free   []int          // free list indices
+}
+
+func (p *OrderPool) Get() *DirectOrder {
+    if len(p.free) == 0 {
+        // 扩容（非热路径，允许 alloc）
+        p.grow()
+    }
+    idx := p.free[len(p.free)-1]
+    p.free = p.free[:len(p.free)-1]
+    return &p.orders[idx]
+}
+
+func (p *OrderPool) Put(order *DirectOrder) {
+    *order = DirectOrder{} // zero out
+    idx := int((uintptr(unsafe.Pointer(order)) - uintptr(unsafe.Pointer(&p.orders[0]))) / unsafe.Sizeof(DirectOrder{}))
+    p.free = append(p.free, idx)
+}
+```
+
+---
+
+## 11. 与 Aeron / exchange-core2 设计的对比总结
+
+| 参考设计 | 我们的适配 | 差异原因 |
+|---------|-----------|---------|
+| Aeron SPSC Ring Buffer (`sun.misc.Unsafe`) | Go `atomic.Uint64` + cache line padding | Go 无 Unsafe，atomic 已足够 |
+| Aeron Media Driver (shared memory IPC) | 进程内 Ring Buffer (同一进程) | 不需要跨进程 IPC |
+| Aeron Archive (persistent stream) | Kafka retention + topic replay | Kafka 是 canonical log |
 | Aeron Cluster (Raft consensus) | Kafka consumer group + deterministic replay | 更简单，利用现有 Kafka 基础设施 |
-| Aeron `UnsafeBuffer` (off-heap) | Go struct value types (stack/inline) | Go GC 对小对象友好，无需 off-heap |
-| Aeron `IdleStrategy` | 直接移植概念 (spin/yield/park) | 1:1 移植 |
-| Aeron `Flyweight` (zero-copy decode) | Fixed-size `MatchCommand` struct | 类似思路，避免 alloc |
+| Aeron `IdleStrategy` | 直接移植 (spin/yield/park) | 1:1 移植 |
+| Aeron `Flyweight` (zero-copy decode) | Fixed-size `MatchCommand` struct | 类似思路 |
+| LMAX Disruptor (exchange-core2 依赖) | 我们的 SPSC Ring Buffer | Disruptor 是 MPMC，我们只需 SPSC |
+| exchange-core2 `LongAdaptiveRadixTreeMap` | `[100]*Bucket` 直接数组 (预测市场优化) | 价格范围固定 1-99，O(1) > O(k) |
+| exchange-core2 侵入式双向链表 | 直接移植到 Go | 核心思路完全适用 |
+| exchange-core2 `ObjectsPool` | Go `OrderPool` (slab + free list) | 同样目标：热路径零 GC |
+| exchange-core2 `bestAskOrder/bestBidOrder` | 直接指针，O(1) best price | 直接移植 |
+| exchange-core2 全局 trade sequence | 放弃全局递增，改用 `bookKey:localSeq` | 多实例 + 确定性 replay 的要求 |
 
 ---
 
@@ -632,14 +857,18 @@ Ph1: Consumer → InputRB → Match → OutputRB → [DB+Kafka async] → Commit
 
 | 当前文件 | V2 新模块 | 改动 |
 |---------|----------|------|
-| `service/consumer.go` (CommandProcessor) | `transport/input_gateway.go` | 拆分为纯 I/O + decode |
+| `service/consumer.go` (CommandProcessor) | `transport/input_gateway.go` | 拆分为纯 I/O + decode，反压用 pause partition |
 | `engine/engine.go` (AsyncEngine) | `supervisor/book_supervisor.go` | 取代 worker map |
 | `engine/engine.go` (Engine.PlaceOrder) | `engine/engine.go` (保留, 优化) | 内部结构优化 |
+| `model/order_book.go` (OrderBook) | `model/order_book_direct.go` | exchange-core2 风格重写 |
+| `model/depth_level.go` (DepthLevel) | `model/bucket.go` + `model/direct_order.go` | 侵入式链表 + 直接指针 |
 | `service/sql_store.go` (PersistResult) | `transport/output_dispatcher.go` | 异步批量化 |
-| (新增) | `ringbuffer/ringbuffer.go` | SPSC Ring Buffer |
-| (新增) | `transport/idle_strategy.go` | Idle Strategy |
+| (新增) | `ringbuffer/ringbuffer.go` | SPSC Ring Buffer (cache-line padded) |
+| (新增) | `transport/idle_strategy.go` | Aeron Idle Strategy (spin/yield/park) |
 | (新增) | `protocol/commands.go` | Binary MatchCommand/MatchResult |
-| (新增) | `ha/standby.go` | Primary-Standby 协议 |
+| (新增) | `model/order_pool.go` | Slab allocator + free list, 零 GC |
+| (新增) | `model/trade_identity.go` | `bookKey:localSeq` 确定性复合 ID |
+| (新增) | `ha/standby.go` | Primary-Standby 确定性 replay |
 
 ---
 

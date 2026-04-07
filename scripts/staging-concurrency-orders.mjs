@@ -489,10 +489,11 @@ async function getJsonOrThrow(config, url, label, { headers } = {}) {
   return response.data ?? {};
 }
 
-async function postJsonOrThrow(config, url, body, label, expectedStatuses = [200, 201, 202]) {
+async function postJsonOrThrow(config, url, body, label, expectedStatuses = [200, 201, 202], { headers: extraHeaders } = {}) {
   const response = await requestJson(config, url, {
     method: "POST",
-    body
+    body,
+    headers: extraHeaders
   });
   if (!expectedStatuses.includes(response.status)) {
     throw new Error(`${label} failed: HTTP ${response.status} ${response.text}`);
@@ -1629,7 +1630,8 @@ async function main() {
     payout_event_ids: [],
     trade_ids: [],
     concurrent_trade_ids: [],
-    taker_users: []
+    taker_users: [],
+    proposed_market_id: 0
   };
   const tx = {};
   const metrics = {
@@ -1966,6 +1968,122 @@ async function main() {
     Object.assign(matrix, consistency.matrix);
     anomalies.push(...consistency.anomalies);
     reads.final_snapshot = finalSnapshot;
+
+    // ── Market Proposal + Notification E2E ──────────────────────────────
+    logStep("market_proposal_e2e_start");
+
+    const proposerUser = users[0];
+    const proposerSession = proposerUser.sessionId;
+    const proposalTitle = `E2E Proposal ${Date.now()}`;
+
+    logStep("propose_market_start", { user_id: proposerUser.userId, title: proposalTitle });
+    const proposedMarket = await postJsonOrThrow(
+      config,
+      `${config.apiBase}/api/v1/markets/propose`,
+      {
+        title: proposalTitle,
+        description: "Automated E2E test market proposal",
+        resolution_source: "E2E test oracle",
+        options: [
+          { label: "Alpha", short_label: "A" },
+          { label: "Beta", short_label: "B" },
+          { label: "Gamma", short_label: "G" }
+        ]
+      },
+      `propose market user=${proposerUser.userId}`,
+      [200, 201],
+      { headers: authHeaders(proposerSession) }
+    );
+    const proposedMarketId = proposedMarket.market_id;
+    ids.proposed_market_id = proposedMarketId;
+    matrix.user_propose_market = proposedMarketId > 0 ? "PASS" : "FAIL";
+    logStep("propose_market_done", { market_id: proposedMarketId, status: proposedMarket.status });
+
+    const fetchedProposal = await getJsonOrThrow(
+      config,
+      `${config.apiBase}/api/v1/markets/${proposedMarketId}`,
+      `get proposed market ${proposedMarketId}`
+    );
+    matrix.proposal_pending_review = fetchedProposal.status === "PENDING_REVIEW" ? "PASS" : `FAIL: ${fetchedProposal.status}`;
+    matrix.proposal_options_stored =
+      Array.isArray(fetchedProposal.options) && fetchedProposal.options.length === 3
+        ? "PASS"
+        : `FAIL: options=${JSON.stringify(fetchedProposal.options)}`;
+    logStep("proposal_verified", {
+      market_id: proposedMarketId,
+      status: fetchedProposal.status,
+      options_count: fetchedProposal.options?.length ?? 0
+    });
+
+    logStep("approve_market_start", { market_id: proposedMarketId });
+    const approveRequestedAt = Date.now();
+    const approveOperator = await signOperatorAction(
+      operatorAccount,
+      `approve_market:${proposedMarketId}:${approveRequestedAt}`,
+      approveRequestedAt
+    );
+    await postJsonOrThrow(
+      config,
+      `${config.adminBase}/api/operator/markets/${proposedMarketId}/approve`,
+      { operator: approveOperator },
+      `approve market ${proposedMarketId}`,
+      [200, 201]
+    );
+    matrix.admin_approve_proposal = "PASS";
+    logStep("approve_market_done", { market_id: proposedMarketId });
+
+    const approvedMarket = await getJsonOrThrow(
+      config,
+      `${config.apiBase}/api/v1/markets/${proposedMarketId}`,
+      `get approved market ${proposedMarketId}`
+    );
+    matrix.proposal_approved_status = approvedMarket.status === "OPEN" ? "PASS" : `FAIL: ${approvedMarket.status}`;
+    matrix.proposal_options_preserved =
+      Array.isArray(approvedMarket.options) && approvedMarket.options.length === 3
+        ? "PASS"
+        : `FAIL: options=${JSON.stringify(approvedMarket.options)}`;
+    logStep("approved_market_verified", {
+      market_id: proposedMarketId,
+      status: approvedMarket.status,
+      options: approvedMarket.options?.map((o) => o.label)
+    });
+
+    logStep("notification_check_start", { user_id: proposerUser.userId });
+    await sleep(2000);
+    const notificationsPayload = await getJsonOrThrow(
+      config,
+      `${config.apiBase}/api/v1/notifications?user_id=${proposerUser.userId}&limit=10`,
+      `get notifications user=${proposerUser.userId}`,
+      { headers: authHeaders(proposerSession) }
+    );
+    const notifications = notificationsPayload.items ?? notificationsPayload ?? [];
+    const approvalNotif = Array.isArray(notifications)
+      ? notifications.find((n) => n.type === "proposal_approved" || (n.title ?? "").includes(proposalTitle))
+      : null;
+    matrix.notification_approval_received = approvalNotif ? "PASS" : "FAIL";
+
+    const unreadPayload = await getJsonOrThrow(
+      config,
+      `${config.apiBase}/api/v1/notifications/unread-count?user_id=${proposerUser.userId}`,
+      `get unread count user=${proposerUser.userId}`,
+      { headers: authHeaders(proposerSession) }
+    );
+    const unreadCount = unreadPayload.count ?? 0;
+    matrix.notification_unread_count = unreadCount > 0 ? "PASS" : "FAIL";
+    logStep("notification_check_done", {
+      user_id: proposerUser.userId,
+      total_notifications: Array.isArray(notifications) ? notifications.length : 0,
+      approval_notification_found: !!approvalNotif,
+      unread_count: unreadCount
+    });
+
+    logStep("market_proposal_e2e_done", {
+      proposed_market_id: proposedMarketId,
+      proposal_status: approvedMarket.status,
+      options_count: approvedMarket.options?.length ?? 0,
+      notification_received: !!approvalNotif
+    });
+    // ── End Market Proposal + Notification E2E ──────────────────────────
 
     const status = Object.values(matrix).every((value) => value === "PASS") && anomalies.length === 0
       ? "PASS"

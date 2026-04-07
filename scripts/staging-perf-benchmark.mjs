@@ -1,85 +1,84 @@
 #!/usr/bin/env node
 
 /**
- * Matching engine performance benchmark.
+ * Matching Engine V2 — Performance Benchmark
  *
- * Sends a burst of concurrent orders to the staging API and measures:
- *   - Throughput  (orders/sec placed + matched)
- *   - Latency     p50 / p95 / p99 from order placement to terminal status
- *   - Match rate  % of orders that settle within the poll window
+ * Reuses the E2E auth flow (trading-key challenge → EIP-712 → ed25519 order intent).
+ * Sends a burst of concurrent signed orders and measures throughput + latency.
  *
  * Usage:
- *   node scripts/staging-perf-benchmark.mjs [--orders N] [--concurrency C] [--market-id M]
- *
- * Requires a running staging environment with the E2E test's user/session setup.
+ *   node scripts/staging-perf-benchmark.mjs [--orders N] [--concurrency C] [--users U]
  */
 
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import * as ed from "../web/node_modules/@noble/ed25519/index.js";
 import {
   createPublicClient,
   createWalletClient,
-  formatUnits,
   http,
   parseAbi,
-  parseUnits
+  parseEther,
+  parseUnits,
 } from "../web/node_modules/viem/_esm/index.js";
 import { bscTestnet } from "../web/node_modules/viem/_esm/chains/index.js";
 import { generatePrivateKey, privateKeyToAccount } from "../web/node_modules/viem/_esm/accounts/index.js";
 
-const DEFAULT_SECRET_FILE = fileURLToPath(new URL("../.secrets", import.meta.url));
-const DEFAULT_SECRET_KEY = "bsc-testnet-operator.key";
-const DEFAULT_API_BASE = "https://funnyoption.xyz";
-const DEFAULT_RPC_URL = "https://data-seed-prebsc-1-s1.bnbchain.org:8545";
-const DEFAULT_TOKEN_ADDRESS = "0x0ADa04558decC14671D565562Aeb8D1096F71dDc";
-const DEFAULT_VAULT_ADDRESS = "0x7Da015dfCD16Fb892328995BDd883da5AA3E670a";
+const SECRET_FILE = fileURLToPath(new URL("../.secrets", import.meta.url));
+const API_BASE   = process.env.API_BASE   || "https://funnyoption.xyz";
+const ADMIN_BASE = process.env.ADMIN_BASE || "https://admin.funnyoption.xyz";
+const RPC_URL    = "https://data-seed-prebsc-1-s1.bnbchain.org:8545";
+const TOKEN_ADDR = "0x0ADa04558decC14671D565562Aeb8D1096F71dDc";
+const VAULT_ADDR = "0x7Da015dfCD16Fb892328995BDd883da5AA3E670a";
+const CHAIN_ID   = bscTestnet.id;
 
 const textEncoder = new TextEncoder();
+const toHex = (bytes) => `0x${Buffer.from(bytes).toString("hex")}`;
+function normalizeAddress(a) {
+  return String(a ?? "").trim().toLowerCase();
+}
+const cleanText = (s) => (s == null ? "" : String(s).trim());
 
 const tokenAbi = parseAbi([
+  "function owner() view returns (address)",
   "function balanceOf(address) view returns (uint256)",
   "function mint(address,uint256) returns (bool)",
   "function approve(address,uint256) returns (bool)"
 ]);
+const vaultAbi = parseAbi(["function deposit(uint256 amount)"]);
 
-const vaultAbi = parseAbi([
-  "function deposit(uint256 amount)"
-]);
-
-// ─── CLI args ───────────────────────────────────────────────────────
+// ─── CLI ────────────────────────────────────────────────────────────
 function parseArgs() {
   const args = process.argv.slice(2);
-  const opts = {
-    orders: 100,
-    concurrency: 10,
-    marketId: 0,
-    outcome: "YES",
-    price: 50,
-    users: 6,
-    pollTimeoutMs: 120_000,
-    pollIntervalMs: 2_000,
-  };
+  const o = { orders: 50, concurrency: 10, users: 4, price: 50 };
   for (let i = 0; i < args.length; i += 2) {
     const k = args[i], v = args[i + 1];
-    if (k === "--orders")       opts.orders = parseInt(v, 10);
-    if (k === "--concurrency")  opts.concurrency = parseInt(v, 10);
-    if (k === "--market-id")    opts.marketId = parseInt(v, 10);
-    if (k === "--users")        opts.users = parseInt(v, 10);
-    if (k === "--price")        opts.price = parseInt(v, 10);
-    if (k === "--poll-timeout") opts.pollTimeoutMs = parseInt(v, 10);
+    if (k === "--orders")      o.orders = +v;
+    if (k === "--concurrency") o.concurrency = +v;
+    if (k === "--users")       o.users = +v;
+    if (k === "--price")       o.price = +v;
   }
-  return opts;
+  return o;
 }
 
-// ─── HTTP helpers ───────────────────────────────────────────────────
+// ─── Secrets ────────────────────────────────────────────────────────
+function readSecret(key) {
+  const raw = readFileSync(SECRET_FILE, "utf-8");
+  for (const line of raw.split(/\r?\n/)) {
+    const t = line.trim();
+    if (t.startsWith(`${key}:`)) return t.slice(key.length + 1).trim();
+    if (t.startsWith(`${key}=`)) return t.slice(key.length + 1).trim();
+  }
+  throw new Error(`secret ${key} not found in ${SECRET_FILE}`);
+}
+
+// ─── HTTP ───────────────────────────────────────────────────────────
 async function fetchJson(url, init = {}) {
   const res = await fetch(url, { ...init, signal: AbortSignal.timeout(15_000) });
-  const body = await res.text();
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
-  return body ? JSON.parse(body) : {};
+  const text = await res.text();
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${url}: ${text.slice(0, 200)}`);
+  return text ? JSON.parse(text) : {};
 }
 
 async function postJson(url, body, headers = {}) {
@@ -90,250 +89,359 @@ async function postJson(url, body, headers = {}) {
   });
 }
 
-// ─── User management ────────────────────────────────────────────────
-function loadSecrets() {
-  try {
-    const raw = readFileSync(DEFAULT_SECRET_FILE, "utf-8").trim();
-    const secrets = {};
-    for (const line of raw.split("\n")) {
-      const [k, v] = line.split("=", 2);
-      if (k && v) secrets[k.trim()] = v.trim();
-    }
-    return secrets;
-  } catch {
-    return {};
-  }
-}
-
-async function createUser(apiBase) {
-  const privKeyHex = generatePrivateKey();
-  const account = privateKeyToAccount(privKeyHex);
-  const edPriv = ed.utils.randomPrivateKey();
-  const edPubHex = Buffer.from(await ed.getPublicKeyAsync(edPriv)).toString("hex");
-
-  const reg = await postJson(`${apiBase}/api/v1/auth/register`, {
-    wallet_address: account.address,
-    ed25519_public_key: edPubHex
-  });
-
-  const challengeMsg = `funnyoption-auth:${reg.user_id}:${reg.nonce}`;
-  const walletSig = await account.signMessage({ message: challengeMsg });
-  const edSigBytes = await ed.signAsync(textEncoder.encode(challengeMsg), edPriv);
-  const edSig = Buffer.from(edSigBytes).toString("hex");
-
-  const session = await postJson(`${apiBase}/api/v1/auth/session`, {
-    wallet_address: account.address,
-    wallet_signature: walletSig,
-    ed25519_signature: edSig,
-    device_label: "perf-bench"
-  });
-
+// ─── Auth: trading-key challenge + register ─────────────────────────
+function buildTradingKeyTypedData(input) {
   return {
-    userId: reg.user_id,
-    address: account.address,
-    privKeyHex,
-    account,
-    edPriv,
-    session,
-    authHeader: `Bearer ${session.sessionId}`,
+    domain: {
+      name: "FunnyOption Trading Authorization",
+      version: "2",
+      chainId: CHAIN_ID,
+      verifyingContract: normalizeAddress(VAULT_ADDR)
+    },
+    types: {
+      AuthorizeTradingKey: [
+        { name: "action", type: "string" },
+        { name: "wallet", type: "address" },
+        { name: "tradingPublicKey", type: "bytes32" },
+        { name: "tradingKeyScheme", type: "string" },
+        { name: "scope", type: "string" },
+        { name: "challenge", type: "bytes32" },
+        { name: "challengeExpiresAt", type: "uint64" },
+        { name: "keyExpiresAt", type: "uint64" },
+      ]
+    },
+    primaryType: "AuthorizeTradingKey",
+    message: {
+      action: "AUTHORIZE_TRADING_KEY",
+      wallet: normalizeAddress(input.walletAddress),
+      tradingPublicKey: normalizeAddress(input.tradingPublicKey),
+      tradingKeyScheme: "ED25519",
+      scope: "TRADE",
+      challenge: normalizeAddress(input.challenge),
+      challengeExpiresAt: BigInt(Math.floor(Number(input.challengeExpiresAt || 0))),
+      keyExpiresAt: BigInt(0),
+    }
   };
 }
 
-async function fundUser(user, publicClient, operatorWallet, tokenAddr, vaultAddr) {
-  const amount = parseUnits("10000", 6);
-  const tx1 = await operatorWallet.writeContract({
-    address: tokenAddr, abi: tokenAbi,
-    functionName: "mint", args: [user.address, amount]
-  });
-  await publicClient.waitForTransactionReceipt({ hash: tx1 });
+async function createSession(account) {
+  const sessionPriv = ed.utils.randomPrivateKey();
+  const sessionPub = toHex(await ed.getPublicKeyAsync(sessionPriv));
 
-  const approveTx = await operatorWallet.writeContract({
-    address: tokenAddr, abi: tokenAbi,
-    functionName: "approve", args: [vaultAddr, amount],
-    account: user.account
+  const challenge = await postJson(`${API_BASE}/api/v1/trading-keys/challenge`, {
+    wallet_address: account.address,
+    chain_id: CHAIN_ID,
+    vault_address: VAULT_ADDR,
   });
-  await publicClient.waitForTransactionReceipt({ hash: approveTx });
 
-  const depositTx = await operatorWallet.writeContract({
-    address: vaultAddr, abi: vaultAbi,
-    functionName: "deposit", args: [amount],
-    account: user.account
+  const typedData = buildTradingKeyTypedData({
+    walletAddress: account.address,
+    tradingPublicKey: sessionPub,
+    challenge: challenge.challenge,
+    challengeExpiresAt: challenge.challenge_expires_at,
   });
-  await publicClient.waitForTransactionReceipt({ hash: depositTx });
+  const walletSig = await account.signTypedData(typedData);
+
+  const result = await postJson(`${API_BASE}/api/v1/trading-keys`, {
+    wallet_address: account.address,
+    chain_id: CHAIN_ID,
+    vault_address: VAULT_ADDR,
+    challenge_id: challenge.challenge_id,
+    challenge: challenge.challenge,
+    challenge_expires_at: challenge.challenge_expires_at,
+    trading_public_key: sessionPub,
+    trading_key_scheme: "ED25519",
+    scope: "TRADE",
+    key_expires_at: 0,
+    wallet_signature_standard: "EIP712_V4",
+    wallet_signature: walletSig,
+  });
+
+  return {
+    sessionId: String(result.session_id || ""),
+    userId: Number(result.user_id || 0),
+    walletAddress: account.address,
+    lastOrderNonce: Number(result.last_order_nonce || 0),
+    sessionPriv,
+  };
 }
 
-// ─── Benchmark logic ────────────────────────────────────────────────
-async function placeOrder(apiBase, user, marketId, outcome, side, price, qty) {
-  const startNs = performance.now();
-  const res = await postJson(`${apiBase}/api/v1/orders`, {
-    market_id: marketId,
-    outcome,
+// ─── Order signing (ed25519 intent message) ─────────────────────────
+function buildOrderIntentMessage(input) {
+  return `FunnyOption Order Authorization
+
+session_id: ${String(input.sessionId ?? "").trim()}
+wallet: ${normalizeAddress(input.walletAddress)}
+user_id: ${Math.floor(Number(input.userId || 0))}
+market_id: ${Math.floor(Number(input.marketId || 0))}
+outcome: ${cleanText(input.outcome).toUpperCase()}
+side: ${cleanText(input.side).toUpperCase()}
+order_type: ${cleanText(input.orderType).toUpperCase()}
+time_in_force: ${cleanText(input.timeInForce).toUpperCase()}
+price: ${Math.floor(Number(input.price || 0))}
+quantity: ${Math.floor(Number(input.quantity || 0))}
+client_order_id: ${String(input.clientOrderId ?? "").trim()}
+nonce: ${Math.floor(Number(input.nonce || 0))}
+requested_at: ${Math.floor(Number(input.requestedAt || 0))}
+`;
+}
+
+async function submitOrder(session, marketId, side, price, qty, nonceOverride) {
+  const requestedAt = Date.now();
+  const nonce = nonceOverride || ++session.lastOrderNonce;
+  const clientOrderId = `bench_${requestedAt}_${nonce}`;
+
+  const message = buildOrderIntentMessage({
+    sessionId: session.sessionId,
+    walletAddress: session.walletAddress,
+    userId: session.userId,
+    marketId,
+    outcome: "yes",
     side,
-    type: "LIMIT",
-    time_in_force: "GTC",
+    orderType: "LIMIT",
+    timeInForce: "GTC",
     price,
     quantity: qty,
-  }, { Authorization: user.authHeader });
-  const endNs = performance.now();
-  return {
-    orderId: res.order_id,
-    placementMs: endNs - startNs,
-    startTime: startNs,
-  };
+    clientOrderId,
+    nonce,
+    requestedAt,
+  });
+
+  const sig = toHex(await ed.signAsync(textEncoder.encode(message), session.sessionPriv));
+
+  const t0 = performance.now();
+  const res = await postJson(`${API_BASE}/api/v1/orders`, {
+    user_id: session.userId,
+    market_id: marketId,
+    outcome: "yes",
+    side: side.toLowerCase(),
+    type: "limit",
+    time_in_force: "gtc",
+    price,
+    quantity: qty,
+    client_order_id: clientOrderId,
+    session_id: session.sessionId,
+    session_signature: sig,
+    order_nonce: nonce,
+    requested_at: requestedAt,
+  });
+  return { orderId: res.order_id, latencyMs: performance.now() - t0 };
 }
 
-async function pollOrderStatus(apiBase, user, orderId, timeoutMs, intervalMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetchJson(`${apiBase}/api/v1/orders/${orderId}`, {
-        headers: { Authorization: user.authHeader }
-      });
-      if (res.status && ["FILLED", "CANCELLED", "REJECTED"].includes(res.status)) {
-        return res;
-      }
-    } catch {}
-    await sleep(intervalMs);
-  }
-  return null;
+// ─── Helpers ────────────────────────────────────────────────────────
+function percentile(arr, p) {
+  if (!arr.length) return 0;
+  return arr[Math.max(0, Math.ceil(p / 100 * arr.length) - 1)];
 }
 
-function percentile(sortedArr, p) {
-  if (sortedArr.length === 0) return 0;
-  const idx = Math.ceil(p / 100 * sortedArr.length) - 1;
-  return sortedArr[Math.max(0, idx)];
-}
-
-async function runBenchmark() {
+// ─── Main ───────────────────────────────────────────────────────────
+async function main() {
   const opts = parseArgs();
-  console.log("=== Matching Engine Performance Benchmark ===");
-  console.log(`  Orders:      ${opts.orders}`);
-  console.log(`  Concurrency: ${opts.concurrency}`);
-  console.log(`  Users:       ${opts.users}`);
-  console.log(`  Price:       ${opts.price}`);
-  console.log(`  Outcome:     ${opts.outcome}`);
-  console.log(`  PollTimeout: ${opts.pollTimeoutMs}ms`);
+  console.log("╔═══════════════════════════════════════════════════════╗");
+  console.log("║   Matching Engine V2 — Performance Benchmark          ║");
+  console.log("╚═══════════════════════════════════════════════════════╝");
+  console.log(`  Orders: ${opts.orders}  Concurrency: ${opts.concurrency}  Users: ${opts.users}  Price: ${opts.price}`);
   console.log();
 
-  const apiBase = process.env.API_BASE || DEFAULT_API_BASE;
-  console.log(`[1/6] Creating ${opts.users} test users...`);
+  let opKey = readSecret("bsc-testnet-operator.key");
+  if (!opKey.startsWith("0x")) opKey = `0x${opKey}`;
+  const operatorAccount = privateKeyToAccount(opKey);
+  const publicClient = createPublicClient({ chain: bscTestnet, transport: http(RPC_URL) });
+  const operatorWallet = createWalletClient({ account: operatorAccount, chain: bscTestnet, transport: http(RPC_URL) });
+
+  // 1. Create & fund users
+  console.log(`[1/5] Creating ${opts.users} users...`);
   const users = [];
   for (let i = 0; i < opts.users; i++) {
-    const u = await createUser(apiBase);
-    users.push(u);
-    process.stdout.write(`  user ${i + 1}/${opts.users} created (${u.userId})\r`);
-  }
-  console.log(`  ${users.length} users created`);
-
-  let marketId = opts.marketId;
-  if (marketId <= 0) {
-    console.log("[2/6] Creating test market...");
-    const binaryOptions = [
-      { key: "YES", label: "Yes", shortLabel: "Y", sortOrder: 10, isActive: true },
-      { key: "NO", label: "No", shortLabel: "N", sortOrder: 20, isActive: true }
-    ];
-    const mkRes = await postJson(`${apiBase}/api/v1/admin/markets`, {
-      title: `Perf Benchmark ${Date.now()}`,
-      description: "Automated perf test",
-      collateral_asset: "USDT",
-      options: binaryOptions,
-    });
-    marketId = mkRes.market_id;
-    console.log(`  market ${marketId} created`);
-  } else {
-    console.log(`[2/6] Using existing market ${marketId}`);
-  }
-
-  console.log("[3/6] Seeding maker liquidity...");
-  const maker = users[0];
-  const makerOrders = 10;
-  for (let i = 0; i < makerOrders; i++) {
     try {
-      await placeOrder(apiBase, maker, marketId, opts.outcome, "SELL", opts.price, 100);
+      const privKey = generatePrivateKey();
+      const account = privateKeyToAccount(privKey);
+
+      const tbnbTx = await operatorWallet.sendTransaction({ to: account.address, value: parseEther("0.02") });
+      await publicClient.waitForTransactionReceipt({ hash: tbnbTx });
+
+      const tokenOwner = await publicClient.readContract({ address: TOKEN_ADDR, abi: tokenAbi, functionName: "owner" });
+      let mintWallet = operatorWallet;
+      if (normalizeAddress(tokenOwner) !== normalizeAddress(operatorAccount.address)) {
+        mintWallet = operatorWallet;
+      }
+
+      const mintTx = await mintWallet.writeContract({
+        address: TOKEN_ADDR, abi: tokenAbi,
+        functionName: "mint", args: [account.address, parseUnits("100000", 6)]
+      });
+      await publicClient.waitForTransactionReceipt({ hash: mintTx });
+
+      const userWallet = createWalletClient({ account, chain: bscTestnet, transport: http(RPC_URL) });
+      const approveTx = await userWallet.writeContract({
+        address: TOKEN_ADDR, abi: tokenAbi,
+        functionName: "approve", args: [VAULT_ADDR, parseUnits("100000", 6)]
+      });
+      await publicClient.waitForTransactionReceipt({ hash: approveTx });
+
+      const depTx = await userWallet.writeContract({
+        address: VAULT_ADDR, abi: vaultAbi,
+        functionName: "deposit", args: [parseUnits("50000", 6)]
+      });
+      await publicClient.waitForTransactionReceipt({ hash: depTx });
+
+      const session = await createSession(account);
+      users.push({ account, session });
+      console.log(`  user ${i + 1}/${opts.users} ready (userId=${session.userId})`);
     } catch (e) {
-      console.log(`  maker order ${i} failed: ${e.message}`);
+      console.log(`  user ${i + 1}/${opts.users} FAILED: ${e.message.slice(0, 120)}`);
     }
   }
-  console.log(`  ${makerOrders} maker SELL orders placed at price ${opts.price}`);
+  if (users.length < 2) throw new Error("Need at least 2 users");
 
-  console.log(`[4/6] Sending ${opts.orders} taker BUY orders (concurrency=${opts.concurrency})...`);
+  // 2. Use user-proposed market (fast path — avoids admin EIP-191 signing)
+  console.log("[2/5] Creating benchmark market via proposal...");
+  const proposer = users[0];
+  const propRes = await postJson(`${API_BASE}/api/v1/markets/propose`, {
+    title: `Perf Bench ${Date.now()}`,
+    description: "Automated perf test",
+    category_key: "CRYPTO",
+    collateral_asset: "USDT",
+    options: [
+      { key: "YES", label: "Yes", short_label: "Y" },
+      { key: "NO", label: "No", short_label: "N" },
+    ],
+  }, { Authorization: `Bearer ${proposer.session.sessionId}` });
+  const marketId = propRes.market_id;
+  console.log(`  proposed market_id = ${marketId}, auto-approving...`);
+
+  // Auto-approve via admin API (use the already-tested approve endpoint)
+  const approveRequestedAt = Date.now();
+  const approveMsg = `approve_market:${marketId}:${approveRequestedAt}`;
+  const approveSig = await operatorAccount.signMessage({ message: approveMsg });
+  await postJson(`${ADMIN_BASE}/api/operator/markets/${marketId}/approve`, {
+    operator: {
+      walletAddress: operatorAccount.address,
+      requestedAt: approveRequestedAt,
+      signature: approveSig,
+    },
+  });
+  console.log(`  market ${marketId} approved`);
+
+  // 3. Wait for deposits and seed maker liquidity
+  console.log("[3/5] Waiting for chain deposit propagation...");
+  const maker = users[0];
+  const makerQty = Math.ceil(opts.orders * 1.5);
+
+  // Poll balance until on-chain deposits are recognized by chain listener
+  for (let attempt = 0; attempt < 40; attempt++) {
+    try {
+      const bal = await fetchJson(
+        `${API_BASE}/api/v1/balances?user_id=${maker.session.userId}&asset=USDT&limit=5`,
+        { headers: { Authorization: `Bearer ${maker.session.sessionId}` } }
+      );
+      const items = bal.items || [];
+      const usdtItem = items.find(i => String(i.asset || "").toUpperCase() === "USDT");
+      const available = Number(usdtItem?.available ?? 0);
+      if (available > 0) {
+        console.log(`  balance detected: ${available} USDT (attempt ${attempt + 1})`);
+        break;
+      }
+    } catch (e) {
+      // ignore fetch errors during polling
+    }
+    if (attempt === 39) {
+      console.log("  warning: balance still 0 after 200s polling, proceeding anyway...");
+    } else {
+      process.stdout.write(`  polling balance... attempt ${attempt + 1}/40\r`);
+    }
+    await sleep(5000);
+  }
+
+  console.log("  Seeding maker liquidity...");
+  const batches = Math.ceil(makerQty / 100);
+  let seeded = 0;
+  for (let b = 0; b < batches; b++) {
+    const qty = Math.min(100, makerQty - b * 100);
+    try {
+      await submitOrder(maker.session, marketId, "SELL", opts.price, qty);
+      seeded += qty;
+    } catch (e) {
+      console.log(`  maker batch ${b} failed: ${e.message.slice(0, 100)}`);
+    }
+  }
+  console.log(`  seeded ${seeded} sell qty at price ${opts.price}`);
+  await sleep(3000);
+
+  // 4. Burst taker orders — pre-assign nonces to avoid conflicts
+  console.log(`[4/5] Sending ${opts.orders} taker BUY orders...`);
   const takerUsers = users.slice(1);
-  const orderPromises = [];
+  const latencies = [];
+  const errors = [];
+
+  // Pre-assign nonces so concurrent orders from the same user don't collide
+  const nonceCounters = new Map();
+  for (const u of takerUsers) {
+    nonceCounters.set(u.session.sessionId, u.session.lastOrderNonce);
+  }
+
+  function nextNonce(sessionId) {
+    const n = (nonceCounters.get(sessionId) || 0) + 1;
+    nonceCounters.set(sessionId, n);
+    return n;
+  }
+
   const burstStart = performance.now();
+  const pool = [];
 
   for (let i = 0; i < opts.orders; i++) {
     const user = takerUsers[i % takerUsers.length];
-    const promise = placeOrder(apiBase, user, marketId, opts.outcome, "BUY", opts.price, 1);
-    orderPromises.push(promise);
+    const nonce = nextNonce(user.session.sessionId);
+    const p = submitOrder(user.session, marketId, "BUY", opts.price, 1, nonce)
+      .then(r => latencies.push(r.latencyMs))
+      .catch(e => errors.push(e.message.slice(0, 100)));
+    pool.push(p);
 
-    if (orderPromises.length >= opts.concurrency) {
-      await Promise.allSettled(orderPromises.splice(0, opts.concurrency));
+    if (pool.length >= opts.concurrency) {
+      await Promise.allSettled(pool.splice(0, opts.concurrency));
     }
   }
-  if (orderPromises.length > 0) {
-    await Promise.allSettled(orderPromises);
+  if (pool.length) await Promise.allSettled(pool);
+
+  // Update sessions' nonce counters
+  for (const u of takerUsers) {
+    u.session.lastOrderNonce = nonceCounters.get(u.session.sessionId) || u.session.lastOrderNonce;
   }
 
-  const burstEnd = performance.now();
-  const burstMs = burstEnd - burstStart;
-  console.log(`  Burst complete in ${burstMs.toFixed(0)}ms`);
+  const burstMs = performance.now() - burstStart;
 
-  console.log(`[5/6] Collecting results (resolved = all settled within ${opts.orders} orders)...`);
-  const placementLatencies = [];
-  const results = await Promise.allSettled(
-    orderPromises.length
-      ? orderPromises
-      : Array.from({ length: opts.orders }, async (_, i) => {
-          const user = takerUsers[i % takerUsers.length];
-          return placeOrder(apiBase, user, marketId, opts.outcome, "BUY", opts.price, 1);
-        })
-  );
+  // 5. Report
+  latencies.sort((a, b) => a - b);
+  const placed = latencies.length;
+  const throughput = placed / (burstMs / 1000);
 
-  let placed = 0, failed = 0;
-  for (const r of results) {
-    if (r.status === "fulfilled") {
-      placed++;
-      placementLatencies.push(r.value.placementMs);
-    } else {
-      failed++;
-    }
+  console.log();
+  console.log("╔═══════════════════════════════════════════════════════╗");
+  console.log("║                   BENCHMARK RESULTS                   ║");
+  console.log("╠═══════════════════════════════════════════════════════╣");
+  console.log(`║  Orders sent:         ${String(opts.orders).padStart(8)}`);
+  console.log(`║  Placed OK:           ${String(placed).padStart(8)}`);
+  console.log(`║  Failed:              ${String(errors.length).padStart(8)}`);
+  console.log(`║  Burst duration:      ${burstMs.toFixed(0).padStart(6)}ms`);
+  console.log(`║  Throughput:          ${throughput.toFixed(1).padStart(6)} orders/sec`);
+  console.log("╠═══════════════════════════════════════════════════════╣");
+  console.log("║  Latency (placement HTTP round-trip):                 ║");
+  if (placed > 0) {
+    console.log(`║    p50:               ${percentile(latencies, 50).toFixed(1).padStart(6)}ms`);
+    console.log(`║    p95:               ${percentile(latencies, 95).toFixed(1).padStart(6)}ms`);
+    console.log(`║    p99:               ${percentile(latencies, 99).toFixed(1).padStart(6)}ms`);
+    console.log(`║    min:               ${latencies[0].toFixed(1).padStart(6)}ms`);
+    console.log(`║    max:               ${latencies[latencies.length - 1].toFixed(1).padStart(6)}ms`);
+    console.log(`║    mean:              ${(latencies.reduce((a, b) => a + b, 0) / placed).toFixed(1).padStart(6)}ms`);
+  }
+  console.log("╚═══════════════════════════════════════════════════════╝");
+
+  if (errors.length) {
+    console.log(`\nErrors (${errors.length}):`);
+    for (const e of [...new Set(errors)].slice(0, 5)) console.log(`  - ${e}`);
   }
 
-  placementLatencies.sort((a, b) => a - b);
-
-  console.log();
-  console.log("=== RESULTS ===");
-  console.log();
-  console.log("Placement Phase:");
-  console.log(`  Total orders sent: ${opts.orders}`);
-  console.log(`  Successfully placed: ${placed}`);
-  console.log(`  Failed: ${failed}`);
-  console.log(`  Burst duration: ${burstMs.toFixed(0)}ms`);
-  console.log(`  Throughput: ${(placed / (burstMs / 1000)).toFixed(1)} orders/sec`);
-  console.log();
-  console.log("Placement Latency (HTTP round-trip):");
-  if (placementLatencies.length > 0) {
-    console.log(`  p50:  ${percentile(placementLatencies, 50).toFixed(1)}ms`);
-    console.log(`  p95:  ${percentile(placementLatencies, 95).toFixed(1)}ms`);
-    console.log(`  p99:  ${percentile(placementLatencies, 99).toFixed(1)}ms`);
-    console.log(`  min:  ${placementLatencies[0].toFixed(1)}ms`);
-    console.log(`  max:  ${placementLatencies[placementLatencies.length - 1].toFixed(1)}ms`);
-    console.log(`  mean: ${(placementLatencies.reduce((a, b) => a + b, 0) / placementLatencies.length).toFixed(1)}ms`);
-  }
-
-  console.log();
-  console.log(`[6/6] Pipeline stats (check matching service logs for ring buffer metrics)`);
-  console.log();
-  console.log("Done. Check 'pipeline stats' in matching service logs for:");
-  console.log("  - gw_received: commands entered gateway");
-  console.log("  - ml_matched: commands processed by matching loop");
-  console.log("  - ml_batches: drain batches");
-  console.log("  - disp_dispatched: results persisted + published");
-  console.log("  - gw_paused: backpressure events");
-  console.log("  - ml_out_stall: output RB backpressure events");
+  console.log("\nPipeline stats: check matching service logs for 'pipeline stats'");
 }
 
-runBenchmark().catch(err => {
-  console.error("Benchmark failed:", err);
-  process.exit(1);
-});
+main().catch(err => { console.error("Benchmark failed:", err.message); process.exit(1); });

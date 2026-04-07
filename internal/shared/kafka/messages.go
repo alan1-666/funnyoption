@@ -61,6 +61,10 @@ type TradeMatchedEvent struct {
 	MakerUserID      int64  `json:"maker_user_id"`
 	TakerSide        string `json:"taker_side"`
 	MakerSide        string `json:"maker_side"`
+	TakerFeeBps      int64  `json:"taker_fee_bps"`
+	MakerFeeBps      int64  `json:"maker_fee_bps"`
+	TakerFee         int64  `json:"taker_fee"`
+	MakerFee         int64  `json:"maker_fee"`
 	OccurredAtMillis int64  `json:"occurred_at_millis"`
 }
 

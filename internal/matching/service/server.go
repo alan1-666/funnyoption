@@ -8,6 +8,7 @@ import (
 	"funnyoption/internal/rollup"
 	"funnyoption/internal/shared/config"
 	shareddb "funnyoption/internal/shared/db"
+	"funnyoption/internal/shared/fee"
 	"funnyoption/internal/shared/grpcx"
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
@@ -38,6 +39,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 
 	cachedStore := NewCachedCommandStore(store)
 	processor := NewCommandProcessor(logger, matcher, publisher, cfg.KafkaTopics, cachedStore)
+	processor.feeSchedule = fee.Schedule{TakerFeeBps: cfg.TakerFeeBps, MakerFeeBps: cfg.MakerFeeBps}
 	expirySweeper := newOrderExpirySweeper(logger, matcher, store, publisher, cfg.KafkaTopics)
 	expirySweeper.Start(ctx)
 	consumer := sharedkafka.NewJSONConsumer(

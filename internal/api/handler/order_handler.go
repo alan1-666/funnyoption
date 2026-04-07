@@ -16,6 +16,7 @@ import (
 
 	accountclient "funnyoption/internal/account/client"
 	"funnyoption/internal/api/dto"
+	orderservice "funnyoption/internal/order"
 	oracleservice "funnyoption/internal/oracle/service"
 	"funnyoption/internal/shared/assets"
 	sharedauth "funnyoption/internal/shared/auth"
@@ -43,6 +44,7 @@ type OrderHandler struct {
 	topics              sharedkafka.Topics
 	account             accountclient.AccountClient
 	store               QueryStore
+	orderService        *orderservice.Service
 	operatorWallets     map[string]struct{}
 	operatorUserID      int64
 	expectedChainID     int64
@@ -59,12 +61,20 @@ func NewOrderHandler(deps Dependencies) *OrderHandler {
 	if expectedChainID <= 0 {
 		expectedChainID = 97
 	}
+	orderSvc := orderservice.NewService(orderservice.Dependencies{
+		Logger:    deps.Logger,
+		Account:   deps.AccountClient,
+		Publisher: deps.KafkaPublisher,
+		Topics:    deps.KafkaTopics,
+		Store:     deps.QueryStore,
+	})
 	return &OrderHandler{
 		logger:              deps.Logger,
 		publisher:           deps.KafkaPublisher,
 		topics:              deps.KafkaTopics,
 		account:             deps.AccountClient,
 		store:               deps.QueryStore,
+		orderService:        orderSvc,
 		operatorWallets:     normalizeOperatorWalletSet(deps.OperatorWallets),
 		operatorUserID:      deps.DefaultOperatorUserID,
 		expectedChainID:     expectedChainID,
@@ -1160,7 +1170,6 @@ func (h *OrderHandler) CreateOrder(ctx *gin.Context) {
 	}
 
 	orderID := sharedkafka.NewID("ord")
-	commandID := sharedkafka.NewID("cmd")
 	now := time.Now()
 	requestedAt := req.RequestedAtMillis
 
@@ -1168,8 +1177,6 @@ func (h *OrderHandler) CreateOrder(ctx *gin.Context) {
 	side := strings.ToUpper(strings.TrimSpace(req.Side))
 	orderType := strings.ToUpper(strings.TrimSpace(req.Type))
 	tif := strings.ToUpper(strings.TrimSpace(req.TimeInForce))
-	collateralAsset := assets.DefaultCollateralAsset
-	bookKey := fmt.Sprintf("%d:%s", req.MarketID, outcome)
 	userID := req.UserID
 
 	if strings.TrimSpace(req.SessionID) != "" {
@@ -1298,95 +1305,55 @@ func (h *OrderHandler) CreateOrder(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "user_id or trading key id is required"})
 		return
 	}
-	if h.store == nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
-		return
-	}
-	if !h.requireRollupNotFrozen(ctx) {
-		return
-	}
 
-	market, err := h.store.GetMarket(ctx, req.MarketID)
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			ctx.JSON(http.StatusNotFound, gin.H{"error": "market not found"})
-			return
-		}
-		h.logger.Error("get market for order failed", "market_id", req.MarketID, "err", err)
-		ctx.JSON(http.StatusBadGateway, gin.H{"error": "get market failed"})
-		return
-	}
-	if !isTradableMarket(market) {
-		ctx.JSON(http.StatusConflict, gin.H{"error": "market is not tradable"})
-		return
-	}
-
-	freezeAsset, freezeAmount, err := calculateFreeze(side, orderType, req.MarketID, outcome, req.Price, req.Quantity)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	if h.account == nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "account client is not configured"})
-		return
-	}
-
-	freezeRecord, err := h.account.PreFreeze(ctx, accountclient.FreezeRequest{
-		UserID:  userID,
-		Asset:   freezeAsset,
-		RefType: "ORDER",
-		RefID:   orderID,
-		Amount:  freezeAmount,
+	result, err := h.orderService.SubmitOrder(ctx, orderservice.SubmitRequest{
+		OrderID:       orderID,
+		UserID:        userID,
+		MarketID:      req.MarketID,
+		Outcome:       outcome,
+		Side:          side,
+		Type:          orderType,
+		TimeInForce:   tif,
+		Price:         req.Price,
+		Quantity:      req.Quantity,
+		TraceID:       strings.TrimSpace(req.TraceID),
+		ClientOrderID: strings.TrimSpace(req.ClientOrderID),
+		RequestedAt:   requestedAt,
 	})
 	if err != nil {
-		status := http.StatusBadRequest
-		errText := strings.ToLower(err.Error())
-		if strings.Contains(errText, "insufficient") {
-			status = http.StatusConflict
-		}
-		ctx.JSON(status, gin.H{"error": err.Error()})
+		h.writeOrderServiceError(ctx, err)
 		return
 	}
 
-	command := sharedkafka.OrderCommand{
-		CommandID:         commandID,
-		TraceID:           strings.TrimSpace(req.TraceID),
-		OrderID:           orderID,
-		ClientOrderID:     strings.TrimSpace(req.ClientOrderID),
-		FreezeID:          freezeRecord.FreezeID,
-		FreezeAsset:       freezeRecord.Asset,
-		FreezeAmount:      freezeRecord.Amount,
-		CollateralAsset:   collateralAsset,
-		UserID:            userID,
-		MarketID:          req.MarketID,
-		Outcome:           outcome,
-		Side:              side,
-		Type:              orderType,
-		TimeInForce:       tif,
-		Price:             req.Price,
-		Quantity:          req.Quantity,
-		RequestedAtMillis: requestedAt,
-	}
-
-	if err := h.publisher.PublishJSON(ctx, h.topics.OrderCommand, bookKey, command); err != nil {
-		if releaseErr := h.account.ReleaseFreeze(ctx, freezeRecord.FreezeID); releaseErr != nil {
-			h.logger.Error("release freeze after publish failure failed", "freeze_id", freezeRecord.FreezeID, "err", releaseErr)
-		}
-		h.logger.Error("publish order command failed", "command_id", commandID, "order_id", orderID, "err", err)
-		ctx.JSON(http.StatusBadGateway, gin.H{"error": "publish order command failed"})
-		return
-	}
-
-	h.logger.Info("order command published", "command_id", commandID, "order_id", orderID, "book_key", bookKey, "freeze_id", freezeRecord.FreezeID, "freeze_amount", freezeRecord.Amount)
 	ctx.JSON(http.StatusAccepted, dto.CreateOrderResponse{
-		CommandID: commandID,
-		OrderID:   orderID,
-		FreezeID:  freezeRecord.FreezeID,
-		Asset:     freezeRecord.Asset,
-		Amount:    freezeRecord.Amount,
+		CommandID: result.CommandID,
+		OrderID:   result.OrderID,
+		FreezeID:  result.FreezeID,
+		Asset:     result.Asset,
+		Amount:    result.Amount,
 		Topic:     h.topics.OrderCommand,
 		Status:    "QUEUED",
 	})
+}
+
+func (h *OrderHandler) writeOrderServiceError(ctx *gin.Context, err error) {
+	switch {
+	case errors.Is(err, orderservice.ErrMarketNotFound):
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "market not found"})
+	case errors.Is(err, orderservice.ErrMarketNotTradable):
+		ctx.JSON(http.StatusConflict, gin.H{"error": "market is not tradable"})
+	case errors.Is(err, orderservice.ErrRollupFrozen):
+		ctx.JSON(http.StatusConflict, gin.H{"error": "rollup is frozen"})
+	case errors.Is(err, orderservice.ErrInsufficientFunds):
+		ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	case errors.Is(err, orderservice.ErrValidationFailed):
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	case errors.Is(err, orderservice.ErrPublishFailed):
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": "publish order command failed"})
+	default:
+		h.logger.Error("order service error", "err", err)
+		ctx.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+	}
 }
 
 func (h *OrderHandler) rollupTradingFrozen(ctx context.Context) (bool, error) {

@@ -141,15 +141,20 @@ func (p *EventProcessor) HandleTradeMatched(ctx context.Context, msg sharedkafka
 		}
 	}
 
+	receiverFee, payerFee := tradeFees(event)
+
 	if receiverUserID > 0 {
-		if _, _, err := p.book.CreditAvailableWithRef(CreditRequest{
-			UserID:  receiverUserID,
-			Asset:   collateralAsset(event.CollateralAsset),
-			Amount:  notional,
-			RefType: "TRADE_COLLATERAL",
-			RefID:   event.EventID,
-		}); err != nil {
-			return err
+		netCredit := notional - receiverFee
+		if netCredit > 0 {
+			if _, _, err := p.book.CreditAvailableWithRef(CreditRequest{
+				UserID:  receiverUserID,
+				Asset:   collateralAsset(event.CollateralAsset),
+				Amount:  netCredit,
+				RefType: "TRADE_COLLATERAL",
+				RefID:   event.EventID,
+			}); err != nil {
+				return err
+			}
 		}
 	}
 	if buyerUserID > 0 {
@@ -158,6 +163,19 @@ func (p *EventProcessor) HandleTradeMatched(ctx context.Context, msg sharedkafka
 			Asset:   assets.PositionAsset(event.MarketID, event.Outcome),
 			Amount:  event.Quantity,
 			RefType: "TRADE_POSITION",
+			RefID:   event.EventID,
+		}); err != nil {
+			return err
+		}
+	}
+
+	platformRevenue := receiverFee + payerFee
+	if platformRevenue > 0 {
+		if _, _, err := p.book.CreditAvailableWithRef(CreditRequest{
+			UserID:  PlatformFeeUserID,
+			Asset:   collateralAsset(event.CollateralAsset),
+			Amount:  platformRevenue,
+			RefType: "TRADE_FEE",
 			RefID:   event.EventID,
 		}); err != nil {
 			return err
@@ -304,4 +322,24 @@ func tradeNotional(price, quantity int64) (int64, error) {
 		return 0, fmt.Errorf("trade notional overflow")
 	}
 	return price * quantity, nil
+}
+
+// PlatformFeeUserID is the synthetic user account that accumulates trading fees.
+const PlatformFeeUserID int64 = 0
+
+// tradeFees extracts the fee amounts for the collateral receiver and payer from
+// the trade event. Returns (receiverFee, payerFee) where receiver is the seller
+// (who receives collateral) and payer is the buyer (who pays collateral).
+// A negative fee means a rebate.
+func tradeFees(event sharedkafka.TradeMatchedEvent) (receiverFee, payerFee int64) {
+	switch strings.ToUpper(strings.TrimSpace(event.TakerSide)) {
+	case "BUY":
+		// Taker buys → taker is the payer, maker is the receiver (seller)
+		return event.MakerFee, event.TakerFee
+	case "SELL":
+		// Taker sells → taker is the receiver, maker is the payer
+		return event.TakerFee, event.MakerFee
+	default:
+		return 0, 0
+	}
 }

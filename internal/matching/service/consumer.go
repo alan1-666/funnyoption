@@ -9,6 +9,7 @@ import (
 	"funnyoption/internal/matching/engine"
 	"funnyoption/internal/matching/model"
 	"funnyoption/internal/shared/assets"
+	"funnyoption/internal/shared/fee"
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
 
@@ -18,21 +19,23 @@ type commandStore interface {
 }
 
 type CommandProcessor struct {
-	logger    *slog.Logger
-	matcher   *engine.AsyncEngine
-	publisher sharedkafka.Publisher
-	topics    sharedkafka.Topics
-	store     commandStore
-	candles   *CandleBook
+	logger      *slog.Logger
+	matcher     *engine.AsyncEngine
+	publisher   sharedkafka.Publisher
+	topics      sharedkafka.Topics
+	store       commandStore
+	candles     *CandleBook
+	feeSchedule fee.Schedule
 }
 
 func NewCommandProcessor(logger *slog.Logger, matcher *engine.AsyncEngine, publisher sharedkafka.Publisher, topics sharedkafka.Topics, store commandStore) *CommandProcessor {
 	return &CommandProcessor{
-		logger:    logger,
-		matcher:   matcher,
-		publisher: publisher,
-		topics:    topics,
-		store:     store,
+		logger:      logger,
+		matcher:     matcher,
+		publisher:   publisher,
+		topics:      topics,
+		store:       store,
+		feeSchedule: fee.DefaultSchedule(),
 		candles:   NewCandleBook(defaultCandleIntervalMillis, defaultCandleHistoryLimit),
 	}
 }
@@ -175,6 +178,13 @@ func (p *CommandProcessor) buildPassiveOrderEvent(traceID, collateralAsset strin
 }
 
 func (p *CommandProcessor) buildTradeEvent(traceID, collateralAsset string, trade model.Trade) sharedkafka.BatchItem {
+	notional := trade.Price * trade.Quantity
+	feeResult, err := p.feeSchedule.Compute(notional)
+	if err != nil {
+		p.logger.Warn("fee computation failed, using zero fees", "err", err)
+		feeResult = fee.FeeResult{}
+	}
+
 	event := sharedkafka.TradeMatchedEvent{
 		EventID:          sharedkafka.NewID("evt_trade"),
 		Sequence:         trade.Sequence,
@@ -191,6 +201,10 @@ func (p *CommandProcessor) buildTradeEvent(traceID, collateralAsset string, trad
 		MakerUserID:      trade.MakerUserID,
 		TakerSide:        string(trade.TakerSide),
 		MakerSide:        string(trade.MakerSide),
+		TakerFeeBps:      p.feeSchedule.TakerFeeBps,
+		MakerFeeBps:      p.feeSchedule.MakerFeeBps,
+		TakerFee:         feeResult.TakerFee,
+		MakerFee:         feeResult.MakerFee,
 		OccurredAtMillis: trade.MatchedAtMillis,
 	}
 	return sharedkafka.BatchItem{Topic: p.topics.TradeMatched, Key: trade.BookKey, Payload: event}

@@ -36,6 +36,8 @@ type ServiceConfig struct {
 	RollupPollInterval      time.Duration
 	ChainGasLimit           uint64
 	CORSExtraOrigins        []string
+	TakerFeeBps             int64
+	MakerFeeBps             int64
 	LogLevel                string
 	ShutdownTimeout         time.Duration
 	PollInterval            time.Duration
@@ -84,6 +86,8 @@ func Load(serviceName string) ServiceConfig {
 	cfg.KafkaBrokers = strings.Split(brokers, ",")
 	cfg.ChainRPCFallbackURLs = splitCSV(getenv("FUNNYOPTION_CHAIN_RPC_FALLBACK_URLS", ""))
 	cfg.CORSExtraOrigins = splitCSV(getenv("FUNNYOPTION_CORS_EXTRA_ORIGINS", ""))
+	cfg.TakerFeeBps = int64(getenvInt("FUNNYOPTION_TAKER_FEE_BPS", 200))
+	cfg.MakerFeeBps = int64(getenvInt("FUNNYOPTION_MAKER_FEE_BPS", -50))
 	cfg.KafkaTopics = kafka.NewTopics(cfg.KafkaTopicPrefx)
 
 	return cfg

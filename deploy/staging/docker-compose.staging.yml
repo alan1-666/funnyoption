@@ -187,6 +187,19 @@ services:
     ports:
       - "127.0.0.1:8081:8081"
 
+  market-maker:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/market-maker.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      api:
+        condition: service_started
+    env_file:
+      - ./.env.staging
+
   web:
     build:
       context: ../..

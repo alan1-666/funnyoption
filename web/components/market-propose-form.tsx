@@ -12,8 +12,8 @@ interface OptionEntry {
 }
 
 const DEFAULT_OPTIONS: OptionEntry[] = [
-  { label: "是", shortLabel: "是" },
-  { label: "否", shortLabel: "否" },
+  { label: "是", shortLabel: "" },
+  { label: "否", shortLabel: "" },
 ];
 
 export function MarketProposeForm({ onClose }: { onClose: () => void }) {

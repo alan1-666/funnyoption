@@ -59,8 +59,8 @@ func TestBuildAcceptedEscapeCollateralSnapshotUsesChainUnitsAndVerifiableProof(t
 	}
 }
 
-func TestBuildAcceptedEscapeCollateralSnapshotRequiresWalletMirror(t *testing.T) {
-	_, _, err := BuildAcceptedEscapeCollateralSnapshot(
+func TestBuildAcceptedEscapeCollateralSnapshotSkipsAccountsWithoutWallet(t *testing.T) {
+	root, leaves, err := BuildAcceptedEscapeCollateralSnapshot(
 		1,
 		"abcd1234",
 		[]AcceptedBalanceRecord{{
@@ -70,8 +70,14 @@ func TestBuildAcceptedEscapeCollateralSnapshotRequiresWalletMirror(t *testing.T)
 		}},
 		nil,
 	)
-	if err == nil {
-		t.Fatalf("expected missing wallet address to fail")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if root.LeafCount != 0 {
+		t.Fatalf("root.LeafCount = %d, want 0 for walletless accounts", root.LeafCount)
+	}
+	if len(leaves) != 0 {
+		t.Fatalf("len(leaves) = %d, want 0", len(leaves))
 	}
 }
 

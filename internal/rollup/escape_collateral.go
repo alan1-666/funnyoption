@@ -62,7 +62,7 @@ func BuildAcceptedEscapeCollateralSnapshot(
 		}
 		walletAddress := sharedauth.NormalizeHex(walletByAccount[balance.AccountID])
 		if walletAddress == "" {
-			return AcceptedEscapeCollateralRootRecord{}, nil, fmt.Errorf("wallet address is required for accepted escape collateral account %d", balance.AccountID)
+			continue
 		}
 		inputs = append(inputs, acceptedEscapeLeafInput{
 			AccountID:       balance.AccountID,

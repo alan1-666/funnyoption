@@ -117,6 +117,19 @@
     for anything not yet accepted)
   - when frozen: API shows only accepted data (unchanged, correct for
     safety lockdown mode)
+- also fixed:
+  - `internal/rollup/escape_collateral.go`:
+    - `BuildAcceptedEscapeCollateralSnapshot` now skips accounts without
+      a wallet address instead of returning a fatal error; accounts
+      without a registered wallet cannot claim escape collateral anyway
+    - this unblocks the rollup submission pipeline on staging where
+      account 1002 (legacy maker) had a USDT balance but no
+      `user_profiles.wallet_address` row
+  - `internal/rollup/escape_collateral_test.go`:
+    - test updated to expect silent skip instead of error
 - validated:
-  - `go build ./internal/api/...` passes
-  - staging E2E pending rerun after deploy
+  - `go build ./...` passes
+  - `go test ./internal/rollup/...` passes (31 tests)
+  - `go test ./internal/api/...` passes
+  - staging E2E PASS after first hotfix deploy
+  - staging E2E on-chain verification pending rerun after this fix

@@ -599,6 +599,15 @@ func (p *testPublisher) PublishJSON(ctx context.Context, topic, key string, payl
 	return nil
 }
 
+func (p *testPublisher) PublishJSONBatch(ctx context.Context, items []kafka.BatchItem) error {
+	for _, item := range items {
+		if err := p.PublishJSON(ctx, item.Topic, item.Key, item.Payload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (p *testPublisher) Close() error {
 	return nil
 }

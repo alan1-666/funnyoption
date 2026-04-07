@@ -50,6 +50,7 @@ type BalanceStore interface {
 	LoadFreezes(ctx context.Context) ([]model.FreezeRecord, error)
 	UpsertBalance(ctx context.Context, balance model.Balance) error
 	UpsertFreeze(ctx context.Context, record model.FreezeRecord) error
+	UpsertBalanceAndFreeze(ctx context.Context, balance model.Balance, freeze model.FreezeRecord) error
 	ApplyCreditEvent(ctx context.Context, req CreditRequest) (model.Balance, bool, error)
 	ApplyDebitEvent(ctx context.Context, req DebitRequest) (model.Balance, bool, error)
 }
@@ -142,15 +143,7 @@ func (b *BalanceBook) PreFreeze(req FreezeRequest) (*model.FreezeRecord, error) 
 	snapshotFreeze := *record
 	b.mu.Unlock()
 
-	if err := b.persistBalance(snapshotBalance); err != nil {
-		b.mu.Lock()
-		balance.Available += req.Amount
-		balance.Frozen -= req.Amount
-		delete(b.freezes, freezeID)
-		b.mu.Unlock()
-		return nil, err
-	}
-	if err := b.persistFreeze(snapshotFreeze); err != nil {
+	if err := b.persistBalanceAndFreeze(snapshotBalance, snapshotFreeze); err != nil {
 		b.mu.Lock()
 		balance.Available += req.Amount
 		balance.Frozen -= req.Amount
@@ -185,14 +178,7 @@ func (b *BalanceBook) ReleaseFreeze(freezeID string) error {
 	snapshotFreeze := *record
 	b.mu.Unlock()
 
-	if err := b.persistBalance(snapshotBalance); err != nil {
-		b.mu.Lock()
-		*balance = oldBalance
-		*record = oldRecord
-		b.mu.Unlock()
-		return err
-	}
-	if err := b.persistFreeze(snapshotFreeze); err != nil {
+	if err := b.persistBalanceAndFreeze(snapshotBalance, snapshotFreeze); err != nil {
 		b.mu.Lock()
 		*balance = oldBalance
 		*record = oldRecord
@@ -229,14 +215,7 @@ func (b *BalanceBook) ReleaseFreezeAmount(freezeID string, amount int64) error {
 	snapshotFreeze := *record
 	b.mu.Unlock()
 
-	if err := b.persistBalance(snapshotBalance); err != nil {
-		b.mu.Lock()
-		*balance = oldBalance
-		*record = oldRecord
-		b.mu.Unlock()
-		return err
-	}
-	if err := b.persistFreeze(snapshotFreeze); err != nil {
+	if err := b.persistBalanceAndFreeze(snapshotBalance, snapshotFreeze); err != nil {
 		b.mu.Lock()
 		*balance = oldBalance
 		*record = oldRecord
@@ -272,14 +251,7 @@ func (b *BalanceBook) ConsumeFreeze(freezeID string, amount int64) error {
 	snapshotFreeze := *record
 	b.mu.Unlock()
 
-	if err := b.persistBalance(snapshotBalance); err != nil {
-		b.mu.Lock()
-		*balance = oldBalance
-		*record = oldRecord
-		b.mu.Unlock()
-		return err
-	}
-	if err := b.persistFreeze(snapshotFreeze); err != nil {
+	if err := b.persistBalanceAndFreeze(snapshotBalance, snapshotFreeze); err != nil {
 		b.mu.Lock()
 		*balance = oldBalance
 		*record = oldRecord
@@ -519,6 +491,13 @@ func (b *BalanceBook) persistFreeze(record model.FreezeRecord) error {
 		return nil
 	}
 	return b.store.UpsertFreeze(context.Background(), record)
+}
+
+func (b *BalanceBook) persistBalanceAndFreeze(balance model.Balance, freeze model.FreezeRecord) error {
+	if b.store == nil {
+		return nil
+	}
+	return b.store.UpsertBalanceAndFreeze(context.Background(), balance, freeze)
 }
 
 func balanceKey(userID int64, asset string) string {

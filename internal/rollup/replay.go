@@ -182,6 +182,60 @@ func ReplayStoredBatches(batches []StoredBatch) (RootSet, error) {
 	return roots, nil
 }
 
+func ReplayBatchOnState(state *shadowState, batch StoredBatch) (RootSet, error) {
+	if batch.InputHash != "" && hashStrings("shadow", "batch_input", batch.InputData) != batch.InputHash {
+		return RootSet{}, fmt.Errorf("rollup batch input hash mismatch for batch %d", batch.BatchID)
+	}
+	currentRoot := state.roots().StateRoot
+	expectedPrev := strings.TrimSpace(batch.PrevStateRoot)
+	if expectedPrev == "" {
+		expectedPrev = ZeroStateRoot()
+	}
+	if currentRoot != expectedPrev {
+		return RootSet{}, fmt.Errorf("rollup batch prev_state_root mismatch: have %s want %s", currentRoot, expectedPrev)
+	}
+	input, err := DecodeBatchInput(batch.InputData)
+	if err != nil {
+		return RootSet{}, err
+	}
+	for _, entry := range input.Entries {
+		if err := state.apply(entry); err != nil {
+			return RootSet{}, err
+		}
+	}
+	return state.roots(), nil
+}
+
+func cloneShadowState(src *shadowState) *shadowState {
+	dst := &shadowState{
+		balances:      make(map[string]balanceLeaf, len(src.balances)),
+		nonces:        make(map[string]nonceLeaf, len(src.nonces)),
+		openOrders:    make(map[string]orderLeaf, len(src.openOrders)),
+		positions:     make(map[string]positionLeaf, len(src.positions)),
+		marketFunding: make(map[string]marketFundingLeaf, len(src.marketFunding)),
+		withdrawals:   make(map[string]withdrawalLeaf, len(src.withdrawals)),
+	}
+	for k, v := range src.balances {
+		dst.balances[k] = v
+	}
+	for k, v := range src.nonces {
+		dst.nonces[k] = v
+	}
+	for k, v := range src.openOrders {
+		dst.openOrders[k] = v
+	}
+	for k, v := range src.positions {
+		dst.positions[k] = v
+	}
+	for k, v := range src.marketFunding {
+		dst.marketFunding[k] = v
+	}
+	for k, v := range src.withdrawals {
+		dst.withdrawals[k] = v
+	}
+	return dst
+}
+
 func (s *shadowState) apply(entry JournalEntry) error {
 	switch entry.EntryType {
 	case EntryTypeNonceAdvanced:

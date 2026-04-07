@@ -13,24 +13,50 @@ contract FunnyVault {
         address recipient;
     }
 
+    struct PendingClaim {
+        address wallet;
+        uint256 amount;
+        address recipient;
+        uint256 executeAfter;
+        bool cancelled;
+    }
+
     IERC20Minimal public immutable collateralToken;
     address public immutable operator;
     address public rollupCore;
 
+    uint256 public operatorEpochClaimCap;
+    uint256 public currentEpochStart;
+    uint256 public currentEpochClaimed;
+    uint256 public constant EPOCH_DURATION = 1 days;
+
+    uint256 public timelockDelay;
+    uint256 public timelockThreshold;
+
     mapping(address => uint256) public depositedBalance;
     mapping(bytes32 => bool) public processedClaims;
     mapping(bytes32 => ClaimRecord) public processedClaimRecords;
+    mapping(bytes32 => PendingClaim) public pendingClaims;
 
     event Deposited(address indexed wallet, uint256 amount);
     event WithdrawalQueued(bytes32 indexed withdrawalId, address indexed wallet, uint256 amount, address recipient);
     event ClaimProcessed(bytes32 indexed claimId, address indexed wallet, uint256 amount, address recipient);
     event RollupCoreUpdated(address indexed rollupCore);
+    event OperatorEpochClaimCapUpdated(uint256 cap);
+    event TimelockConfigUpdated(uint256 threshold, uint256 delay);
+    event ClaimQueued(bytes32 indexed claimId, address indexed wallet, uint256 amount, address recipient, uint256 executeAfter);
+    event QueuedClaimCancelled(bytes32 indexed claimId);
 
     error OnlyOperator();
     error OnlyAuthorizedClaimer();
     error InvalidAmount();
     error ClaimAlreadyProcessed();
     error InvalidRollupCore();
+    error OperatorEpochCapExceeded();
+    error ClaimTimelocked();
+    error ClaimNotReady();
+    error ClaimNotQueued();
+    error ClaimCancelled();
 
     constructor(address collateralToken_, address operator_) {
         collateralToken = IERC20Minimal(collateralToken_);
@@ -42,6 +68,19 @@ contract FunnyVault {
         if (rollupCore_ == address(0)) revert InvalidRollupCore();
         rollupCore = rollupCore_;
         emit RollupCoreUpdated(rollupCore_);
+    }
+
+    function setOperatorEpochClaimCap(uint256 cap) external {
+        if (msg.sender != operator) revert OnlyOperator();
+        operatorEpochClaimCap = cap;
+        emit OperatorEpochClaimCapUpdated(cap);
+    }
+
+    function setTimelockConfig(uint256 threshold, uint256 delay) external {
+        if (msg.sender != operator) revert OnlyOperator();
+        timelockThreshold = threshold;
+        timelockDelay = delay;
+        emit TimelockConfigUpdated(threshold, delay);
     }
 
     function deposit(uint256 amount) external {
@@ -63,9 +102,58 @@ contract FunnyVault {
         if (processedClaims[claimId]) revert ClaimAlreadyProcessed();
         if (amount == 0) revert InvalidAmount();
 
+        if (msg.sender == operator) {
+            if (operatorEpochClaimCap > 0) {
+                uint256 epochStart = (block.timestamp / EPOCH_DURATION) * EPOCH_DURATION;
+                if (epochStart != currentEpochStart) {
+                    currentEpochStart = epochStart;
+                    currentEpochClaimed = 0;
+                }
+                if (currentEpochClaimed + amount > operatorEpochClaimCap) revert OperatorEpochCapExceeded();
+                currentEpochClaimed += amount;
+            }
+
+            if (timelockThreshold > 0 && amount >= timelockThreshold && timelockDelay > 0) {
+                if (pendingClaims[claimId].executeAfter == 0) {
+                    revert ClaimTimelocked();
+                }
+            }
+        }
+
+        if (pendingClaims[claimId].executeAfter > 0) {
+            PendingClaim storage pending = pendingClaims[claimId];
+            if (pending.cancelled) revert ClaimCancelled();
+            if (block.timestamp < pending.executeAfter) revert ClaimNotReady();
+            if (pending.wallet != wallet || pending.amount != amount || pending.recipient != recipient) revert InvalidAmount();
+        }
+
         processedClaims[claimId] = true;
         processedClaimRecords[claimId] = ClaimRecord({wallet: wallet, amount: amount, recipient: recipient});
         require(collateralToken.transfer(recipient, amount), "TRANSFER_FAILED");
         emit ClaimProcessed(claimId, wallet, amount, recipient);
+    }
+
+    function queueClaim(bytes32 claimId, address wallet, uint256 amount, address recipient) external {
+        if (msg.sender != operator) revert OnlyOperator();
+        if (processedClaims[claimId]) revert ClaimAlreadyProcessed();
+        if (amount == 0) revert InvalidAmount();
+        if (pendingClaims[claimId].executeAfter > 0) revert ClaimAlreadyProcessed();
+
+        uint256 executeAfter = block.timestamp + timelockDelay;
+        pendingClaims[claimId] = PendingClaim({
+            wallet: wallet,
+            amount: amount,
+            recipient: recipient,
+            executeAfter: executeAfter,
+            cancelled: false
+        });
+        emit ClaimQueued(claimId, wallet, amount, recipient, executeAfter);
+    }
+
+    function cancelQueuedClaim(bytes32 claimId) external {
+        if (msg.sender != operator) revert OnlyOperator();
+        if (pendingClaims[claimId].executeAfter == 0) revert ClaimNotQueued();
+        pendingClaims[claimId].cancelled = true;
+        emit QueuedClaimCancelled(claimId);
     }
 }

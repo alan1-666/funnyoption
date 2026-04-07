@@ -219,6 +219,10 @@ func (s *SQLStore) MarketIsTradable(ctx context.Context, marketID int64) (bool, 
 	if err != nil {
 		return false, err
 	}
+	return s.marketTradableWithFrozen(ctx, frozen, marketID)
+}
+
+func (s *SQLStore) marketTradableWithFrozen(ctx context.Context, frozen bool, marketID int64) (bool, error) {
 	var (
 		status  string
 		closeAt int64
@@ -234,6 +238,14 @@ func (s *SQLStore) MarketIsTradable(ctx context.Context, marketID int64) (bool, 
 		return false, err
 	}
 	return marketTradingEnabled(frozen, status, closeAt, time.Now().Unix()), nil
+}
+
+func (s *SQLStore) MarketTradableNoFreeze(ctx context.Context, marketID int64) (bool, error) {
+	return s.marketTradableWithFrozen(ctx, false, marketID)
+}
+
+func (s *SQLStore) RollupFrozen(ctx context.Context) (bool, error) {
+	return s.rollupFrozen(ctx)
 }
 
 func (s *SQLStore) rollupFrozen(ctx context.Context) (bool, error) {

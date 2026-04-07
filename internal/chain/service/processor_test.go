@@ -191,6 +191,15 @@ func (f *fakeChainPublisher) PublishJSON(ctx context.Context, topic, key string,
 	return nil
 }
 
+func (f *fakeChainPublisher) PublishJSONBatch(ctx context.Context, items []sharedkafka.BatchItem) error {
+	for _, item := range items {
+		if err := f.PublishJSON(ctx, item.Topic, item.Key, item.Payload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (f *fakeChainPublisher) Close() error { return nil }
 
 func TestApplyConfirmedDepositCreditsOnce(t *testing.T) {

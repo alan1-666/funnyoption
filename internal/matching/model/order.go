@@ -42,8 +42,8 @@ func (o *Order) Validate() error {
 	if o.Quantity <= 0 {
 		return fmt.Errorf("quantity must be positive")
 	}
-	if o.Type == OrderTypeLimit && o.Price <= 0 {
-		return fmt.Errorf("price must be positive for limit order")
+	if o.Type == OrderTypeLimit && (o.Price < 1 || o.Price > 99) {
+		return fmt.Errorf("limit order price must be between 1 and 99")
 	}
 	if o.Type == OrderTypeMarket && o.Price != 0 {
 		return fmt.Errorf("market order price must be zero")

@@ -36,7 +36,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	publisher := sharedkafka.NewJSONPublisher(logger, cfg.KafkaBrokers)
 	defer publisher.Close()
 
-	processor := NewCommandProcessor(logger, matcher, publisher, cfg.KafkaTopics, store)
+	cachedStore := NewCachedCommandStore(store)
+	processor := NewCommandProcessor(logger, matcher, publisher, cfg.KafkaTopics, cachedStore)
 	expirySweeper := newOrderExpirySweeper(logger, matcher, store, publisher, cfg.KafkaTopics)
 	expirySweeper.Start(ctx)
 	consumer := sharedkafka.NewJSONConsumer(

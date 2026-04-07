@@ -43,6 +43,15 @@ func (p *capturePublisherMulti) PublishJSON(_ context.Context, topic, key string
 	return nil
 }
 
+func (p *capturePublisherMulti) PublishJSONBatch(ctx context.Context, items []sharedkafka.BatchItem) error {
+	for _, item := range items {
+		if err := p.PublishJSON(ctx, item.Topic, item.Key, item.Payload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (p *capturePublisherMulti) Close() error { return nil }
 
 func TestOrderExpirySweeperCancelsPastCloseRestingOrders(t *testing.T) {

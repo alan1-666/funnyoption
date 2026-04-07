@@ -20,7 +20,7 @@ func TestEnginePriceTimePriority(t *testing.T) {
 		Side:        model.OrderSideSell,
 		Type:        model.OrderTypeLimit,
 		TimeInForce: model.TimeInForceGTC,
-		Price:       120,
+		Price:       60,
 		Quantity:    50,
 	}
 	makerTwo := &model.Order{
@@ -31,7 +31,7 @@ func TestEnginePriceTimePriority(t *testing.T) {
 		Side:        model.OrderSideSell,
 		Type:        model.OrderTypeLimit,
 		TimeInForce: model.TimeInForceGTC,
-		Price:       110,
+		Price:       55,
 		Quantity:    30,
 	}
 	_, _ = eng.PlaceOrder(makerOne)
@@ -45,7 +45,7 @@ func TestEnginePriceTimePriority(t *testing.T) {
 		Side:        model.OrderSideBuy,
 		Type:        model.OrderTypeLimit,
 		TimeInForce: model.TimeInForceGTC,
-		Price:       120,
+		Price:       60,
 		Quantity:    60,
 	}
 	result, err := eng.PlaceOrder(taker)
@@ -55,8 +55,8 @@ func TestEnginePriceTimePriority(t *testing.T) {
 	if len(result.Trades) != 2 {
 		t.Fatalf("expected 2 trades, got %d", len(result.Trades))
 	}
-	if result.Trades[0].Price != 110 {
-		t.Fatalf("expected first trade at best ask 110, got %d", result.Trades[0].Price)
+	if result.Trades[0].Price != 55 {
+		t.Fatalf("expected first trade at best ask 55, got %d", result.Trades[0].Price)
 	}
 	if result.Trades[0].MakerOrderID != "maker-2" {
 		t.Fatalf("expected maker-2 to match first, got %s", result.Trades[0].MakerOrderID)
@@ -79,7 +79,7 @@ func TestEngineIOCResidualCancelled(t *testing.T) {
 		Side:        model.OrderSideSell,
 		Type:        model.OrderTypeLimit,
 		TimeInForce: model.TimeInForceGTC,
-		Price:       100,
+		Price:       50,
 		Quantity:    20,
 	})
 
@@ -91,7 +91,7 @@ func TestEngineIOCResidualCancelled(t *testing.T) {
 		Side:        model.OrderSideBuy,
 		Type:        model.OrderTypeLimit,
 		TimeInForce: model.TimeInForceIOC,
-		Price:       100,
+		Price:       50,
 		Quantity:    50,
 	}
 	result, err := eng.PlaceOrder(order)

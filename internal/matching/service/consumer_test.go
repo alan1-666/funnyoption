@@ -41,6 +41,15 @@ func (p *capturePublisher) PublishJSON(_ context.Context, topic, key string, pay
 	return nil
 }
 
+func (p *capturePublisher) PublishJSONBatch(ctx context.Context, items []sharedkafka.BatchItem) error {
+	for _, item := range items {
+		if err := p.PublishJSON(ctx, item.Topic, item.Key, item.Payload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (p *capturePublisher) Close() error { return nil }
 
 func TestHandleOrderCommandRejectsNonTradableMarket(t *testing.T) {

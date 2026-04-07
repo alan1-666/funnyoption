@@ -86,34 +86,31 @@ func (p *CommandProcessor) HandleOrderCommand(ctx context.Context, msg sharedkaf
 		}
 	}
 
-	if err := p.publishOrderEvent(ctx, command, result.Order); err != nil {
+	batch := make([]sharedkafka.BatchItem, 0, 4+len(result.Affected)+len(result.Trades)*4)
+	if item, err := p.buildOrderEvent(command, result.Order); err != nil {
 		return err
+	} else if item != nil {
+		batch = append(batch, *item)
 	}
 	for _, affected := range result.Affected {
-		if err := p.publishPassiveOrderEvent(ctx, command.TraceID, command.CollateralAsset, affected); err != nil {
+		if item, err := p.buildPassiveOrderEvent(command.TraceID, command.CollateralAsset, affected); err != nil {
 			return err
+		} else if item != nil {
+			batch = append(batch, *item)
 		}
 	}
 	for _, trade := range result.Trades {
-		if err := p.publishTradeEvent(ctx, command.TraceID, command.CollateralAsset, trade); err != nil {
-			return err
-		}
-		if err := p.publishPositionEvents(ctx, command.TraceID, trade); err != nil {
-			return err
-		}
-		if err := p.publishCandleEvent(ctx, command.TraceID, trade); err != nil {
-			return err
-		}
+		batch = append(batch, p.buildTradeEvent(command.TraceID, command.CollateralAsset, trade))
+		batch = append(batch, p.buildPositionEvents(command.TraceID, trade)...)
+		batch = append(batch, p.buildCandleEvent(command.TraceID, trade))
 	}
-	if err := p.publishQuoteEvents(ctx, command.TraceID, result); err != nil {
-		return err
-	}
-	return nil
+	batch = append(batch, p.buildQuoteEvents(command.TraceID, result)...)
+	return p.publisher.PublishJSONBatch(ctx, batch)
 }
 
-func (p *CommandProcessor) publishOrderEvent(ctx context.Context, command sharedkafka.OrderCommand, order *model.Order) error {
+func (p *CommandProcessor) buildOrderEvent(command sharedkafka.OrderCommand, order *model.Order) (*sharedkafka.BatchItem, error) {
 	if order == nil {
-		return nil
+		return nil, nil
 	}
 	event := sharedkafka.OrderEvent{
 		EventID:           sharedkafka.NewID("evt_order"),
@@ -139,12 +136,20 @@ func (p *CommandProcessor) publishOrderEvent(ctx context.Context, command shared
 		RemainingQuantity: order.RemainingQuantity(),
 		OccurredAtMillis:  time.Now().UnixMilli(),
 	}
-	return p.publisher.PublishJSON(ctx, p.topics.OrderEvent, order.BookKey(), event)
+	return &sharedkafka.BatchItem{Topic: p.topics.OrderEvent, Key: order.BookKey(), Payload: event}, nil
 }
 
-func (p *CommandProcessor) publishPassiveOrderEvent(ctx context.Context, traceID, collateralAsset string, order *model.Order) error {
+func (p *CommandProcessor) publishOrderEvent(ctx context.Context, command sharedkafka.OrderCommand, order *model.Order) error {
+	item, err := p.buildOrderEvent(command, order)
+	if err != nil || item == nil {
+		return err
+	}
+	return p.publisher.PublishJSON(ctx, item.Topic, item.Key, item.Payload)
+}
+
+func (p *CommandProcessor) buildPassiveOrderEvent(traceID, collateralAsset string, order *model.Order) (*sharedkafka.BatchItem, error) {
 	if order == nil {
-		return nil
+		return nil, nil
 	}
 	event := sharedkafka.OrderEvent{
 		EventID:           sharedkafka.NewID("evt_order"),
@@ -166,10 +171,10 @@ func (p *CommandProcessor) publishPassiveOrderEvent(ctx context.Context, traceID
 		RemainingQuantity: order.RemainingQuantity(),
 		OccurredAtMillis:  time.Now().UnixMilli(),
 	}
-	return p.publisher.PublishJSON(ctx, p.topics.OrderEvent, order.BookKey(), event)
+	return &sharedkafka.BatchItem{Topic: p.topics.OrderEvent, Key: order.BookKey(), Payload: event}, nil
 }
 
-func (p *CommandProcessor) publishTradeEvent(ctx context.Context, traceID, collateralAsset string, trade model.Trade) error {
+func (p *CommandProcessor) buildTradeEvent(traceID, collateralAsset string, trade model.Trade) sharedkafka.BatchItem {
 	event := sharedkafka.TradeMatchedEvent{
 		EventID:          sharedkafka.NewID("evt_trade"),
 		Sequence:         trade.Sequence,
@@ -188,13 +193,13 @@ func (p *CommandProcessor) publishTradeEvent(ctx context.Context, traceID, colla
 		MakerSide:        string(trade.MakerSide),
 		OccurredAtMillis: trade.MatchedAtMillis,
 	}
-	return p.publisher.PublishJSON(ctx, p.topics.TradeMatched, trade.BookKey, event)
+	return sharedkafka.BatchItem{Topic: p.topics.TradeMatched, Key: trade.BookKey, Payload: event}
 }
 
-func (p *CommandProcessor) publishPositionEvents(ctx context.Context, traceID string, trade model.Trade) error {
+func (p *CommandProcessor) buildPositionEvents(traceID string, trade model.Trade) []sharedkafka.BatchItem {
 	buyerUserID, sellerUserID := positionSides(trade)
-	events := []sharedkafka.PositionChangedEvent{
-		{
+	return []sharedkafka.BatchItem{
+		{Topic: p.topics.PositionChange, Key: trade.BookKey, Payload: sharedkafka.PositionChangedEvent{
 			EventID:          sharedkafka.NewID("evt_pos"),
 			TraceID:          traceID,
 			SourceTradeID:    trade.TakerOrderID + ":" + trade.MakerOrderID,
@@ -204,8 +209,8 @@ func (p *CommandProcessor) publishPositionEvents(ctx context.Context, traceID st
 			PositionAsset:    assets.PositionAsset(trade.MarketID, trade.Outcome),
 			DeltaQuantity:    trade.Quantity,
 			OccurredAtMillis: trade.MatchedAtMillis,
-		},
-		{
+		}},
+		{Topic: p.topics.PositionChange, Key: trade.BookKey, Payload: sharedkafka.PositionChangedEvent{
 			EventID:          sharedkafka.NewID("evt_pos"),
 			TraceID:          traceID,
 			SourceTradeID:    trade.TakerOrderID + ":" + trade.MakerOrderID,
@@ -215,15 +220,8 @@ func (p *CommandProcessor) publishPositionEvents(ctx context.Context, traceID st
 			PositionAsset:    assets.PositionAsset(trade.MarketID, trade.Outcome),
 			DeltaQuantity:    -trade.Quantity,
 			OccurredAtMillis: trade.MatchedAtMillis,
-		},
+		}},
 	}
-
-	for _, event := range events {
-		if err := p.publisher.PublishJSON(ctx, p.topics.PositionChange, trade.BookKey, event); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func positionSides(trade model.Trade) (buyerUserID, sellerUserID int64) {
@@ -233,7 +231,7 @@ func positionSides(trade model.Trade) (buyerUserID, sellerUserID int64) {
 	return trade.MakerUserID, trade.TakerUserID
 }
 
-func (p *CommandProcessor) publishQuoteEvents(ctx context.Context, traceID string, result engine.Result) error {
+func (p *CommandProcessor) buildQuoteEvents(traceID string, result engine.Result) []sharedkafka.BatchItem {
 	depth := sharedkafka.QuoteDepthEvent{
 		EventID:          sharedkafka.NewID("evt_depth"),
 		TraceID:          traceID,
@@ -249,9 +247,6 @@ func (p *CommandProcessor) publishQuoteEvents(ctx context.Context, traceID strin
 	}
 	for _, level := range result.Book.Asks {
 		depth.Asks = append(depth.Asks, sharedkafka.QuoteLevel{Price: level.Price, Quantity: level.Quantity})
-	}
-	if err := p.publisher.PublishJSON(ctx, p.topics.QuoteDepth, result.Book.Key, depth); err != nil {
-		return err
 	}
 
 	ticker := sharedkafka.QuoteTickerEvent{
@@ -269,14 +264,22 @@ func (p *CommandProcessor) publishQuoteEvents(ctx context.Context, traceID strin
 		ticker.LastPrice = lastTrade.Price
 		ticker.LastQuantity = lastTrade.Quantity
 	}
-	return p.publisher.PublishJSON(ctx, p.topics.QuoteTicker, result.Book.Key, ticker)
+	return []sharedkafka.BatchItem{
+		{Topic: p.topics.QuoteDepth, Key: result.Book.Key, Payload: depth},
+		{Topic: p.topics.QuoteTicker, Key: result.Book.Key, Payload: ticker},
+	}
 }
 
-func (p *CommandProcessor) publishCandleEvent(ctx context.Context, traceID string, trade model.Trade) error {
+func (p *CommandProcessor) publishQuoteEvents(ctx context.Context, traceID string, result engine.Result) error {
+	items := p.buildQuoteEvents(traceID, result)
+	return p.publisher.PublishJSONBatch(ctx, items)
+}
+
+func (p *CommandProcessor) buildCandleEvent(traceID string, trade model.Trade) sharedkafka.BatchItem {
 	if p.candles == nil {
-		return nil
+		return sharedkafka.BatchItem{Topic: p.topics.QuoteCandle, Key: trade.BookKey, Payload: sharedkafka.QuoteCandleEvent{}}
 	}
 	event := p.candles.ApplyTrade(trade)
 	event.TraceID = traceID
-	return p.publisher.PublishJSON(ctx, p.topics.QuoteCandle, trade.BookKey, event)
+	return sharedkafka.BatchItem{Topic: p.topics.QuoteCandle, Key: trade.BookKey, Payload: event}
 }

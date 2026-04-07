@@ -75,7 +75,7 @@ func (p *Processor) HandleMarketEvent(ctx context.Context, msg sharedkafka.Messa
 		return err
 	}
 	if !freshResolve {
-		return nil
+		return p.settleWinningPositions(ctx, event.MarketID, resolvedOutcome)
 	}
 	cancelledOrders, err := p.store.CancelActiveOrders(ctx, event.MarketID, "MARKET_RESOLVED")
 	if err != nil {
@@ -110,7 +110,11 @@ func (p *Processor) HandleMarketEvent(ctx context.Context, msg sharedkafka.Messa
 			return err
 		}
 	}
-	positions, err := p.store.WinningPositions(ctx, event.MarketID, resolvedOutcome)
+	return p.settleWinningPositions(ctx, event.MarketID, resolvedOutcome)
+}
+
+func (p *Processor) settleWinningPositions(ctx context.Context, marketID int64, resolvedOutcome string) error {
+	positions, err := p.store.WinningPositions(ctx, marketID, resolvedOutcome)
 	if err != nil {
 		return err
 	}

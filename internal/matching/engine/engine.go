@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -51,18 +52,38 @@ type cancelEnvelope struct {
 type Engine struct {
 	logger   *slog.Logger
 	books    map[string]*model.OrderBook
-	sequence uint64
+	sequence *uint64
+}
+
+type bookWorker struct {
+	bookKey string
+	engine  *Engine
+	ch      chan asyncRequest
 }
 
 type AsyncEngine struct {
-	engine   *Engine
-	requests chan asyncRequest
+	logger   *slog.Logger
+	sequence uint64
+	mu       sync.RWMutex
+	workers  map[string]*bookWorker
+	buffer   int
+	ctx      context.Context
 }
 
 func New(logger *slog.Logger) *Engine {
+	seq := uint64(0)
 	return &Engine{
-		logger: logger,
-		books:  make(map[string]*model.OrderBook),
+		logger:   logger,
+		books:    make(map[string]*model.OrderBook),
+		sequence: &seq,
+	}
+}
+
+func newEngineWithSequence(logger *slog.Logger, sequence *uint64) *Engine {
+	return &Engine{
+		logger:   logger,
+		books:    make(map[string]*model.OrderBook),
+		sequence: sequence,
 	}
 }
 
@@ -71,15 +92,20 @@ func NewAsync(logger *slog.Logger, buffer int) *AsyncEngine {
 		buffer = 1024
 	}
 	return &AsyncEngine{
-		engine:   New(logger),
-		requests: make(chan asyncRequest, buffer),
+		logger:  logger,
+		workers: make(map[string]*bookWorker),
+		buffer:  buffer,
 	}
 }
 
 func (e *AsyncEngine) Restore(sequence uint64, orders []*model.Order) error {
-	atomic.StoreUint64(&e.engine.sequence, sequence)
+	atomic.StoreUint64(&e.sequence, sequence)
 	for _, order := range orders {
-		if err := e.engine.RestoreOrder(order); err != nil {
+		if order == nil {
+			continue
+		}
+		w := e.getOrCreateWorkerLocked(order.BookKey())
+		if err := w.engine.RestoreOrder(order); err != nil {
 			return err
 		}
 	}
@@ -87,20 +113,28 @@ func (e *AsyncEngine) Restore(sequence uint64, orders []*model.Order) error {
 }
 
 func (e *AsyncEngine) Start(ctx context.Context) {
+	e.ctx = ctx
+	e.mu.RLock()
+	for _, w := range e.workers {
+		startWorker(ctx, w)
+	}
+	e.mu.RUnlock()
+	e.logger.Info("matching sharded engine started", "workers", len(e.workers), "buffer_per_book", e.buffer)
+}
+
+func startWorker(ctx context.Context, w *bookWorker) {
 	go func() {
-		e.engine.logger.Info("matching event loop started", "buffer", cap(e.requests))
 		for {
 			select {
 			case <-ctx.Done():
-				e.engine.logger.Info("matching event loop stopped")
 				return
-			case req := <-e.requests:
+			case req := <-w.ch:
 				switch {
 				case req.place != nil:
-					result, err := e.engine.PlaceOrder(req.place.order)
+					result, err := w.engine.PlaceOrder(req.place.order)
 					req.place.reply <- resultEnvelope{result: result, err: err}
 				case req.cancel != nil:
-					result, err := e.engine.CancelOrders(req.cancel.orders, req.cancel.reason)
+					result, err := w.engine.CancelOrders(req.cancel.orders, req.cancel.reason)
 					req.cancel.reply <- cancelEnvelope{result: result, err: err}
 				}
 			}
@@ -108,14 +142,46 @@ func (e *AsyncEngine) Start(ctx context.Context) {
 	}()
 }
 
+func (e *AsyncEngine) getOrCreateWorkerLocked(bookKey string) *bookWorker {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.getOrCreateWorkerUnsafe(bookKey)
+}
+
+func (e *AsyncEngine) getOrCreateWorkerUnsafe(bookKey string) *bookWorker {
+	if w, ok := e.workers[bookKey]; ok {
+		return w
+	}
+	eng := newEngineWithSequence(e.logger, &e.sequence)
+	w := &bookWorker{
+		bookKey: bookKey,
+		engine:  eng,
+		ch:      make(chan asyncRequest, e.buffer),
+	}
+	e.workers[bookKey] = w
+	if e.ctx != nil {
+		startWorker(e.ctx, w)
+	}
+	return w
+}
+
 func (e *AsyncEngine) Submit(ctx context.Context, order *model.Order) (Result, error) {
+	if order == nil {
+		return Result{}, fmt.Errorf("order is nil")
+	}
+	bookKey := order.BookKey()
+
+	e.mu.Lock()
+	w := e.getOrCreateWorkerUnsafe(bookKey)
+	e.mu.Unlock()
+
 	reply := make(chan resultEnvelope, 1)
 	request := asyncRequest{place: &placeOrderRequest{order: order, reply: reply}}
 
 	select {
 	case <-ctx.Done():
 		return Result{}, ctx.Err()
-	case e.requests <- request:
+	case w.ch <- request:
 	}
 
 	select {
@@ -127,25 +193,75 @@ func (e *AsyncEngine) Submit(ctx context.Context, order *model.Order) (Result, e
 }
 
 func (e *AsyncEngine) CancelOrders(ctx context.Context, orders []*model.Order, reason model.CancelReason) (CancelResult, error) {
-	reply := make(chan cancelEnvelope, 1)
-	request := asyncRequest{cancel: &cancelOrdersRequest{orders: orders, reason: reason, reply: reply}}
-
-	select {
-	case <-ctx.Done():
-		return CancelResult{}, ctx.Err()
-	case e.requests <- request:
+	grouped := make(map[string][]*model.Order)
+	for _, o := range orders {
+		if o == nil {
+			continue
+		}
+		key := o.BookKey()
+		grouped[key] = append(grouped[key], o)
+	}
+	if len(grouped) == 0 {
+		return CancelResult{}, nil
 	}
 
-	select {
-	case <-ctx.Done():
-		return CancelResult{}, ctx.Err()
-	case resp := <-reply:
-		return resp.result, resp.err
+	type fanoutResult struct {
+		result CancelResult
+		err    error
 	}
+
+	e.mu.RLock()
+	results := make(chan fanoutResult, len(grouped))
+	sent := 0
+	for bookKey, bookOrders := range grouped {
+		w, ok := e.workers[bookKey]
+		if !ok {
+			continue
+		}
+		sent++
+		reply := make(chan cancelEnvelope, 1)
+		request := asyncRequest{cancel: &cancelOrdersRequest{orders: bookOrders, reason: reason, reply: reply}}
+
+		go func(w *bookWorker, reply chan cancelEnvelope) {
+			select {
+			case <-ctx.Done():
+				results <- fanoutResult{err: ctx.Err()}
+			case w.ch <- request:
+				select {
+				case <-ctx.Done():
+					results <- fanoutResult{err: ctx.Err()}
+				case resp := <-reply:
+					results <- fanoutResult{result: resp.result, err: resp.err}
+				}
+			}
+		}(w, reply)
+	}
+	e.mu.RUnlock()
+
+	merged := CancelResult{}
+	for i := 0; i < sent; i++ {
+		fr := <-results
+		if fr.err != nil {
+			return CancelResult{}, fr.err
+		}
+		merged.Orders = append(merged.Orders, fr.result.Orders...)
+		merged.Books = append(merged.Books, fr.result.Books...)
+	}
+	return merged, nil
 }
 
 func (e *AsyncEngine) BookCount() int {
-	return len(e.engine.books)
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	count := 0
+	for _, w := range e.workers {
+		for _, book := range w.engine.books {
+			if len(book.OrderMap) > 0 {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 func (e *Engine) RestoreOrder(order *model.Order) error {
@@ -316,6 +432,10 @@ func (e *Engine) match(order *model.Order, book *model.OrderBook) ([]model.Trade
 				remaining = append(remaining, maker)
 				continue
 			}
+			if order.UserID == maker.UserID {
+				remaining = append(remaining, maker)
+				continue
+			}
 			tradeQty := min(order.RemainingQuantity(), maker.RemainingQuantity())
 			if tradeQty <= 0 {
 				remaining = append(remaining, maker)
@@ -325,7 +445,7 @@ func (e *Engine) match(order *model.Order, book *model.OrderBook) ([]model.Trade
 			order.ApplyFill(tradeQty)
 			maker.ApplyFill(tradeQty)
 			trade := model.Trade{
-				Sequence:        atomic.AddUint64(&e.sequence, 1),
+				Sequence:        atomic.AddUint64(e.sequence, 1),
 				MarketID:        order.MarketID,
 				Outcome:         order.Outcome,
 				BookKey:         order.BookKey(),

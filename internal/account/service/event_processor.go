@@ -142,12 +142,24 @@ func (p *EventProcessor) HandleTradeMatched(ctx context.Context, msg sharedkafka
 	}
 
 	if receiverUserID > 0 {
-		if err := p.book.CreditAvailable(receiverUserID, collateralAsset(event.CollateralAsset), notional); err != nil {
+		if _, _, err := p.book.CreditAvailableWithRef(CreditRequest{
+			UserID:  receiverUserID,
+			Asset:   collateralAsset(event.CollateralAsset),
+			Amount:  notional,
+			RefType: "TRADE_COLLATERAL",
+			RefID:   event.EventID,
+		}); err != nil {
 			return err
 		}
 	}
 	if buyerUserID > 0 {
-		if err := p.book.CreditAvailable(buyerUserID, assets.PositionAsset(event.MarketID, event.Outcome), event.Quantity); err != nil {
+		if _, _, err := p.book.CreditAvailableWithRef(CreditRequest{
+			UserID:  buyerUserID,
+			Asset:   assets.PositionAsset(event.MarketID, event.Outcome),
+			Amount:  event.Quantity,
+			RefType: "TRADE_POSITION",
+			RefID:   event.EventID,
+		}); err != nil {
 			return err
 		}
 	}
@@ -170,12 +182,24 @@ func (p *EventProcessor) HandleSettlementCompleted(ctx context.Context, msg shar
 	}
 
 	if event.SettledQuantity > 0 {
-		if err := p.book.DebitAvailable(event.UserID, event.PositionAsset, event.SettledQuantity); err != nil {
+		if _, _, err := p.book.DebitAvailableWithRef(DebitRequest{
+			UserID:  event.UserID,
+			Asset:   event.PositionAsset,
+			Amount:  event.SettledQuantity,
+			RefType: "SETTLEMENT_DEBIT",
+			RefID:   event.EventID,
+		}); err != nil {
 			return err
 		}
 	}
 	if event.PayoutAmount > 0 {
-		if err := p.book.CreditAvailable(event.UserID, collateralAsset(event.PayoutAsset), event.PayoutAmount); err != nil {
+		if _, _, err := p.book.CreditAvailableWithRef(CreditRequest{
+			UserID:  event.UserID,
+			Asset:   collateralAsset(event.PayoutAsset),
+			Amount:  event.PayoutAmount,
+			RefType: "SETTLEMENT_CREDIT",
+			RefID:   event.EventID,
+		}); err != nil {
 			return err
 		}
 	}

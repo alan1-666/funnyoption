@@ -130,6 +130,61 @@ func (s *SQLStore) UpsertFreeze(ctx context.Context, record model.FreezeRecord) 
 	return err
 }
 
+func (s *SQLStore) UpsertBalanceAndFreeze(ctx context.Context, balance model.Balance, freeze model.FreezeRecord) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO account_balances (user_id, asset, available, frozen, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT)
+		ON CONFLICT (user_id, asset) DO UPDATE
+		SET available = EXCLUDED.available,
+			frozen = EXCLUDED.frozen,
+			updated_at = EXCLUDED.updated_at
+	`, balance.UserID, balance.Asset, balance.Available, balance.Frozen); err != nil {
+		return err
+	}
+
+	originalAmount := freeze.OriginalAmount
+	if originalAmount <= 0 {
+		originalAmount = freeze.Amount
+	}
+	status := "ACTIVE"
+	if freeze.Released {
+		status = "RELEASED"
+	}
+	if freeze.Consumed {
+		status = "CONSUMED"
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO freeze_records (
+			freeze_id, user_id, asset, ref_type, ref_id,
+			original_amount, remaining_amount, status, created_at, updated_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT)
+		ON CONFLICT (freeze_id) DO UPDATE
+		SET user_id = EXCLUDED.user_id,
+			asset = EXCLUDED.asset,
+			ref_type = EXCLUDED.ref_type,
+			ref_id = EXCLUDED.ref_id,
+			original_amount = CASE
+				WHEN freeze_records.original_amount > 0 THEN freeze_records.original_amount
+				ELSE EXCLUDED.original_amount
+			END,
+			remaining_amount = EXCLUDED.remaining_amount,
+			status = EXCLUDED.status,
+			updated_at = EXCLUDED.updated_at
+	`, freeze.FreezeID, freeze.UserID, freeze.Asset, freeze.RefType, freeze.RefID, originalAmount, freeze.Amount, status); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
 func (s *SQLStore) LoadOrderState(ctx context.Context, orderID string) (*OrderState, error) {
 	var state OrderState
 	err := s.db.QueryRowContext(ctx, `

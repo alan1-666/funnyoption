@@ -32,7 +32,9 @@ type sqlQueryer interface {
 }
 
 type Store struct {
-	db *sql.DB
+	db             *sql.DB
+	cachedState    *shadowState
+	cachedStateRoot string
 }
 
 type acceptedWithdrawalClaimPayload struct {
@@ -46,6 +48,30 @@ type acceptedWithdrawalClaimPayload struct {
 
 func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
+}
+
+func (s *Store) warmCacheFromFullReplay(batches []StoredBatch, roots RootSet) {
+	state := shadowState{
+		balances:      make(map[string]balanceLeaf),
+		nonces:        make(map[string]nonceLeaf),
+		openOrders:    make(map[string]orderLeaf),
+		positions:     make(map[string]positionLeaf),
+		marketFunding: make(map[string]marketFundingLeaf),
+		withdrawals:   make(map[string]withdrawalLeaf),
+	}
+	for _, batch := range batches {
+		input, err := DecodeBatchInput(batch.InputData)
+		if err != nil {
+			return
+		}
+		for _, entry := range input.Entries {
+			if err := state.apply(entry); err != nil {
+				return
+			}
+		}
+	}
+	s.cachedState = &state
+	s.cachedStateRoot = roots.StateRoot
 }
 
 func (s *Store) AppendEntries(ctx context.Context, entries []JournalAppend) error {
@@ -142,22 +168,37 @@ func (s *Store) MaterializeNextBatch(ctx context.Context, limit int) (StoredBatc
 		return StoredBatch{}, err
 	}
 
-	existing, err := s.ListBatches(ctx)
-	if err != nil {
-		return StoredBatch{}, err
-	}
-	replayBatches := append(existing, StoredBatch{
+	newBatch := StoredBatch{
 		EncodingVersion: BatchEncodingVersion,
 		InputData:       inputData,
 		InputHash:       inputHash,
 		PrevStateRoot:   ZeroStateRoot(),
-	})
-	if hasLast {
-		replayBatches[len(replayBatches)-1].PrevStateRoot = lastBatch.StateRoot
 	}
-	roots, err := ReplayStoredBatches(replayBatches)
-	if err != nil {
-		return StoredBatch{}, err
+	if hasLast {
+		newBatch.PrevStateRoot = lastBatch.StateRoot
+	}
+
+	var roots RootSet
+	if s.cachedState != nil && s.cachedStateRoot == newBatch.PrevStateRoot {
+		state := cloneShadowState(s.cachedState)
+		var err error
+		roots, err = ReplayBatchOnState(state, newBatch)
+		if err != nil {
+			return StoredBatch{}, err
+		}
+		s.cachedState = state
+		s.cachedStateRoot = roots.StateRoot
+	} else {
+		existing, err := s.ListBatches(ctx)
+		if err != nil {
+			return StoredBatch{}, err
+		}
+		replayBatches := append(existing, newBatch)
+		roots, err = ReplayStoredBatches(replayBatches)
+		if err != nil {
+			return StoredBatch{}, err
+		}
+		s.warmCacheFromFullReplay(replayBatches, roots)
 	}
 
 	batch := StoredBatch{

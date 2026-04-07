@@ -66,6 +66,15 @@ func (p *capturePublisher) PublishJSON(ctx context.Context, topic, key string, p
 	return nil
 }
 
+func (p *capturePublisher) PublishJSONBatch(ctx context.Context, items []sharedkafka.BatchItem) error {
+	for _, item := range items {
+		if err := p.PublishJSON(ctx, item.Topic, item.Key, item.Payload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (p *capturePublisher) Close() error { return nil }
 
 func TestWorkerPollOnceObservesAndPublishes(t *testing.T) {

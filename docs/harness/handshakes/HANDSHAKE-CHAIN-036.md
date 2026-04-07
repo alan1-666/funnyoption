@@ -80,11 +80,12 @@
 
 ## Blockers
 
-- the repo still lacks one operator-free frozen collateral exit
-- liability/reporting truth still lags behind accepted/frozen state
-- the current cryptographic lane still proves digest consistency more than full
-  state-transition witness semantics
+- no active blocker
+- residuals remain:
+  - unresolved-open-position emergency handling at freeze is still narrow
+  - prover/backend is still repo-local first cut, not a production proving fleet
+  - the repo is closer to `Mode B`, but not every live truth boundary is fully replaced by accepted roots
 
 ## Status
 
-- active
+- completed

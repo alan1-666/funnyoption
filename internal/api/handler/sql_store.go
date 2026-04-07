@@ -467,24 +467,22 @@ func (s *SQLStore) CreateClaimRequest(ctx context.Context, req dto.ClaimPayoutRe
 		payoutAsset  string
 		payoutAmount int64
 	)
-	acceptedVisible, err := s.acceptedReadTruthVisible(ctx)
-	if err != nil {
-		return dto.ChainTransactionResponse{}, err
-	}
 	query := `
 		SELECT market_id, payout_asset, payout_amount
-		FROM settlement_payouts
-		WHERE event_id = $1
-		  AND user_id = $2
-	`
-	if acceptedVisible {
-		query = `
-			SELECT market_id, payout_asset, payout_amount
+		FROM (
+			SELECT market_id, payout_asset, payout_amount, 0 AS truth_rank
 			FROM rollup_accepted_payouts
 			WHERE event_id = $1
 			  AND user_id = $2
-		`
-	}
+			UNION ALL
+			SELECT market_id, payout_asset, payout_amount, 1 AS truth_rank
+			FROM settlement_payouts
+			WHERE event_id = $1
+			  AND user_id = $2
+		) payout_truth
+		ORDER BY truth_rank ASC
+		LIMIT 1
+	`
 	err = s.db.QueryRowContext(ctx, query, strings.TrimSpace(req.EventID), req.UserID).Scan(&marketID, &payoutAsset, &payoutAmount)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -522,16 +520,14 @@ func (s *SQLStore) CreateClaimRequest(ctx context.Context, req dto.ClaimPayoutRe
 	if err != nil {
 		return dto.ChainTransactionResponse{}, err
 	}
-	if acceptedVisible {
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE rollup_accepted_payouts
-			SET status = 'CLAIM_PENDING',
-			    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
-			WHERE event_id = $1
-			  AND user_id = $2
-		`, strings.TrimSpace(req.EventID), req.UserID); err != nil {
-			return dto.ChainTransactionResponse{}, err
-		}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE rollup_accepted_payouts
+		SET status = 'CLAIM_PENDING',
+		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE event_id = $1
+		  AND user_id = $2
+	`, strings.TrimSpace(req.EventID), req.UserID); err != nil {
+		return dto.ChainTransactionResponse{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return dto.ChainTransactionResponse{}, err
@@ -1363,29 +1359,131 @@ func (s *SQLStore) ListTrades(ctx context.Context, req dto.ListTradesRequest) ([
 }
 
 func (s *SQLStore) ListBalances(ctx context.Context, req dto.ListBalancesRequest) ([]dto.BalanceResponse, error) {
-	acceptedVisible, err := s.acceptedReadTruthVisible(ctx)
+	useAcceptedTruth, err := s.acceptedFinancialTruthVisible(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if acceptedVisible {
+	if useAcceptedTruth {
 		return s.listAcceptedBalances(ctx, req)
 	}
+	return s.listMergedBalances(ctx, req)
+}
 
+func (s *SQLStore) ListPositions(ctx context.Context, req dto.ListPositionsRequest) ([]dto.PositionResponse, error) {
+	useAcceptedTruth, err := s.acceptedFinancialTruthVisible(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if useAcceptedTruth {
+		return s.listAcceptedPositions(ctx, req)
+	}
+	return s.listMergedPositions(ctx, req)
+}
+
+func (s *SQLStore) ListPayouts(ctx context.Context, req dto.ListPayoutsRequest) ([]dto.PayoutResponse, error) {
+	useAcceptedTruth, err := s.acceptedFinancialTruthVisible(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if useAcceptedTruth {
+		return s.listAcceptedPayouts(ctx, req)
+	}
+	return s.listMergedPayouts(ctx, req)
+}
+
+func (s *SQLStore) acceptedFinancialTruthVisible(ctx context.Context) (bool, error) {
+	frozen, err := s.rollupFrozen(ctx)
+	if err != nil {
+		return false, err
+	}
+	if frozen {
+		return true, nil
+	}
+	return s.acceptedReadTruthVisible(ctx)
+}
+
+func (s *SQLStore) acceptedReadTruthVisible(ctx context.Context) (bool, error) {
+	var visible bool
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM rollup_accepted_batches
+			LIMIT 1
+		)
+	`).Scan(&visible); err != nil {
+		return false, err
+	}
+	return visible, nil
+}
+
+func (s *SQLStore) rollupFrozen(ctx context.Context) (bool, error) {
+	var frozen bool
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COALESCE(frozen, FALSE)
+		FROM rollup_freeze_state
+		WHERE id = TRUE
+	`).Scan(&frozen)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return frozen, nil
+}
+
+func (s *SQLStore) listMergedBalances(ctx context.Context, req dto.ListBalancesRequest) ([]dto.BalanceResponse, error) {
 	var (
 		args    []any
 		filters []string
 	)
 	query := `
-		SELECT user_id, asset, available, frozen, created_at, updated_at
-		FROM account_balances
+		WITH latest_anchor AS (
+			SELECT MAX(batch_id) AS batch_id
+			FROM rollup_accepted_escape_roots
+			WHERE anchor_status = 'ANCHORED'
+		), accepted AS (
+			SELECT ab.account_id,
+			       ab.asset,
+			       CASE
+			           WHEN el.claim_status = 'CLAIMED' AND ab.asset = 'USDT' THEN 0
+			           ELSE ab.available
+			       END AS available,
+			       CASE
+			           WHEN el.claim_status = 'CLAIMED' AND ab.asset = 'USDT' THEN 0
+			           ELSE ab.frozen
+			       END AS frozen,
+			       ab.created_at,
+			       ab.updated_at,
+			       1 AS truth_rank
+			FROM rollup_accepted_balances ab
+			LEFT JOIN latest_anchor la ON TRUE
+			LEFT JOIN rollup_accepted_escape_leaves el
+			  ON el.batch_id = la.batch_id
+			 AND el.account_id = ab.account_id
+			 AND el.collateral_asset = ab.asset
+		), live AS (
+			SELECT user_id AS account_id, asset, available, frozen, created_at, updated_at, 0 AS truth_rank
+			FROM account_balances
+		), ranked AS (
+			SELECT account_id, asset, available, frozen, created_at, updated_at,
+			       ROW_NUMBER() OVER (PARTITION BY account_id, asset ORDER BY updated_at DESC, truth_rank ASC) AS rn
+			FROM (
+				SELECT * FROM live
+				UNION ALL
+				SELECT * FROM accepted
+			) candidates
+		)
+		SELECT account_id, asset, available, frozen, created_at, updated_at
+		FROM ranked
 	`
-
 	args = append(args, req.UserID)
-	filters = append(filters, fmt.Sprintf("user_id = $%d", len(args)))
+	filters = append(filters, fmt.Sprintf("account_id = $%d", len(args)))
 	if asset := normalizeOptional(req.Asset); asset != "" {
 		args = append(args, asset)
 		filters = append(filters, fmt.Sprintf("asset = $%d", len(args)))
 	}
+	filters = append(filters, "rn = 1")
 	query += " WHERE " + strings.Join(filters, " AND ")
 	args = append(args, normalizeLimit(req.Limit))
 	query += fmt.Sprintf(" ORDER BY asset ASC LIMIT $%d", len(args))
@@ -1396,40 +1494,49 @@ func (s *SQLStore) ListBalances(ctx context.Context, req dto.ListBalancesRequest
 	}
 	defer rows.Close()
 
-	var balances []dto.BalanceResponse
+	items := make([]dto.BalanceResponse, 0)
 	for rows.Next() {
 		var item dto.BalanceResponse
 		if err := rows.Scan(&item.UserID, &item.Asset, &item.Available, &item.Frozen, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
-		balances = append(balances, item)
+		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return normalizeCollectionItems(balances), nil
+	return normalizeCollectionItems(items), nil
 }
 
-func (s *SQLStore) ListPositions(ctx context.Context, req dto.ListPositionsRequest) ([]dto.PositionResponse, error) {
-	acceptedVisible, err := s.acceptedReadTruthVisible(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if acceptedVisible {
-		return s.listAcceptedPositions(ctx, req)
-	}
-
+func (s *SQLStore) listMergedPositions(ctx context.Context, req dto.ListPositionsRequest) ([]dto.PositionResponse, error) {
 	var (
 		args    []any
 		filters []string
 	)
 	query := `
-		SELECT market_id, user_id, outcome, position_asset, quantity, settled_quantity, created_at, updated_at
-		FROM positions
+		WITH accepted AS (
+			SELECT market_id, account_id, outcome, position_asset, quantity, settled_quantity, created_at, updated_at, 1 AS truth_rank
+			FROM rollup_accepted_positions
+		), live AS (
+			SELECT market_id, user_id AS account_id, outcome, position_asset, quantity, settled_quantity, created_at, updated_at, 0 AS truth_rank
+			FROM positions
+		), ranked AS (
+			SELECT market_id, account_id, outcome, position_asset, quantity, settled_quantity, created_at, updated_at,
+			       ROW_NUMBER() OVER (
+			           PARTITION BY account_id, market_id, outcome
+			           ORDER BY updated_at DESC, truth_rank ASC
+			       ) AS rn
+			FROM (
+				SELECT * FROM live
+				UNION ALL
+				SELECT * FROM accepted
+			) candidates
+		)
+		SELECT market_id, account_id, outcome, position_asset, quantity, settled_quantity, created_at, updated_at
+		FROM ranked
 	`
-
 	args = append(args, req.UserID)
-	filters = append(filters, fmt.Sprintf("user_id = $%d", len(args)))
+	filters = append(filters, fmt.Sprintf("account_id = $%d", len(args)))
 	if req.MarketID > 0 {
 		args = append(args, req.MarketID)
 		filters = append(filters, fmt.Sprintf("market_id = $%d", len(args)))
@@ -1438,6 +1545,7 @@ func (s *SQLStore) ListPositions(ctx context.Context, req dto.ListPositionsReque
 		args = append(args, outcome)
 		filters = append(filters, fmt.Sprintf("outcome = $%d", len(args)))
 	}
+	filters = append(filters, "rn = 1")
 	query += " WHERE " + strings.Join(filters, " AND ")
 	args = append(args, normalizeLimit(req.Limit))
 	query += fmt.Sprintf(" ORDER BY updated_at DESC, market_id DESC LIMIT $%d", len(args))
@@ -1448,7 +1556,7 @@ func (s *SQLStore) ListPositions(ctx context.Context, req dto.ListPositionsReque
 	}
 	defer rows.Close()
 
-	var positions []dto.PositionResponse
+	items := make([]dto.PositionResponse, 0)
 	for rows.Next() {
 		var item dto.PositionResponse
 		if err := rows.Scan(
@@ -1463,39 +1571,49 @@ func (s *SQLStore) ListPositions(ctx context.Context, req dto.ListPositionsReque
 		); err != nil {
 			return nil, err
 		}
-		positions = append(positions, item)
+		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return normalizeCollectionItems(positions), nil
+	return normalizeCollectionItems(items), nil
 }
 
-func (s *SQLStore) ListPayouts(ctx context.Context, req dto.ListPayoutsRequest) ([]dto.PayoutResponse, error) {
-	acceptedVisible, err := s.acceptedReadTruthVisible(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if acceptedVisible {
-		return s.listAcceptedPayouts(ctx, req)
-	}
-
+func (s *SQLStore) listMergedPayouts(ctx context.Context, req dto.ListPayoutsRequest) ([]dto.PayoutResponse, error) {
 	var (
 		args    []any
 		filters []string
 	)
 	query := `
+		WITH accepted AS (
+			SELECT event_id, market_id, user_id, winning_outcome, position_asset, settled_quantity,
+			       payout_asset, payout_amount, status, created_at, updated_at, 0 AS truth_rank
+			FROM rollup_accepted_payouts
+		), live AS (
+			SELECT event_id, market_id, user_id, winning_outcome, position_asset, settled_quantity,
+			       payout_asset, payout_amount, status, created_at, updated_at, 1 AS truth_rank
+			FROM settlement_payouts
+		), ranked AS (
+			SELECT event_id, market_id, user_id, winning_outcome, position_asset, settled_quantity,
+			       payout_asset, payout_amount, status, created_at, updated_at,
+			       ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY truth_rank ASC, updated_at DESC) AS rn
+			FROM (
+				SELECT * FROM accepted
+				UNION ALL
+				SELECT * FROM live
+			) candidates
+		)
 		SELECT event_id, market_id, user_id, winning_outcome, position_asset, settled_quantity,
 		       payout_asset, payout_amount, status, created_at, updated_at
-		FROM settlement_payouts
+		FROM ranked
 	`
-
 	args = append(args, req.UserID)
 	filters = append(filters, fmt.Sprintf("user_id = $%d", len(args)))
 	if req.MarketID > 0 {
 		args = append(args, req.MarketID)
 		filters = append(filters, fmt.Sprintf("market_id = $%d", len(args)))
 	}
+	filters = append(filters, "rn = 1")
 	query += " WHERE " + strings.Join(filters, " AND ")
 	args = append(args, normalizeLimit(req.Limit))
 	query += fmt.Sprintf(" ORDER BY created_at DESC, event_id DESC LIMIT $%d", len(args))
@@ -1506,7 +1624,7 @@ func (s *SQLStore) ListPayouts(ctx context.Context, req dto.ListPayoutsRequest) 
 	}
 	defer rows.Close()
 
-	var payouts []dto.PayoutResponse
+	items := make([]dto.PayoutResponse, 0)
 	for rows.Next() {
 		var item dto.PayoutResponse
 		if err := rows.Scan(
@@ -1524,20 +1642,12 @@ func (s *SQLStore) ListPayouts(ctx context.Context, req dto.ListPayoutsRequest) 
 		); err != nil {
 			return nil, err
 		}
-		payouts = append(payouts, item)
+		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return normalizeCollectionItems(payouts), nil
-}
-
-func (s *SQLStore) acceptedReadTruthVisible(ctx context.Context) (bool, error) {
-	// Accepted read truth is not yet a complete snapshot of all user
-	// balances; it only contains entries from replayed rollup batches.
-	// Keep using account_balances as the primary source until the
-	// replay logic covers every account reliably.
-	return false, nil
+	return normalizeCollectionItems(items), nil
 }
 
 func (s *SQLStore) listAcceptedBalances(ctx context.Context, req dto.ListBalancesRequest) ([]dto.BalanceResponse, error) {
@@ -1833,11 +1943,11 @@ func (s *SQLStore) ListLedgerPostings(ctx context.Context, entryID string) ([]dt
 }
 
 func (s *SQLStore) BuildLiabilityReport(ctx context.Context) ([]dto.LiabilityReportLine, error) {
-	acceptedVisible, err := s.acceptedReadTruthVisible(ctx)
+	useAcceptedTruth, err := s.acceptedFinancialTruthVisible(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if acceptedVisible {
+	if useAcceptedTruth {
 		return s.buildAcceptedLiabilityReport(ctx)
 	}
 
@@ -2456,7 +2566,7 @@ func (s *SQLStore) loadMarketRuntime(ctx context.Context, marketIDs []int64) (ma
 		return nil, err
 	}
 
-	acceptedVisible, err := s.acceptedReadTruthVisible(ctx)
+	useAcceptedTruth, err := s.acceptedFinancialTruthVisible(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2479,7 +2589,7 @@ func (s *SQLStore) loadMarketRuntime(ctx context.Context, marketIDs []int64) (ma
 		  AND sp.market_id = ANY($1)
 		GROUP BY sp.market_id
 	`
-	if acceptedVisible {
+	if useAcceptedTruth {
 		payoutQuery = `
 			SELECT market_id,
 			       COUNT(*) AS payout_count,

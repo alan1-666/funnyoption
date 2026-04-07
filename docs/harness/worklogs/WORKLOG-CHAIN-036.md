@@ -31,3 +31,56 @@
   - implement accepted escape collateral roots and frozen Merkle-proof claims
   - then widen accepted/frozen truth
   - then upgrade the proving lane to consume state-transition witness material
+
+### 2026-04-07 18:00 CST
+
+- changed:
+  - accepted/frozen truth:
+    - `internal/api/handler/sql_store.go`
+    - `internal/api/handler/sql_store_accepted_runtime_test.go`
+    - accepted financial read truth is now visible once accepted batches exist,
+      not only after freeze
+  - local full-flow:
+    - `cmd/local-lifecycle/main.go`
+    - `cmd/local-lifecycle/trading_key_oracle_flow.go`
+    - the default trading-key oracle flow now reaches:
+      - accepted batch
+      - anchored escape root
+      - forced withdrawal
+      - freeze
+      - Merkle-proof escape collateral claim
+  - proving / accepted replay:
+    - `internal/rollup/transition_witness.go`
+    - `internal/rollup/verifier_contract.go`
+    - `internal/rollup/groth16_lane.go`
+    - `contracts/src/FunnyRollupVerifier.sol`
+    - `contracts/src/FunnyRollupGroth16Backend.sol`
+    - preferred lane now binds state-transition witness material instead of only
+      outer digest equality
+  - accepted leaf rematerialization:
+    - `internal/rollup/store.go`
+    - `internal/rollup/accepted_test.go`
+    - accepted escape / withdrawal leaves now preserve existing claim runtime
+      state across replay / restart instead of resetting `CLAIMED` rows back to
+      `CLAIMABLE`
+- validated:
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/rollup ./internal/chain/service ./internal/api/handler ./internal/api ./cmd/local-lifecycle -timeout=20m`
+  - `forge test --offline --match-path contracts/test/FunnyRollupCore.t.sol`
+  - `git diff --check`
+  - fresh local dev flow:
+    - `./scripts/dev-down.sh`
+    - `touch .run/dev/local-chain-fresh-start`
+    - `FUNNYOPTION_LOCAL_CHAIN_FORCED_WITHDRAWAL_GRACE_PERIOD=2 ./scripts/dev-up.sh`
+    - `GOCACHE=/tmp/funnyoption-gocache go run ./cmd/local-lifecycle --flow trading-key-oracle -timeout=5m`
+  - post-flow evidence:
+    - accepted batch count reached `2`
+    - `/api/v1/balances` for buyer returned `available=0`
+    - `/api/v1/rollup/escape-collateral` returned batch-2 claim with
+      `claim_status=CLAIMED`
+    - `rollup_accepted_escape_leaves` kept batch-2 buyer leaf at `CLAIMED`
+      after the flow completed
+- residuals:
+  - unresolved-open-position emergency handling at freeze is still narrow
+  - prover/backend is still repo-local first cut, not a production proving fleet
+  - the repo is materially closer to `Mode B`, but not every live truth
+    boundary is yet fully replaced by accepted roots

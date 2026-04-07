@@ -52,11 +52,12 @@ func main() {
 		fatal(fmt.Errorf("batch-encoding-hash, auth-proof-hash, and verifier-gate-hash are required unless -contract is set"))
 	}
 
-	artifact, err := rollup.BuildFixedGroth16Artifact(rollup.SolidityVerifierGateContext{
+	context := rollup.SolidityVerifierGateContext{
 		BatchEncodingHash: *batchEncodingHash,
 		AuthProofHash:     *authProofHash,
 		VerifierGateHash:  *verifierGateHash,
-	})
+	}
+	artifact, err := rollup.BuildFixedGroth16Artifact(context, rollup.BuildDeterministicStateTransitionWitnessMaterial(context))
 	if err != nil {
 		fatal(err)
 	}

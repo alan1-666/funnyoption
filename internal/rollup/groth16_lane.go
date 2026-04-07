@@ -30,10 +30,12 @@ const (
 	groth16BackendWrapperContractSource = `
 
 contract FunnyRollupGroth16Backend is Verifier {
-    function verifyTupleProof(
+    function verifyTupleProofWithCommitments(
         uint256[2] calldata a,
         uint256[2][2] calldata b,
         uint256[2] calldata c,
+        uint256[2] calldata commitments,
+        uint256[2] calldata commitmentPok,
         uint256[8] calldata input
     ) external view returns (bool) {
         uint256[8] memory proof;
@@ -46,8 +48,6 @@ contract FunnyRollupGroth16Backend is Verifier {
         proof[6] = c[0];
         proof[7] = c[1];
 
-        uint256[2] memory commitments;
-        uint256[2] memory commitmentPok;
         try this.verifyProof(proof, commitments, commitmentPok, input) {
             return true;
         } catch {
@@ -70,29 +70,14 @@ type fixedGroth16StateTransitionCircuit struct {
 	AuthProofHash     [32]uints.U8
 	VerifierGateHash  [32]uints.U8
 
-	BatchID       frontend.Variable
-	FirstSequence frontend.Variable
-	LastSequence  frontend.Variable
-	EntryCount    frontend.Variable
-
-	BatchDataHash        [32]uints.U8
-	PrevStateRoot        [32]uints.U8
-	BalancesRoot         [32]uints.U8
-	OrdersRoot           [32]uints.U8
-	PositionsFundingRoot [32]uints.U8
-	WithdrawalsRoot      [32]uints.U8
-	NextStateRoot        [32]uints.U8
-	ConservationHash     [32]uints.U8
+	TransitionContextHash       [32]uints.U8
+	StateTransitionMaterialHash [32]uints.U8
 }
 
 func (c *fixedGroth16StateTransitionCircuit) Define(api frontend.API) error {
 	byteAPI, err := uints.NewBytes(api)
 	if err != nil {
 		return fmt.Errorf("new bytes api: %w", err)
-	}
-	uint64API, err := uints.NewBinaryField[uints.U64](api)
-	if err != nil {
-		return fmt.Errorf("new uint64 api: %w", err)
 	}
 	hasher, err := sha2.New(api)
 	if err != nil {
@@ -106,21 +91,9 @@ func (c *fixedGroth16StateTransitionCircuit) Define(api frontend.API) error {
 	api.AssertIsEqual(c.PublicInputs[4], packBytes128MSB(api, byteAPI, c.VerifierGateHash[:16]))
 	api.AssertIsEqual(c.PublicInputs[5], packBytes128MSB(api, byteAPI, c.VerifierGateHash[16:]))
 
-	abiEncoded := make([]uints.U8, 0, 32*14)
-	abiEncoded = append(abiEncoded, c.BatchEncodingHash[:]...)
-	abiEncoded = append(abiEncoded, abiUint64ToBytes32(uint64API, c.BatchID)...)
-	abiEncoded = append(abiEncoded, abiUint64ToBytes32(uint64API, c.FirstSequence)...)
-	abiEncoded = append(abiEncoded, abiUint64ToBytes32(uint64API, c.LastSequence)...)
-	abiEncoded = append(abiEncoded, abiUint64ToBytes32(uint64API, c.EntryCount)...)
-	abiEncoded = append(abiEncoded, c.BatchDataHash[:]...)
-	abiEncoded = append(abiEncoded, c.PrevStateRoot[:]...)
-	abiEncoded = append(abiEncoded, c.BalancesRoot[:]...)
-	abiEncoded = append(abiEncoded, c.OrdersRoot[:]...)
-	abiEncoded = append(abiEncoded, c.PositionsFundingRoot[:]...)
-	abiEncoded = append(abiEncoded, c.WithdrawalsRoot[:]...)
-	abiEncoded = append(abiEncoded, c.NextStateRoot[:]...)
-	abiEncoded = append(abiEncoded, c.ConservationHash[:]...)
-	abiEncoded = append(abiEncoded, c.AuthProofHash[:]...)
+	abiEncoded := make([]uints.U8, 0, 64)
+	abiEncoded = append(abiEncoded, c.TransitionContextHash[:]...)
+	abiEncoded = append(abiEncoded, c.StateTransitionMaterialHash[:]...)
 
 	hasher.Write(abiEncoded)
 	digest := hasher.Sum()
@@ -139,19 +112,21 @@ type fixedGroth16Lane struct {
 }
 
 type FixedGroth16StateTransitionWitness struct {
-	BatchEncodingHash   string                       `json:"batch_encoding_hash"`
-	PublicInputs        SolidityVerifierPublicInputs `json:"public_inputs"`
-	AuthProofHash       string                       `json:"auth_proof_hash"`
-	VerifierGateHash    string                       `json:"verifier_gate_hash"`
-	TransitionWitnessHash string                     `json:"transition_witness_hash"`
-	EncodingDescription string                       `json:"encoding_description"`
+	BatchEncodingHash     string                         `json:"batch_encoding_hash"`
+	PublicInputs          SolidityVerifierPublicInputs   `json:"public_inputs"`
+	AuthProofHash         string                         `json:"auth_proof_hash"`
+	VerifierGateHash      string                         `json:"verifier_gate_hash"`
+	WitnessMaterial       StateTransitionWitnessMaterial `json:"witness_material"`
+	TransitionContextHash string                         `json:"transition_context_hash"`
+	TransitionWitnessHash string                         `json:"transition_witness_hash"`
+	EncodingDescription   string                         `json:"encoding_description"`
 }
 
 type FixedGroth16Artifact struct {
-	ProofBytes              string                            `json:"proof_bytes"`
-	PublicInputs            []string                          `json:"public_inputs"`
-	ProofTuple              VerifierGroth16ProofTuple         `json:"proof_tuple"`
-	StateTransitionWitness  FixedGroth16StateTransitionWitness `json:"state_transition_witness"`
+	ProofBytes             string                             `json:"proof_bytes"`
+	PublicInputs           []string                           `json:"public_inputs"`
+	ProofTuple             VerifierGroth16ProofTuple          `json:"proof_tuple"`
+	StateTransitionWitness FixedGroth16StateTransitionWitness `json:"state_transition_witness"`
 }
 
 type deterministicReader struct {
@@ -244,12 +219,16 @@ func ExportFunnyRollupGroth16BackendSolidity() (string, error) {
 	return lane.contractSource, nil
 }
 
-func BuildFixedGroth16Artifact(context SolidityVerifierGateContext) (FixedGroth16Artifact, error) {
-	transitionWitnessHash, err := buildTransitionWitnessHashFromContext(context)
+func BuildFixedGroth16Artifact(context SolidityVerifierGateContext, material StateTransitionWitnessMaterial) (FixedGroth16Artifact, error) {
+	transitionWitnessHash, err := buildTransitionWitnessHash(context, material)
 	if err != nil {
 		return FixedGroth16Artifact{}, err
 	}
-	proofBytes, publicInputs, proofTuple, err := buildBatchSpecificGroth16Proof(context)
+	transitionContextHash, err := buildTransitionContextHash(context)
+	if err != nil {
+		return FixedGroth16Artifact{}, err
+	}
+	proofBytes, publicInputs, proofTuple, err := buildBatchSpecificGroth16Proof(context, material)
 	if err != nil {
 		return FixedGroth16Artifact{}, err
 	}
@@ -258,23 +237,25 @@ func BuildFixedGroth16Artifact(context SolidityVerifierGateContext) (FixedGroth1
 		PublicInputs: publicInputs,
 		ProofTuple:   proofTuple,
 		StateTransitionWitness: FixedGroth16StateTransitionWitness{
-			BatchEncodingHash: context.BatchEncodingHash,
-			PublicInputs:      context.PublicInputs,
-			AuthProofHash:     context.AuthProofHash,
-			VerifierGateHash:  context.VerifierGateHash,
+			BatchEncodingHash:     context.BatchEncodingHash,
+			PublicInputs:          context.PublicInputs,
+			AuthProofHash:         context.AuthProofHash,
+			VerifierGateHash:      context.VerifierGateHash,
+			WitnessMaterial:       material,
+			TransitionContextHash: transitionContextHash,
 			TransitionWitnessHash: transitionWitnessHash,
-			EncodingDescription: "the circuit privately consumes batch/public-input witness material and derives one sha256 state-transition witness hash over the stable batch/public-input contract while still exposing batchEncodingHash, authProofHash, and verifierGateHash as fixed public limbs",
+			EncodingDescription:   "the circuit now binds the stable verifier context through a deterministic transitionContextHash plus a deterministic material hash derived from ordered journal entries, accepted replay projections, withdrawal leaves, and escape-collateral leaves while proof bytes continue carrying the underlying witness digests for verifier-side consistency checks",
 		},
 	}, nil
 }
 
-func buildBatchSpecificGroth16Proof(context SolidityVerifierGateContext) ([]byte, []string, VerifierGroth16ProofTuple, error) {
+func buildBatchSpecificGroth16Proof(context SolidityVerifierGateContext, material StateTransitionWitnessMaterial) ([]byte, []string, VerifierGroth16ProofTuple, error) {
 	lane, err := loadFixedGroth16Lane()
 	if err != nil {
 		return nil, nil, VerifierGroth16ProofTuple{}, err
 	}
 
-	transitionWitnessHash, err := buildTransitionWitnessHashFromContext(context)
+	transitionWitnessHash, err := buildTransitionWitnessHash(context, material)
 	if err != nil {
 		return nil, nil, VerifierGroth16ProofTuple{}, err
 	}
@@ -283,7 +264,7 @@ func buildBatchSpecificGroth16Proof(context SolidityVerifierGateContext) ([]byte
 		return nil, nil, VerifierGroth16ProofTuple{}, err
 	}
 
-	assignment, err := groth16CircuitAssignmentFromContext(context, publicInputs)
+	assignment, err := groth16CircuitAssignmentFromContext(context, material, publicInputs)
 	if err != nil {
 		return nil, nil, VerifierGroth16ProofTuple{}, err
 	}
@@ -293,7 +274,7 @@ func buildBatchSpecificGroth16Proof(context SolidityVerifierGateContext) ([]byte
 	}
 
 	var proof groth16.Proof
-	if err := withDeterministicRand(groth16ProofSeed(context), func() error {
+	if err := withDeterministicRand(groth16ProofSeed(context, material), func() error {
 		var proveErr error
 		proof, proveErr = groth16.Prove(
 			lane.ccs,
@@ -327,7 +308,7 @@ func buildBatchSpecificGroth16Proof(context SolidityVerifierGateContext) ([]byte
 	if err != nil {
 		return nil, nil, VerifierGroth16ProofTuple{}, err
 	}
-	transitionWitnessHash, err = buildTransitionWitnessHashFromContext(context)
+	transitionWitnessHash, err = buildTransitionWitnessHash(context, material)
 	if err != nil {
 		return nil, nil, VerifierGroth16ProofTuple{}, err
 	}
@@ -338,13 +319,84 @@ func buildBatchSpecificGroth16Proof(context SolidityVerifierGateContext) ([]byte
 	if len(transitionWitnessBytes) != 32 {
 		return nil, nil, VerifierGroth16ProofTuple{}, fmt.Errorf("transition witness hash must be 32 bytes, got %d", len(transitionWitnessBytes))
 	}
-	proofBytes := make([]byte, 0, len(transitionWitnessBytes)+len(rawTupleBytes))
+	entrySetHashBytes, err := hex.DecodeString(strings.TrimPrefix(strings.TrimSpace(material.EntrySetHash), "0x"))
+	if err != nil {
+		return nil, nil, VerifierGroth16ProofTuple{}, fmt.Errorf("decode entry_set_hash: %w", err)
+	}
+	acceptedBalancesHashBytes, err := hex.DecodeString(strings.TrimPrefix(strings.TrimSpace(material.AcceptedBalancesHash), "0x"))
+	if err != nil {
+		return nil, nil, VerifierGroth16ProofTuple{}, fmt.Errorf("decode accepted_balances_hash: %w", err)
+	}
+	acceptedPositionsHashBytes, err := hex.DecodeString(strings.TrimPrefix(strings.TrimSpace(material.AcceptedPositionsHash), "0x"))
+	if err != nil {
+		return nil, nil, VerifierGroth16ProofTuple{}, fmt.Errorf("decode accepted_positions_hash: %w", err)
+	}
+	acceptedPayoutsHashBytes, err := hex.DecodeString(strings.TrimPrefix(strings.TrimSpace(material.AcceptedPayoutsHash), "0x"))
+	if err != nil {
+		return nil, nil, VerifierGroth16ProofTuple{}, fmt.Errorf("decode accepted_payouts_hash: %w", err)
+	}
+	acceptedWithdrawalRootHashBytes, err := hex.DecodeString(strings.TrimPrefix(strings.TrimSpace(material.AcceptedWithdrawalRootHash), "0x"))
+	if err != nil {
+		return nil, nil, VerifierGroth16ProofTuple{}, fmt.Errorf("decode accepted_withdrawal_root_hash: %w", err)
+	}
+	acceptedWithdrawalLeavesHashBytes, err := hex.DecodeString(strings.TrimPrefix(strings.TrimSpace(material.AcceptedWithdrawalLeavesHash), "0x"))
+	if err != nil {
+		return nil, nil, VerifierGroth16ProofTuple{}, fmt.Errorf("decode accepted_withdrawal_leaves_hash: %w", err)
+	}
+	escapeCollateralRootHashBytes, err := hex.DecodeString(strings.TrimPrefix(strings.TrimSpace(material.EscapeCollateralRootHash), "0x"))
+	if err != nil {
+		return nil, nil, VerifierGroth16ProofTuple{}, fmt.Errorf("decode escape_collateral_root_hash: %w", err)
+	}
+	escapeCollateralLeavesHashBytes, err := hex.DecodeString(strings.TrimPrefix(strings.TrimSpace(material.EscapeCollateralLeavesHash), "0x"))
+	if err != nil {
+		return nil, nil, VerifierGroth16ProofTuple{}, fmt.Errorf("decode escape_collateral_leaves_hash: %w", err)
+	}
+	proofBytes := make([]byte, 0, len(transitionWitnessBytes)+len(entrySetHashBytes)+len(acceptedBalancesHashBytes)+len(acceptedPositionsHashBytes)+len(acceptedPayoutsHashBytes)+len(acceptedWithdrawalRootHashBytes)+len(acceptedWithdrawalLeavesHashBytes)+len(escapeCollateralRootHashBytes)+len(escapeCollateralLeavesHashBytes)+len(rawTupleBytes))
 	proofBytes = append(proofBytes, transitionWitnessBytes...)
+	proofBytes = append(proofBytes, entrySetHashBytes...)
+	proofBytes = append(proofBytes, acceptedBalancesHashBytes...)
+	proofBytes = append(proofBytes, acceptedPositionsHashBytes...)
+	proofBytes = append(proofBytes, acceptedPayoutsHashBytes...)
+	proofBytes = append(proofBytes, acceptedWithdrawalRootHashBytes...)
+	proofBytes = append(proofBytes, acceptedWithdrawalLeavesHashBytes...)
+	proofBytes = append(proofBytes, escapeCollateralRootHashBytes...)
+	proofBytes = append(proofBytes, escapeCollateralLeavesHashBytes...)
 	proofBytes = append(proofBytes, rawTupleBytes...)
 	return proofBytes, publicInputs, proofTuple, nil
 }
 
-func buildTransitionWitnessHashFromContext(context SolidityVerifierGateContext) (string, error) {
+func buildTransitionWitnessHash(context SolidityVerifierGateContext, material StateTransitionWitnessMaterial) (string, error) {
+	transitionContextHash, err := buildTransitionContextHash(context)
+	if err != nil {
+		return "", err
+	}
+	stateTransitionMaterialHash, err := buildStateTransitionMaterialHash(material)
+	if err != nil {
+		return "", err
+	}
+	transitionContextHashValue, err := solidityHashFromBytes32(transitionContextHash, "witness_material.transition_context_hash")
+	if err != nil {
+		return "", err
+	}
+	stateTransitionMaterialHashValue, err := solidityHashFromBytes32(stateTransitionMaterialHash, "witness_material.material_hash")
+	if err != nil {
+		return "", err
+	}
+	packed, err := abi.Arguments{
+		{Type: solidityBytes32ABIType},
+		{Type: solidityBytes32ABIType},
+	}.Pack(
+		transitionContextHashValue,
+		stateTransitionMaterialHashValue,
+	)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(packed)
+	return "0x" + hex.EncodeToString(sum[:]), nil
+}
+
+func buildTransitionContextHash(context SolidityVerifierGateContext) (string, error) {
 	batchEncodingHash, err := solidityHashFromBytes32(context.BatchEncodingHash, "context.batch_encoding_hash")
 	if err != nil {
 		return "", err
@@ -423,7 +475,84 @@ func buildTransitionWitnessHashFromContext(context SolidityVerifierGateContext) 
 	return "0x" + hex.EncodeToString(sum[:]), nil
 }
 
-func groth16CircuitAssignmentFromContext(context SolidityVerifierGateContext, publicInputs []string) (fixedGroth16StateTransitionCircuit, error) {
+func buildStateTransitionMaterialHash(material StateTransitionWitnessMaterial) (string, error) {
+	entrySetHash, err := solidityHashFromBytes32(material.EntrySetHash, "witness_material.entry_set_hash")
+	if err != nil {
+		return "", err
+	}
+	acceptedBalancesHash, err := solidityHashFromBytes32(material.AcceptedBalancesHash, "witness_material.accepted_balances_hash")
+	if err != nil {
+		return "", err
+	}
+	acceptedPositionsHash, err := solidityHashFromBytes32(material.AcceptedPositionsHash, "witness_material.accepted_positions_hash")
+	if err != nil {
+		return "", err
+	}
+	acceptedPayoutsHash, err := solidityHashFromBytes32(material.AcceptedPayoutsHash, "witness_material.accepted_payouts_hash")
+	if err != nil {
+		return "", err
+	}
+	acceptedWithdrawalRootHash, err := solidityHashFromBytes32(material.AcceptedWithdrawalRootHash, "witness_material.accepted_withdrawal_root_hash")
+	if err != nil {
+		return "", err
+	}
+	acceptedWithdrawalLeavesHash, err := solidityHashFromBytes32(material.AcceptedWithdrawalLeavesHash, "witness_material.accepted_withdrawal_leaves_hash")
+	if err != nil {
+		return "", err
+	}
+	escapeCollateralRootHash, err := solidityHashFromBytes32(material.EscapeCollateralRootHash, "witness_material.escape_collateral_root_hash")
+	if err != nil {
+		return "", err
+	}
+	escapeCollateralLeavesHash, err := solidityHashFromBytes32(material.EscapeCollateralLeavesHash, "witness_material.escape_collateral_leaves_hash")
+	if err != nil {
+		return "", err
+	}
+	leftPacked, err := abi.Arguments{
+		{Type: solidityBytes32ABIType},
+		{Type: solidityBytes32ABIType},
+		{Type: solidityBytes32ABIType},
+		{Type: solidityBytes32ABIType},
+	}.Pack(
+		entrySetHash,
+		acceptedBalancesHash,
+		acceptedPositionsHash,
+		acceptedPayoutsHash,
+	)
+	if err != nil {
+		return "", err
+	}
+	leftSum := sha256.Sum256(leftPacked)
+	rightPacked, err := abi.Arguments{
+		{Type: solidityBytes32ABIType},
+		{Type: solidityBytes32ABIType},
+		{Type: solidityBytes32ABIType},
+		{Type: solidityBytes32ABIType},
+	}.Pack(
+		acceptedWithdrawalRootHash,
+		acceptedWithdrawalLeavesHash,
+		escapeCollateralRootHash,
+		escapeCollateralLeavesHash,
+	)
+	if err != nil {
+		return "", err
+	}
+	rightSum := sha256.Sum256(rightPacked)
+	packed, err := abi.Arguments{
+		{Type: solidityBytes32ABIType},
+		{Type: solidityBytes32ABIType},
+	}.Pack(
+		leftSum,
+		rightSum,
+	)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(packed)
+	return "0x" + hex.EncodeToString(sum[:]), nil
+}
+
+func groth16CircuitAssignmentFromContext(context SolidityVerifierGateContext, material StateTransitionWitnessMaterial, publicInputs []string) (fixedGroth16StateTransitionCircuit, error) {
 	if len(publicInputs) != 8 {
 		return fixedGroth16StateTransitionCircuit{}, fmt.Errorf("expected 8 Groth16 public inputs, got %d", len(publicInputs))
 	}
@@ -440,35 +569,19 @@ func groth16CircuitAssignmentFromContext(context SolidityVerifierGateContext, pu
 	if err != nil {
 		return fixedGroth16StateTransitionCircuit{}, err
 	}
-	batchDataHash, err := witnessBytes32FromHex(context.PublicInputs.BatchDataHash, "context.public_inputs.batch_data_hash")
+	transitionContextHash, err := buildTransitionContextHash(context)
 	if err != nil {
 		return fixedGroth16StateTransitionCircuit{}, err
 	}
-	prevStateRoot, err := witnessBytes32FromHex(context.PublicInputs.PrevStateRoot, "context.public_inputs.prev_state_root")
+	transitionContextHashWitness, err := witnessBytes32FromHex(transitionContextHash, "witness_material.transition_context_hash")
 	if err != nil {
 		return fixedGroth16StateTransitionCircuit{}, err
 	}
-	balancesRoot, err := witnessBytes32FromHex(context.PublicInputs.BalancesRoot, "context.public_inputs.balances_root")
+	stateTransitionMaterialHash, err := buildStateTransitionMaterialHash(material)
 	if err != nil {
 		return fixedGroth16StateTransitionCircuit{}, err
 	}
-	ordersRoot, err := witnessBytes32FromHex(context.PublicInputs.OrdersRoot, "context.public_inputs.orders_root")
-	if err != nil {
-		return fixedGroth16StateTransitionCircuit{}, err
-	}
-	positionsFundingRoot, err := witnessBytes32FromHex(context.PublicInputs.PositionsFundingRoot, "context.public_inputs.positions_funding_root")
-	if err != nil {
-		return fixedGroth16StateTransitionCircuit{}, err
-	}
-	withdrawalsRoot, err := witnessBytes32FromHex(context.PublicInputs.WithdrawalsRoot, "context.public_inputs.withdrawals_root")
-	if err != nil {
-		return fixedGroth16StateTransitionCircuit{}, err
-	}
-	nextStateRoot, err := witnessBytes32FromHex(context.PublicInputs.NextStateRoot, "context.public_inputs.next_state_root")
-	if err != nil {
-		return fixedGroth16StateTransitionCircuit{}, err
-	}
-	conservationHashWitness, err := witnessBytes32FromHex(context.PublicInputs.ConservationHash, "context.public_inputs.conservation_hash")
+	stateTransitionMaterialHashWitness, err := witnessBytes32FromHex(stateTransitionMaterialHash, "witness_material.material_hash")
 	if err != nil {
 		return fixedGroth16StateTransitionCircuit{}, err
 	}
@@ -484,18 +597,8 @@ func groth16CircuitAssignmentFromContext(context SolidityVerifierGateContext, pu
 	assignment.BatchEncodingHash = batchEncodingHash
 	assignment.AuthProofHash = authProofHash
 	assignment.VerifierGateHash = verifierGateHash
-	assignment.BatchID = new(big.Int).SetUint64(context.PublicInputs.BatchID)
-	assignment.FirstSequence = new(big.Int).SetUint64(context.PublicInputs.FirstSequence)
-	assignment.LastSequence = new(big.Int).SetUint64(context.PublicInputs.LastSequence)
-	assignment.EntryCount = new(big.Int).SetUint64(context.PublicInputs.EntryCount)
-	assignment.BatchDataHash = batchDataHash
-	assignment.PrevStateRoot = prevStateRoot
-	assignment.BalancesRoot = balancesRoot
-	assignment.OrdersRoot = ordersRoot
-	assignment.PositionsFundingRoot = positionsFundingRoot
-	assignment.WithdrawalsRoot = withdrawalsRoot
-	assignment.NextStateRoot = nextStateRoot
-	assignment.ConservationHash = conservationHashWitness
+	assignment.TransitionContextHash = transitionContextHashWitness
+	assignment.StateTransitionMaterialHash = stateTransitionMaterialHashWitness
 	return assignment, nil
 }
 
@@ -522,13 +625,6 @@ func packBytes128MSB(api frontend.API, byteAPI *uints.Bytes, raw []uints.U8) fro
 	return acc
 }
 
-func abiUint64ToBytes32(uint64API *uints.BinaryField[uints.U64], value frontend.Variable) []uints.U8 {
-	encoded := make([]uints.U8, 0, 32)
-	encoded = append(encoded, uints.NewU8Array(make([]uint8, 24))...)
-	encoded = append(encoded, uint64API.UnpackMSB(uint64API.ValueOf(value))...)
-	return encoded
-}
-
 func groth16BigIntFromHex(value string) (*big.Int, error) {
 	normalized := strings.TrimSpace(strings.TrimPrefix(strings.ToLower(value), "0x"))
 	if normalized == "" {
@@ -541,7 +637,7 @@ func groth16BigIntFromHex(value string) (*big.Int, error) {
 	return scalar, nil
 }
 
-func groth16ProofSeed(context SolidityVerifierGateContext) string {
+func groth16ProofSeed(context SolidityVerifierGateContext, material StateTransitionWitnessMaterial) string {
 	return strings.Join([]string{
 		fixedGroth16ProveDomain,
 		strings.ToLower(strings.TrimSpace(context.BatchEncodingHash)),
@@ -558,6 +654,14 @@ func groth16ProofSeed(context SolidityVerifierGateContext) string {
 		strings.ToLower(strings.TrimSpace(context.PublicInputs.NextStateRoot)),
 		strings.ToLower(strings.TrimSpace(context.AuthProofHash)),
 		strings.ToLower(strings.TrimSpace(context.VerifierGateHash)),
+		strings.ToLower(strings.TrimSpace(material.EntrySetHash)),
+		strings.ToLower(strings.TrimSpace(material.AcceptedBalancesHash)),
+		strings.ToLower(strings.TrimSpace(material.AcceptedPositionsHash)),
+		strings.ToLower(strings.TrimSpace(material.AcceptedPayoutsHash)),
+		strings.ToLower(strings.TrimSpace(material.AcceptedWithdrawalRootHash)),
+		strings.ToLower(strings.TrimSpace(material.AcceptedWithdrawalLeavesHash)),
+		strings.ToLower(strings.TrimSpace(material.EscapeCollateralRootHash)),
+		strings.ToLower(strings.TrimSpace(material.EscapeCollateralLeavesHash)),
 	}, "|")
 }
 

@@ -1,6 +1,10 @@
 package rollup
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/ethereum/go-ethereum/crypto"
+)
 
 const (
 	TruthModeTruthfulShadow   = "TRUTHFUL_SHADOW"
@@ -116,13 +120,7 @@ func shadowNamespaceTruth() []NamespaceTruth {
 }
 
 func canonicalBatchDataHash(batch StoredBatch) string {
-	if hash := strings.TrimSpace(batch.InputHash); hash != "" {
-		return hash
-	}
-	if strings.TrimSpace(batch.InputData) == "" {
-		return hashStrings("shadow", "batch_input", "")
-	}
-	return hashStrings("shadow", "batch_input", batch.InputData)
+	return strings.TrimPrefix(strings.ToLower(crypto.Keccak256Hash([]byte(batch.InputData)).Hex()), "0x")
 }
 
 func defaultStateRoot(root string) string {

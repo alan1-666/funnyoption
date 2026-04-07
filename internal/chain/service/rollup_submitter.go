@@ -37,22 +37,22 @@ const rollupEscapeCollateralRootABIJSON = `[{
 var rollupEscapeCollateralRootABI = mustEscapeCollateralRootABI(rollupEscapeCollateralRootABIJSON)
 
 const (
-	RollupSubmissionActionNoop            = "NOOP"
-	RollupSubmissionActionFrozen          = "FROZEN"
+	RollupSubmissionActionNoop                = "NOOP"
+	RollupSubmissionActionFrozen              = "FROZEN"
 	RollupSubmissionActionEscapeRootSubmitted = "ESCAPE_ROOT_SUBMITTED"
 	RollupSubmissionActionEscapeRootPending   = "ESCAPE_ROOT_PENDING"
 	RollupSubmissionActionEscapeRootAnchored  = "ESCAPE_ROOT_ANCHORED"
 	RollupSubmissionActionEscapeRootFailed    = "ESCAPE_ROOT_FAILED"
-	RollupSubmissionActionBlockedAuth     = "BLOCKED_AUTH"
-	RollupSubmissionActionFailedBlocked   = "FAILED_BLOCKED"
-	RollupSubmissionActionRecordSubmitted = "RECORD_SUBMITTED"
-	RollupSubmissionActionRecordPending   = "RECORD_PENDING"
-	RollupSubmissionActionPublishSubmitted = "PUBLISH_SUBMITTED"
-	RollupSubmissionActionPublishPending   = "PUBLISH_PENDING"
-	RollupSubmissionActionAcceptSubmitted = "ACCEPT_SUBMITTED"
-	RollupSubmissionActionAcceptPending   = "ACCEPT_PENDING"
-	RollupSubmissionActionAccepted        = "ACCEPTED"
-	RollupSubmissionActionFailed          = "FAILED"
+	RollupSubmissionActionBlockedAuth         = "BLOCKED_AUTH"
+	RollupSubmissionActionFailedBlocked       = "FAILED_BLOCKED"
+	RollupSubmissionActionRecordSubmitted     = "RECORD_SUBMITTED"
+	RollupSubmissionActionRecordPending       = "RECORD_PENDING"
+	RollupSubmissionActionPublishSubmitted    = "PUBLISH_SUBMITTED"
+	RollupSubmissionActionPublishPending      = "PUBLISH_PENDING"
+	RollupSubmissionActionAcceptSubmitted     = "ACCEPT_SUBMITTED"
+	RollupSubmissionActionAcceptPending       = "ACCEPT_PENDING"
+	RollupSubmissionActionAccepted            = "ACCEPTED"
+	RollupSubmissionActionFailed              = "FAILED"
 )
 
 type rollupSubmissionStore interface {
@@ -85,12 +85,12 @@ type rollupTxSender interface {
 }
 
 type RollupSubmissionProgress struct {
-	Action     string                  `json:"action"`
-	Prepared   bool                    `json:"prepared"`
-	Submission rollup.StoredSubmission `json:"submission"`
+	Action     string                                    `json:"action"`
+	Prepared   bool                                      `json:"prepared"`
+	Submission rollup.StoredSubmission                   `json:"submission"`
 	EscapeRoot rollup.AcceptedEscapeCollateralRootRecord `json:"escape_root"`
-	TxHash     string                  `json:"tx_hash,omitempty"`
-	Note       string                  `json:"note,omitempty"`
+	TxHash     string                                    `json:"tx_hash,omitempty"`
+	Note       string                                    `json:"note,omitempty"`
 }
 
 type RollupSubmissionRun struct {
@@ -773,6 +773,7 @@ type expectedRollupSubmissionState struct {
 	PositionsFundingRoot common.Hash
 	WithdrawalsRoot      common.Hash
 	NextStateRoot        common.Hash
+	ConservationHash     common.Hash
 	AuthProofHash        common.Hash
 	VerifierGateHash     common.Hash
 }
@@ -825,6 +826,7 @@ func (p *RollupSubmissionProcessor) reconcileAcceptedSubmissionState(
 		observed.PositionsFundingRoot != expected.PositionsFundingRoot ||
 		observed.WithdrawalsRoot != expected.WithdrawalsRoot ||
 		observed.NextStateRoot != expected.NextStateRoot ||
+		observed.ConservationHash != expected.ConservationHash ||
 		observed.AuthProofHash != expected.AuthProofHash ||
 		observed.VerifierGateHash != expected.VerifierGateHash {
 		return false, "acceptVerifiedBatch receipt succeeded; waiting for visible onchain acceptance reconciliation", nil
@@ -837,7 +839,7 @@ func buildExpectedSubmissionState(submission rollup.StoredSubmission) (expectedR
 	if err != nil {
 		return expectedRollupSubmissionState{}, err
 	}
-	batchDataHash, err := parseExpectedHash(bundle.Batch.InputHash, "bundle.batch.input_hash")
+	batchDataHash, err := parseExpectedHash(bundle.Batch.BatchDataHash, "bundle.batch.batch_data_hash")
 	if err != nil {
 		return expectedRollupSubmissionState{}, err
 	}
@@ -865,6 +867,10 @@ func buildExpectedSubmissionState(submission rollup.StoredSubmission) (expectedR
 	if err != nil {
 		return expectedRollupSubmissionState{}, err
 	}
+	conservationHash, err := parseExpectedHash(bundle.Batch.ConservationHash, "bundle.batch.conservation_hash")
+	if err != nil {
+		return expectedRollupSubmissionState{}, err
+	}
 	authProofHash, err := parseExpectedHash(submission.AuthProofHash, "submission.auth_proof_hash")
 	if err != nil {
 		return expectedRollupSubmissionState{}, err
@@ -888,6 +894,7 @@ func buildExpectedSubmissionState(submission rollup.StoredSubmission) (expectedR
 		PositionsFundingRoot: positionsFundingRoot,
 		WithdrawalsRoot:      withdrawalsRoot,
 		NextStateRoot:        nextStateRoot,
+		ConservationHash:     conservationHash,
 		AuthProofHash:        authProofHash,
 		VerifierGateHash:     verifierGateHash,
 	}, nil

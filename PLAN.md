@@ -100,6 +100,12 @@ Detailed execution lives in `docs/harness/plans/active/`.
 - Off-chain MVP: code-complete, with truthful local deposit proof and explicit first-liquidity now in place
 - Admin/operator backend: dedicated admin service is converged and core privileged market mutations are now protected at the shared API boundary
 - API service hardening: modular routing, middleware layering, rate limiting, bare-`user_id` fallback removal, same-proof bootstrap replay protection, and bootstrap semantic uniqueness are now in place
+- Mode B accepted/frozen closeout: local full-flow now reaches accepted batch
+  truth, forced withdrawal, freeze, and one Merkle-proof escape collateral
+  claim; balances / positions / payouts / liability reporting prefer
+  accepted-first financial truth once accepted visibility exists or the
+  rollup is frozen, and the preferred proving lane now consumes
+  state-transition witness material instead of only outer-digest equality
 - Next worker focus:
   - `TASK-OFFCHAIN-014` is complete: V2 auth now explicitly rejects signature-derived deterministic trading keys and adopts wallet-authorized browser-local trading keys
   - `TASK-CHAIN-005` is complete: oracle-settled crypto markets now have one explicit metadata / evidence / resolver contract plus a Foundry-only contract boundary if any future on-chain helper is needed

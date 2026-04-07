@@ -2583,3 +2583,36 @@
 - next:
   - move into forced-withdrawal / freeze foundations with this local proof path
     kept as the regression harness
+
+### 2026-04-07 18:00 CST
+
+- thread: COMMANDER
+- scope:
+  - accepted and closed `TASK-CHAIN-036`
+  - verified one merged local full-flow that now reaches accepted batch truth,
+    forced withdrawal, freeze, and a Merkle-proof escape collateral claim
+- changed:
+  - updated:
+    - `PLAN.md`
+    - `docs/harness/plans/active/PLAN-2026-04-01-master.md`
+    - `docs/architecture/mode-b-zk-rollup.md`
+    - `docs/sql/schema.md`
+    - `docs/harness/handshakes/HANDSHAKE-CHAIN-036.md`
+    - `docs/harness/worklogs/WORKLOG-CHAIN-036.md`
+- validated:
+  - `GOCACHE=/tmp/funnyoption-gocache go test ./internal/rollup ./internal/chain/service ./internal/api/handler ./internal/api ./cmd/local-lifecycle -timeout=20m`
+  - `forge test --offline --match-path contracts/test/FunnyRollupCore.t.sol`
+  - `git diff --check`
+  - fresh local flow proved:
+    - accepted batches advance
+    - escape collateral root anchors
+    - forced withdrawal freezes the rollup
+    - buyer executes a Merkle-proof collateral claim
+    - accepted balance readback stays at `0`
+    - accepted escape leaf stays `CLAIMED` after replay/rematerialization
+- residuals:
+  - unresolved-open-position emergency handling at freeze is still narrow
+  - prover/backend is still repo-local first cut
+  - the repo is substantially closer to `Mode B`, but it still should not
+    overclaim that every live truth boundary is already fully replaced by
+    accepted roots

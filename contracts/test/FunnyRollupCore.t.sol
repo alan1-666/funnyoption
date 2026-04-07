@@ -13,9 +13,9 @@ abstract contract FunnyRollupArtifactFixtures is DSTest {
     bytes32 internal constant GO_ARTIFACT_AUTH_PROOF_HASH =
         hex"1e7c5c1c118b439a090ebf565465179476e94bae5ba6a5ae0f146ec3866c8795";
     bytes32 internal constant GO_ARTIFACT_VERIFIER_GATE_HASH =
-        hex"bdb8adff0902424ca22e6b3a15581cb9b23705ba8192448826e23449e8128626";
+        hex"efefbcd563252d443f9828f2a30139f9ae0e25ad24a23bbfa43286618af69ba5";
     bytes32 internal constant GO_ARTIFACT_SECOND_VERIFIER_GATE_HASH =
-        hex"795a355fc2c2e98cbac5561fa98476a65d079471a264f5999e37158d9440e026";
+        hex"7ddc06edb632783fa18398652eadb1ce9d24679ac28b356af36aad73cff4bdd9";
     bytes32 internal constant GO_ARTIFACT_PROOF_SCHEMA_HASH =
         hex"45d038e607974e1baa9a64b2ee0ae0d345a16b4ad5ccf32c35924a22abac02b7";
     bytes32 internal constant GO_ARTIFACT_PUBLIC_SIGNALS_HASH =
@@ -23,30 +23,37 @@ abstract contract FunnyRollupArtifactFixtures is DSTest {
     bytes32 internal constant GO_ARTIFACT_PROOF_DATA_SCHEMA_HASH =
         hex"627084a901f511fbfdc855a140c870c7de43da7b9b900117c3f719b0121e09f7";
     bytes32 internal constant GO_ARTIFACT_PROOF_VERSION_HASH =
-        hex"4c620ff3da228edbea86e6c62707674cb14e8cfc20fee57eb70e8adfb03c1a23";
+        hex"61d926910cd37f0427ac13baa3386a8b649e9c83c83a845ed4355ec4df7b8d2e";
 
     function goArtifactProofBytes() internal pure returns (bytes memory) {
-        return hex"89976dac11073c7be3e8e6290a7fef4a049f44ccce9dcba57bcc0b65c7c534e818868700fa735f25df27d493c3ee7489775c5a5bfb70c5fe1bb910a15ef3fc381cb8cf62a1fa97a484e66c014834a0117e99e5d356a849a855bdb1cd4c2e62cc21b2c6db60136c8744e9f0d5694c71dcd9a513ba0f8f68ad38d0be7ce07e74441eb2fe77dc8b67d30fa18aa0838fe8e8bda225bcd11d3bd836d379d0dd9e09f22299a7d4101f03a810e63e95419b3d02faca6735f835650aca893256e0d3e7e62c669bdb792ee7f45d1610d66e8ef4602e9c49c8b63bcf9d65e2bc10d4ea012b11887cdf149acb3a29f485e6e35d603bc2c6787daf06c7e424b3ac6b6f413c0c2c4609f176329a48b5c2478c941b2ba2b648fdb94f3b016d039c6a054df3d99222c23e22120cabd75aee443c80a3b0929ed0c6943cb489617cd8bd9e7b9b712c0e46ca3d303bf15b33d91d80dcb51d95a017a1a0726a8932a97e5ddf5b5286a40c4706d5920b4717c94ee7ef987052492e0f34480cf12bb626cbc4b79aed1c1e276ef44cb21ffc49b99fb63f14f2e83ffd1855199c5bb96fb6b49678403b15b3";
+        return hex"f87b07b17aed58b7ed4f12adc3a9b558f6f6405efaa177e8be6cc4f5ee464b82da6118bacf3be9f7e55ebcd74e742b58befea375db7650fee74e42a7ad27e17d412d96f28c9bd212ba27d0da92a15f27337e6ea50cbfaf4c4223af098c47ccf3b45deacc486e6a3ccaa3dbd3ead0e5cde3c3ce6aeea8c9088ea4d53036fdd94e9431ddbfb4276462d98f2fcf32458a0bfe21839c42a8f82bba3847de86d323d73a89b167b1513f5eaac606f903af4688218714b356282bac1cce90e1186c82f953fec9e4f5725b75bf8c0501257419c4fb7aba8c3024792652e9bb81b494a211eaf1c7d70ef5145001f9116853718f2bb6c919df8e7ac47dd74b0ed9be4d55632be8de8b7a68ebe83143f17ba5adc06112af77398b9106f21ea3a0fb8dd30165222a757b0cf1a9a2f2f563cfcdc04171d756ee12a4574a5f7bd9a8fd07d3d2210def9ead58e1b4c674c065c659c36c4f7d44738dec650d2d836c9df754ffe268094fcf497c12d650e90ac8199f72d97b49456ee60605651993279f61025f08ff14364ad5244e50987cadcca61e9540c272c776760580e94cb51aa32d307645070702dafcfc6a25cd4b80bc23b69c3d20218e7aab5b3731356d7bae79f33fc53710b039a909ca9f217f729d990ea23ba67aa95e942e96253f55d67e36c9fa2c722f6fe8d802b80cf963795bfe7c5c6e8d50280be96a0f9afb88deedf441f7e24c02af9381436360048f80b6c38ad8b40cd66f8397075ed2d3c1c505ca0c36afe01f51b361faf4d4a26cc5cb3c47b59a0399ea012e36dd7659073db66e4d2f2f06015aae143471880055c136e7d792b643d9126073c367e9573af3eb947d17bf7622f7b08ce4d1fac36e24465aef2e89e9ca8de9c7a3e4f03d36b2d4616a488790026b7632df3f5ee591f37afedb8c0578907669500ae8ea3d519bef746d8f6c76";
     }
 
     function goArtifactProofData() internal pure returns (bytes memory) {
-        return hex"627084a901f511fbfdc855a140c870c7de43da7b9b900117c3f719b0121e09f74c620ff3da228edbea86e6c62707674cb14e8cfc20fee57eb70e8adfb03c1a233b6489209bd528a9779ecc9db44d4d05dceb8faba670a6922ff939d841f202cb1e7c5c1c118b439a090ebf565465179476e94bae5ba6a5ae0f146ec3866c8795bdb8adff0902424ca22e6b3a15581cb9b23705ba8192448826e23449e812862600000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000001a089976dac11073c7be3e8e6290a7fef4a049f44ccce9dcba57bcc0b65c7c534e818868700fa735f25df27d493c3ee7489775c5a5bfb70c5fe1bb910a15ef3fc381cb8cf62a1fa97a484e66c014834a0117e99e5d356a849a855bdb1cd4c2e62cc21b2c6db60136c8744e9f0d5694c71dcd9a513ba0f8f68ad38d0be7ce07e74441eb2fe77dc8b67d30fa18aa0838fe8e8bda225bcd11d3bd836d379d0dd9e09f22299a7d4101f03a810e63e95419b3d02faca6735f835650aca893256e0d3e7e62c669bdb792ee7f45d1610d66e8ef4602e9c49c8b63bcf9d65e2bc10d4ea012b11887cdf149acb3a29f485e6e35d603bc2c6787daf06c7e424b3ac6b6f413c0c2c4609f176329a48b5c2478c941b2ba2b648fdb94f3b016d039c6a054df3d99222c23e22120cabd75aee443c80a3b0929ed0c6943cb489617cd8bd9e7b9b712c0e46ca3d303bf15b33d91d80dcb51d95a017a1a0726a8932a97e5ddf5b5286a40c4706d5920b4717c94ee7ef987052492e0f34480cf12bb626cbc4b79aed1c1e276ef44cb21ffc49b99fb63f14f2e83ffd1855199c5bb96fb6b49678403b15b3";
+        return hex"627084a901f511fbfdc855a140c870c7de43da7b9b900117c3f719b0121e09f761d926910cd37f0427ac13baa3386a8b649e9c83c83a845ed4355ec4df7b8d2e3b6489209bd528a9779ecc9db44d4d05dceb8faba670a6922ff939d841f202cb1e7c5c1c118b439a090ebf565465179476e94bae5ba6a5ae0f146ec3866c8795efefbcd563252d443f9828f2a30139f9ae0e25ad24a23bbfa43286618af69ba500000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000002a0f87b07b17aed58b7ed4f12adc3a9b558f6f6405efaa177e8be6cc4f5ee464b82da6118bacf3be9f7e55ebcd74e742b58befea375db7650fee74e42a7ad27e17d412d96f28c9bd212ba27d0da92a15f27337e6ea50cbfaf4c4223af098c47ccf3b45deacc486e6a3ccaa3dbd3ead0e5cde3c3ce6aeea8c9088ea4d53036fdd94e9431ddbfb4276462d98f2fcf32458a0bfe21839c42a8f82bba3847de86d323d73a89b167b1513f5eaac606f903af4688218714b356282bac1cce90e1186c82f953fec9e4f5725b75bf8c0501257419c4fb7aba8c3024792652e9bb81b494a211eaf1c7d70ef5145001f9116853718f2bb6c919df8e7ac47dd74b0ed9be4d55632be8de8b7a68ebe83143f17ba5adc06112af77398b9106f21ea3a0fb8dd30165222a757b0cf1a9a2f2f563cfcdc04171d756ee12a4574a5f7bd9a8fd07d3d2210def9ead58e1b4c674c065c659c36c4f7d44738dec650d2d836c9df754ffe268094fcf497c12d650e90ac8199f72d97b49456ee60605651993279f61025f08ff14364ad5244e50987cadcca61e9540c272c776760580e94cb51aa32d307645070702dafcfc6a25cd4b80bc23b69c3d20218e7aab5b3731356d7bae79f33fc53710b039a909ca9f217f729d990ea23ba67aa95e942e96253f55d67e36c9fa2c722f6fe8d802b80cf963795bfe7c5c6e8d50280be96a0f9afb88deedf441f7e24c02af9381436360048f80b6c38ad8b40cd66f8397075ed2d3c1c505ca0c36afe01f51b361faf4d4a26cc5cb3c47b59a0399ea012e36dd7659073db66e4d2f2f06015aae143471880055c136e7d792b643d9126073c367e9573af3eb947d17bf7622f7b08ce4d1fac36e24465aef2e89e9ca8de9c7a3e4f03d36b2d4616a488790026b7632df3f5ee591f37afedb8c0578907669500ae8ea3d519bef746d8f6c76";
     }
 
     function goArtifactProof() internal pure returns (bytes memory) {
-        return hex"45d038e607974e1baa9a64b2ee0ae0d345a16b4ad5ccf32c35924a22abac02b7404acb1bd1ca34653909e83ee6c144d1e74d98467ed0b421dc6792f57aa00cbf3b6489209bd528a9779ecc9db44d4d05dceb8faba670a6922ff939d841f202cb1e7c5c1c118b439a090ebf565465179476e94bae5ba6a5ae0f146ec3866c8795bdb8adff0902424ca22e6b3a15581cb9b23705ba8192448826e23449e812862600000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000280627084a901f511fbfdc855a140c870c7de43da7b9b900117c3f719b0121e09f74c620ff3da228edbea86e6c62707674cb14e8cfc20fee57eb70e8adfb03c1a233b6489209bd528a9779ecc9db44d4d05dceb8faba670a6922ff939d841f202cb1e7c5c1c118b439a090ebf565465179476e94bae5ba6a5ae0f146ec3866c8795bdb8adff0902424ca22e6b3a15581cb9b23705ba8192448826e23449e812862600000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000001a089976dac11073c7be3e8e6290a7fef4a049f44ccce9dcba57bcc0b65c7c534e818868700fa735f25df27d493c3ee7489775c5a5bfb70c5fe1bb910a15ef3fc381cb8cf62a1fa97a484e66c014834a0117e99e5d356a849a855bdb1cd4c2e62cc21b2c6db60136c8744e9f0d5694c71dcd9a513ba0f8f68ad38d0be7ce07e74441eb2fe77dc8b67d30fa18aa0838fe8e8bda225bcd11d3bd836d379d0dd9e09f22299a7d4101f03a810e63e95419b3d02faca6735f835650aca893256e0d3e7e62c669bdb792ee7f45d1610d66e8ef4602e9c49c8b63bcf9d65e2bc10d4ea012b11887cdf149acb3a29f485e6e35d603bc2c6787daf06c7e424b3ac6b6f413c0c2c4609f176329a48b5c2478c941b2ba2b648fdb94f3b016d039c6a054df3d99222c23e22120cabd75aee443c80a3b0929ed0c6943cb489617cd8bd9e7b9b712c0e46ca3d303bf15b33d91d80dcb51d95a017a1a0726a8932a97e5ddf5b5286a40c4706d5920b4717c94ee7ef987052492e0f34480cf12bb626cbc4b79aed1c1e276ef44cb21ffc49b99fb63f14f2e83ffd1855199c5bb96fb6b49678403b15b3";
+        return hex"45d038e607974e1baa9a64b2ee0ae0d345a16b4ad5ccf32c35924a22abac02b7404acb1bd1ca34653909e83ee6c144d1e74d98467ed0b421dc6792f57aa00cbf3b6489209bd528a9779ecc9db44d4d05dceb8faba670a6922ff939d841f202cb1e7c5c1c118b439a090ebf565465179476e94bae5ba6a5ae0f146ec3866c8795efefbcd563252d443f9828f2a30139f9ae0e25ad24a23bbfa43286618af69ba500000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000380627084a901f511fbfdc855a140c870c7de43da7b9b900117c3f719b0121e09f761d926910cd37f0427ac13baa3386a8b649e9c83c83a845ed4355ec4df7b8d2e3b6489209bd528a9779ecc9db44d4d05dceb8faba670a6922ff939d841f202cb1e7c5c1c118b439a090ebf565465179476e94bae5ba6a5ae0f146ec3866c8795efefbcd563252d443f9828f2a30139f9ae0e25ad24a23bbfa43286618af69ba500000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000002a0f87b07b17aed58b7ed4f12adc3a9b558f6f6405efaa177e8be6cc4f5ee464b82da6118bacf3be9f7e55ebcd74e742b58befea375db7650fee74e42a7ad27e17d412d96f28c9bd212ba27d0da92a15f27337e6ea50cbfaf4c4223af098c47ccf3b45deacc486e6a3ccaa3dbd3ead0e5cde3c3ce6aeea8c9088ea4d53036fdd94e9431ddbfb4276462d98f2fcf32458a0bfe21839c42a8f82bba3847de86d323d73a89b167b1513f5eaac606f903af4688218714b356282bac1cce90e1186c82f953fec9e4f5725b75bf8c0501257419c4fb7aba8c3024792652e9bb81b494a211eaf1c7d70ef5145001f9116853718f2bb6c919df8e7ac47dd74b0ed9be4d55632be8de8b7a68ebe83143f17ba5adc06112af77398b9106f21ea3a0fb8dd30165222a757b0cf1a9a2f2f563cfcdc04171d756ee12a4574a5f7bd9a8fd07d3d2210def9ead58e1b4c674c065c659c36c4f7d44738dec650d2d836c9df754ffe268094fcf497c12d650e90ac8199f72d97b49456ee60605651993279f61025f08ff14364ad5244e50987cadcca61e9540c272c776760580e94cb51aa32d307645070702dafcfc6a25cd4b80bc23b69c3d20218e7aab5b3731356d7bae79f33fc53710b039a909ca9f217f729d990ea23ba67aa95e942e96253f55d67e36c9fa2c722f6fe8d802b80cf963795bfe7c5c6e8d50280be96a0f9afb88deedf441f7e24c02af9381436360048f80b6c38ad8b40cd66f8397075ed2d3c1c505ca0c36afe01f51b361faf4d4a26cc5cb3c47b59a0399ea012e36dd7659073db66e4d2f2f06015aae143471880055c136e7d792b643d9126073c367e9573af3eb947d17bf7622f7b08ce4d1fac36e24465aef2e89e9ca8de9c7a3e4f03d36b2d4616a488790026b7632df3f5ee591f37afedb8c0578907669500ae8ea3d519bef746d8f6c76";
     }
 
     function goArtifactSecondProofBytes() internal pure returns (bytes memory) {
-        return hex"22781bd0ce3ae00ab124eaa3264beca2ac49e53c51790f798b52b0f548660bfd01c8d66e953513e29069e77388f23101f53e7846c0c16c27be8b58fb56b0df8a2292e43b415e18492ed03ba5e60eed22ab4d22d6df3902998a4c45fb5a660e270f3144829fa5e5da7eb16ee468da123ed79e1685c0d3b4f6c897e3fb5177642c0e501b22c70e241e82d96735088d256c746df0761a66223f6fa9a56884c06b8e22516fd808ab38eb45b5fcce93b758379bf29467b40453b2afba8a656aab9c88052016533e0624b3ff5f29bd2aa9df7b95f7ce3a73a4e740f7db3f005cf775c81fa0fd4e2a058be4a7e09a40ffe5c7f41f28d5791cada3498701da3a619dacd80af472be383ea3c68a174cb4059c5287f3aa520e02a4c0f88b2217bf125c6dfd2641b5c70fbf99f2b252e10c51f4c65100d0fc8bea2efaf297e6de3f75eacd9611816317e8b3a02ae849dad595d7b96eab4937ae76fa8f3b95431c33802c893d2fb5fde088be3c80241778198fb0a650b155f3b375b6a6062d954f995d05878e1a22180db2f61dc25be768ef7993711b2e17e78dd8414ef63baa298c9f46de56";
+        return hex"9419e9657fc9acc263c7cc9f779e5e24365c6de05587bd9bcc125676274e2322da6118bacf3be9f7e55ebcd74e742b58befea375db7650fee74e42a7ad27e17d412d96f28c9bd212ba27d0da92a15f27337e6ea50cbfaf4c4223af098c47ccf3b45deacc486e6a3ccaa3dbd3ead0e5cde3c3ce6aeea8c9088ea4d53036fdd94e9431ddbfb4276462d98f2fcf32458a0bfe21839c42a8f82bba3847de86d323d73a89b167b1513f5eaac606f903af4688218714b356282bac1cce90e1186c82f953fec9e4f5725b75bf8c0501257419c4fb7aba8c3024792652e9bb81b494a211ff85a89bea5a71c56064cef7dea74bc38c141009ecc684347edd4acedfffedcf2be8de8b7a68ebe83143f17ba5adc06112af77398b9106f21ea3a0fb8dd301651057a3107db087c8d1450e370a7bae1808f1d9015b9c7648d0ff2318a1fa1576293fe8c44720bf756fb9a233cb0f650a48fa954c89b12d88629e8fa501f3965718dca7321376e53acf685e9df07496ebedf5a31d149e32821a9882895ed31d052c48922cd78845eb7ca1ba69039bb44fc0003488e587e2e9bbb4f6efdccc1d9d004c85a0b228eaff287ed24518842d2cdb7315f4289e0c0d94ef45349470f83c2ecd0e7c59b9b2298be8b29570f7d89c51f6e7aa0572c967a9006acbb31048531fc0e9f94ba86a1137841fef1cef17a88a048242123a3d510ceeff131d97876709ce9cc9954447062c16e5718e5d044297140e1f0ebde637d8c17242c5bbb605204273f49d855f1f5ef4736939d5565a35c8d5a3c16b9b4fdd0ef2a3e0e0059924cef37342ba0a293eb781c5992a86371381ec0a49609e53a347c5ae4ef6f50021e23a330523e7ecbb56df7a0c0582e9a804b68f10742fa595d4b1cdcc9662621f4417a6bed3027eb2d9d1470537c193bfebe8090e9b2868b9353130f6fb5671";
     }
 
     function goArtifactSecondProofData() internal pure returns (bytes memory) {
-        return hex"627084a901f511fbfdc855a140c870c7de43da7b9b900117c3f719b0121e09f74c620ff3da228edbea86e6c62707674cb14e8cfc20fee57eb70e8adfb03c1a233b6489209bd528a9779ecc9db44d4d05dceb8faba670a6922ff939d841f202cb1e7c5c1c118b439a090ebf565465179476e94bae5ba6a5ae0f146ec3866c8795795a355fc2c2e98cbac5561fa98476a65d079471a264f5999e37158d9440e02600000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000001a022781bd0ce3ae00ab124eaa3264beca2ac49e53c51790f798b52b0f548660bfd01c8d66e953513e29069e77388f23101f53e7846c0c16c27be8b58fb56b0df8a2292e43b415e18492ed03ba5e60eed22ab4d22d6df3902998a4c45fb5a660e270f3144829fa5e5da7eb16ee468da123ed79e1685c0d3b4f6c897e3fb5177642c0e501b22c70e241e82d96735088d256c746df0761a66223f6fa9a56884c06b8e22516fd808ab38eb45b5fcce93b758379bf29467b40453b2afba8a656aab9c88052016533e0624b3ff5f29bd2aa9df7b95f7ce3a73a4e740f7db3f005cf775c81fa0fd4e2a058be4a7e09a40ffe5c7f41f28d5791cada3498701da3a619dacd80af472be383ea3c68a174cb4059c5287f3aa520e02a4c0f88b2217bf125c6dfd2641b5c70fbf99f2b252e10c51f4c65100d0fc8bea2efaf297e6de3f75eacd9611816317e8b3a02ae849dad595d7b96eab4937ae76fa8f3b95431c33802c893d2fb5fde088be3c80241778198fb0a650b155f3b375b6a6062d954f995d05878e1a22180db2f61dc25be768ef7993711b2e17e78dd8414ef63baa298c9f46de56";
+        return hex"627084a901f511fbfdc855a140c870c7de43da7b9b900117c3f719b0121e09f761d926910cd37f0427ac13baa3386a8b649e9c83c83a845ed4355ec4df7b8d2e3b6489209bd528a9779ecc9db44d4d05dceb8faba670a6922ff939d841f202cb1e7c5c1c118b439a090ebf565465179476e94bae5ba6a5ae0f146ec3866c87957ddc06edb632783fa18398652eadb1ce9d24679ac28b356af36aad73cff4bdd900000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000002a09419e9657fc9acc263c7cc9f779e5e24365c6de05587bd9bcc125676274e2322da6118bacf3be9f7e55ebcd74e742b58befea375db7650fee74e42a7ad27e17d412d96f28c9bd212ba27d0da92a15f27337e6ea50cbfaf4c4223af098c47ccf3b45deacc486e6a3ccaa3dbd3ead0e5cde3c3ce6aeea8c9088ea4d53036fdd94e9431ddbfb4276462d98f2fcf32458a0bfe21839c42a8f82bba3847de86d323d73a89b167b1513f5eaac606f903af4688218714b356282bac1cce90e1186c82f953fec9e4f5725b75bf8c0501257419c4fb7aba8c3024792652e9bb81b494a211ff85a89bea5a71c56064cef7dea74bc38c141009ecc684347edd4acedfffedcf2be8de8b7a68ebe83143f17ba5adc06112af77398b9106f21ea3a0fb8dd301651057a3107db087c8d1450e370a7bae1808f1d9015b9c7648d0ff2318a1fa1576293fe8c44720bf756fb9a233cb0f650a48fa954c89b12d88629e8fa501f3965718dca7321376e53acf685e9df07496ebedf5a31d149e32821a9882895ed31d052c48922cd78845eb7ca1ba69039bb44fc0003488e587e2e9bbb4f6efdccc1d9d004c85a0b228eaff287ed24518842d2cdb7315f4289e0c0d94ef45349470f83c2ecd0e7c59b9b2298be8b29570f7d89c51f6e7aa0572c967a9006acbb31048531fc0e9f94ba86a1137841fef1cef17a88a048242123a3d510ceeff131d97876709ce9cc9954447062c16e5718e5d044297140e1f0ebde637d8c17242c5bbb605204273f49d855f1f5ef4736939d5565a35c8d5a3c16b9b4fdd0ef2a3e0e0059924cef37342ba0a293eb781c5992a86371381ec0a49609e53a347c5ae4ef6f50021e23a330523e7ecbb56df7a0c0582e9a804b68f10742fa595d4b1cdcc9662621f4417a6bed3027eb2d9d1470537c193bfebe8090e9b2868b9353130f6fb5671";
     }
 
     function goArtifactSecondProof() internal pure returns (bytes memory) {
-        return hex"45d038e607974e1baa9a64b2ee0ae0d345a16b4ad5ccf32c35924a22abac02b7404acb1bd1ca34653909e83ee6c144d1e74d98467ed0b421dc6792f57aa00cbf3b6489209bd528a9779ecc9db44d4d05dceb8faba670a6922ff939d841f202cb1e7c5c1c118b439a090ebf565465179476e94bae5ba6a5ae0f146ec3866c8795795a355fc2c2e98cbac5561fa98476a65d079471a264f5999e37158d9440e02600000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000280627084a901f511fbfdc855a140c870c7de43da7b9b900117c3f719b0121e09f74c620ff3da228edbea86e6c62707674cb14e8cfc20fee57eb70e8adfb03c1a233b6489209bd528a9779ecc9db44d4d05dceb8faba670a6922ff939d841f202cb1e7c5c1c118b439a090ebf565465179476e94bae5ba6a5ae0f146ec3866c8795795a355fc2c2e98cbac5561fa98476a65d079471a264f5999e37158d9440e02600000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000001a022781bd0ce3ae00ab124eaa3264beca2ac49e53c51790f798b52b0f548660bfd01c8d66e953513e29069e77388f23101f53e7846c0c16c27be8b58fb56b0df8a2292e43b415e18492ed03ba5e60eed22ab4d22d6df3902998a4c45fb5a660e270f3144829fa5e5da7eb16ee468da123ed79e1685c0d3b4f6c897e3fb5177642c0e501b22c70e241e82d96735088d256c746df0761a66223f6fa9a56884c06b8e22516fd808ab38eb45b5fcce93b758379bf29467b40453b2afba8a656aab9c88052016533e0624b3ff5f29bd2aa9df7b95f7ce3a73a4e740f7db3f005cf775c81fa0fd4e2a058be4a7e09a40ffe5c7f41f28d5791cada3498701da3a619dacd80af472be383ea3c68a174cb4059c5287f3aa520e02a4c0f88b2217bf125c6dfd2641b5c70fbf99f2b252e10c51f4c65100d0fc8bea2efaf297e6de3f75eacd9611816317e8b3a02ae849dad595d7b96eab4937ae76fa8f3b95431c33802c893d2fb5fde088be3c80241778198fb0a650b155f3b375b6a6062d954f995d05878e1a22180db2f61dc25be768ef7993711b2e17e78dd8414ef63baa298c9f46de56";
+        return hex"45d038e607974e1baa9a64b2ee0ae0d345a16b4ad5ccf32c35924a22abac02b7404acb1bd1ca34653909e83ee6c144d1e74d98467ed0b421dc6792f57aa00cbf3b6489209bd528a9779ecc9db44d4d05dceb8faba670a6922ff939d841f202cb1e7c5c1c118b439a090ebf565465179476e94bae5ba6a5ae0f146ec3866c87957ddc06edb632783fa18398652eadb1ce9d24679ac28b356af36aad73cff4bdd900000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000380627084a901f511fbfdc855a140c870c7de43da7b9b900117c3f719b0121e09f761d926910cd37f0427ac13baa3386a8b649e9c83c83a845ed4355ec4df7b8d2e3b6489209bd528a9779ecc9db44d4d05dceb8faba670a6922ff939d841f202cb1e7c5c1c118b439a090ebf565465179476e94bae5ba6a5ae0f146ec3866c87957ddc06edb632783fa18398652eadb1ce9d24679ac28b356af36aad73cff4bdd900000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000002a09419e9657fc9acc263c7cc9f779e5e24365c6de05587bd9bcc125676274e2322da6118bacf3be9f7e55ebcd74e742b58befea375db7650fee74e42a7ad27e17d412d96f28c9bd212ba27d0da92a15f27337e6ea50cbfaf4c4223af098c47ccf3b45deacc486e6a3ccaa3dbd3ead0e5cde3c3ce6aeea8c9088ea4d53036fdd94e9431ddbfb4276462d98f2fcf32458a0bfe21839c42a8f82bba3847de86d323d73a89b167b1513f5eaac606f903af4688218714b356282bac1cce90e1186c82f953fec9e4f5725b75bf8c0501257419c4fb7aba8c3024792652e9bb81b494a211ff85a89bea5a71c56064cef7dea74bc38c141009ecc684347edd4acedfffedcf2be8de8b7a68ebe83143f17ba5adc06112af77398b9106f21ea3a0fb8dd301651057a3107db087c8d1450e370a7bae1808f1d9015b9c7648d0ff2318a1fa1576293fe8c44720bf756fb9a233cb0f650a48fa954c89b12d88629e8fa501f3965718dca7321376e53acf685e9df07496ebedf5a31d149e32821a9882895ed31d052c48922cd78845eb7ca1ba69039bb44fc0003488e587e2e9bbb4f6efdccc1d9d004c85a0b228eaff287ed24518842d2cdb7315f4289e0c0d94ef45349470f83c2ecd0e7c59b9b2298be8b29570f7d89c51f6e7aa0572c967a9006acbb31048531fc0e9f94ba86a1137841fef1cef17a88a048242123a3d510ceeff131d97876709ce9cc9954447062c16e5718e5d044297140e1f0ebde637d8c17242c5bbb605204273f49d855f1f5ef4736939d5565a35c8d5a3c16b9b4fdd0ef2a3e0e0059924cef37342ba0a293eb781c5992a86371381ec0a49609e53a347c5ae4ef6f50021e23a330523e7ecbb56df7a0c0582e9a804b68f10742fa595d4b1cdcc9662621f4417a6bed3027eb2d9d1470537c193bfebe8090e9b2868b9353130f6fb5671";
+    }
+
+    function proofTransitionWitnessHash(bytes memory proofBytes) internal pure returns (bytes32 value) {
+        require(proofBytes.length >= 32, "proof bytes too short");
+        assembly {
+            value := mload(add(proofBytes, 0x20))
+        }
     }
 }
 
@@ -260,7 +267,7 @@ contract FunnyRollupCoreTest is FunnyRollupArtifactFixtures {
             firstSequenceNo: 7,
             lastSequenceNo: 7,
             entryCount: 1,
-            batchDataHash: hex"8a6a2bdede255ffcf3de22c1c07efd93df958681f7582e293ce0bbe19a47ffe0",
+            batchDataHash: hex"40fb1f27f99a0e02b654c683da614e4e7a5e97e38bf42be33556c4c54a03b579",
             prevStateRoot: hex"749de8c4520e934e38bb7cd42bb62208a408b53f7373fa2b333cc56c62102e46",
             balancesRoot: hex"a18255dc375d022d3d805eb70bb97aa1d44562a0dc9a6d5b0a3b4a103b6ad319",
             ordersRoot: hex"1854c9b450264fa6410c58d2f66c3b7f32425fc528d88fac9f5624d2839f93ce",
@@ -276,11 +283,15 @@ contract FunnyRollupCoreTest is FunnyRollupArtifactFixtures {
         bytes32 verifierGateHash = core.hashVerifierGateBatch(publicInputs, authProofHash);
         FunnyRollupVerifierTypes.VerifierContext memory verifierContext =
             core.buildVerifierContext(publicInputs, authProofHash);
-        bytes32 verifierProofHash = verifier.GROTH16_BN254_2X128_SHADOW_STATE_ROOT_GATE_V1_HASH();
+        bytes32 verifierProofHash =
+            verifier.GROTH16_BN254_2X128_SHADOW_STATE_TRANSITION_CONTEXT_MATERIAL_PAIR_HASH_V5_HASH();
         bytes memory verifierProof = buildVerifierProof(verifier, verifierContext);
-        bytes32 transitionWitnessHash = verifier.hashTransitionWitness(verifierContext);
+        bytes32 transitionWitnessHash = proofTransitionWitnessHash(goArtifactProofBytes());
         uint256[8] memory groth16PublicInputs = verifier.deriveGroth16PublicInputs(
-            verifierContext.batchEncodingHash, verifierContext.authProofHash, verifierContext.verifierGateHash, transitionWitnessHash
+            verifierContext.batchEncodingHash,
+            verifierContext.authProofHash,
+            verifierContext.verifierGateHash,
+            transitionWitnessHash
         );
 
         assertEqBytes32(
@@ -315,8 +326,8 @@ contract FunnyRollupCoreTest is FunnyRollupArtifactFixtures {
         assertEq(groth16PublicInputs[1], 0xdceb8faba670a6922ff939d841f202cb, "batchEncodingHashLo mismatch");
         assertEq(groth16PublicInputs[2], 0x1e7c5c1c118b439a090ebf5654651794, "authProofHashHi mismatch");
         assertEq(groth16PublicInputs[3], 0x76e94bae5ba6a5ae0f146ec3866c8795, "authProofHashLo mismatch");
-        assertEq(groth16PublicInputs[4], 0xbdb8adff0902424ca22e6b3a15581cb9, "verifierGateHashHi mismatch");
-        assertEq(groth16PublicInputs[5], 0xb23705ba8192448826e23449e8128626, "verifierGateHashLo mismatch");
+        assertEq(groth16PublicInputs[4], 0xefefbcd563252d443f9828f2a30139f9, "verifierGateHashHi mismatch");
+        assertEq(groth16PublicInputs[5], 0xae0e25ad24a23bbfa43286618af69ba5, "verifierGateHashLo mismatch");
         assertEqBytes32(
             keccak256(
                 buildProofData(
@@ -458,6 +469,52 @@ contract FunnyRollupCoreTest is FunnyRollupArtifactFixtures {
         assertEq(
             uint256(uint8(status)), uint256(uint8(FunnyRollupCore.ForcedWithdrawalStatus.SATISFIED)), "status mismatch"
         );
+    }
+
+    function testOperatorLargeClaimRequiresQueueAndCanCancel() public {
+        MockUSDT token = new MockUSDT();
+        FunnyVault vault = new FunnyVault(address(token), address(this));
+        bytes32 claimId = keccak256("timelock_claim_1");
+
+        token.mint(address(vault), 900);
+        vault.setTimelockConfig(500, 3600);
+
+        try vault.processClaim(claimId, address(this), 900, address(0xCAFE)) {
+            revert("expected operator timelock gate");
+        } catch {}
+
+        vault.queueClaim(claimId, address(this), 900, address(0xCAFE));
+
+        (address wallet, uint256 amount, address recipient, uint256 executeAfter, bool cancelled) =
+            vault.pendingClaims(claimId);
+        assertEq(uint256(uint160(wallet)), uint256(uint160(address(this))), "queued wallet mismatch");
+        assertEq(amount, 900, "queued amount mismatch");
+        assertEq(uint256(uint160(recipient)), uint256(uint160(address(0xCAFE))), "queued recipient mismatch");
+        assertTrue(executeAfter > 0, "executeAfter should be set");
+        assertTrue(!cancelled, "queued claim should start active");
+
+        vault.cancelQueuedClaim(claimId);
+        (,,,, cancelled) = vault.pendingClaims(claimId);
+        assertTrue(cancelled, "queued claim should be cancellable");
+    }
+
+    function testRollupCorePathBypassesOperatorTimelock() public {
+        MockUSDT token = new MockUSDT();
+        FunnyVault vault = new FunnyVault(address(token), address(this));
+        VaultClaimProxy proxy = new VaultClaimProxy();
+        bytes32 claimId = keccak256("timelock_claim_2");
+
+        token.mint(address(vault), 900);
+        vault.setTimelockConfig(500, 3600);
+        vault.setRollupCore(address(proxy));
+
+        proxy.process(vault, claimId, address(this), 900, address(0xCAFE));
+
+        assertTrue(vault.processedClaims(claimId), "claim should be processed through rollupCore path");
+        (address wallet, uint256 amount, address recipient) = vault.processedClaimRecords(claimId);
+        assertEq(uint256(uint160(wallet)), uint256(uint160(address(this))), "processed wallet mismatch");
+        assertEq(amount, 900, "processed amount mismatch");
+        assertEq(uint256(uint160(recipient)), uint256(uint160(address(0xCAFE))), "processed recipient mismatch");
     }
 
     function testFreezeBlocksBatchAdvancementAfterMissedDeadline() public {
@@ -656,7 +713,7 @@ contract FunnyRollupCoreTest is FunnyRollupArtifactFixtures {
             firstSequenceNo: 7,
             lastSequenceNo: 7,
             entryCount: 1,
-            batchDataHash: hex"8a6a2bdede255ffcf3de22c1c07efd93df958681f7582e293ce0bbe19a47ffe0",
+            batchDataHash: hex"40fb1f27f99a0e02b654c683da614e4e7a5e97e38bf42be33556c4c54a03b579",
             prevStateRoot: hex"749de8c4520e934e38bb7cd42bb62208a408b53f7373fa2b333cc56c62102e46",
             balancesRoot: hex"a18255dc375d022d3d805eb70bb97aa1d44562a0dc9a6d5b0a3b4a103b6ad319",
             ordersRoot: hex"1854c9b450264fa6410c58d2f66c3b7f32425fc528d88fac9f5624d2839f93ce",
@@ -727,7 +784,7 @@ contract FunnyRollupVerifierTest is FunnyRollupArtifactFixtures {
         FunnyRollupVerifier verifier = new FunnyRollupVerifier();
         FunnyRollupVerifierTypes.VerifierContext memory context = buildSecondGoArtifactContext();
         bytes memory verifierProof = buildSecondGoArtifactProof(verifier, context);
-        bytes32 transitionWitnessHash = verifier.hashTransitionWitness(context);
+        bytes32 transitionWitnessHash = proofTransitionWitnessHash(goArtifactSecondProofBytes());
         uint256[8] memory publicInputs = verifier.deriveGroth16PublicInputs(
             context.batchEncodingHash, context.authProofHash, context.verifierGateHash, transitionWitnessHash
         );
@@ -751,8 +808,8 @@ contract FunnyRollupVerifierTest is FunnyRollupArtifactFixtures {
             keccak256(goArtifactSecondProofData()),
             "second proofData mismatch"
         );
-        assertEq(publicInputs[4], 0x795a355fc2c2e98cbac5561fa98476a6, "second verifierGateHashHi mismatch");
-        assertEq(publicInputs[5], 0x5d079471a264f5999e37158d9440e026, "second verifierGateHashLo mismatch");
+        assertEq(publicInputs[4], 0x7ddc06edb632783fa18398652eadb1ce, "second verifierGateHashHi mismatch");
+        assertEq(publicInputs[5], 0x9d24679ac28b356af36aad73cff4bdd9, "second verifierGateHashLo mismatch");
         assertTrue(
             keccak256(goArtifactProofBytes()) != keccak256(goArtifactSecondProofBytes()),
             "expected batch-specific proof bytes divergence"
@@ -821,7 +878,7 @@ contract FunnyRollupVerifierTest is FunnyRollupArtifactFixtures {
     function testDerivesGoArtifactGroth16PublicInputs() public {
         FunnyRollupVerifier verifier = new FunnyRollupVerifier();
         FunnyRollupVerifierTypes.VerifierContext memory context = buildGoArtifactContext();
-        bytes32 transitionWitnessHash = verifier.hashTransitionWitness(context);
+        bytes32 transitionWitnessHash = proofTransitionWitnessHash(goArtifactProofBytes());
         uint256[8] memory publicInputs = verifier.deriveGroth16PublicInputs(
             context.batchEncodingHash, context.authProofHash, context.verifierGateHash, transitionWitnessHash
         );
@@ -830,8 +887,8 @@ contract FunnyRollupVerifierTest is FunnyRollupArtifactFixtures {
         assertEq(publicInputs[1], 0xdceb8faba670a6922ff939d841f202cb, "batchEncodingHashLo mismatch");
         assertEq(publicInputs[2], 0x1e7c5c1c118b439a090ebf5654651794, "authProofHashHi mismatch");
         assertEq(publicInputs[3], 0x76e94bae5ba6a5ae0f146ec3866c8795, "authProofHashLo mismatch");
-        assertEq(publicInputs[4], 0xbdb8adff0902424ca22e6b3a15581cb9, "verifierGateHashHi mismatch");
-        assertEq(publicInputs[5], 0xb23705ba8192448826e23449e8128626, "verifierGateHashLo mismatch");
+        assertEq(publicInputs[4], 0xefefbcd563252d443f9828f2a30139f9, "verifierGateHashHi mismatch");
+        assertEq(publicInputs[5], 0xae0e25ad24a23bbfa43286618af69ba5, "verifierGateHashLo mismatch");
     }
 
     function buildGoArtifactContext() internal pure returns (FunnyRollupVerifierTypes.VerifierContext memory) {
@@ -842,7 +899,7 @@ contract FunnyRollupVerifierTest is FunnyRollupArtifactFixtures {
                 firstSequenceNo: 7,
                 lastSequenceNo: 7,
                 entryCount: 1,
-                batchDataHash: hex"8a6a2bdede255ffcf3de22c1c07efd93df958681f7582e293ce0bbe19a47ffe0",
+                batchDataHash: hex"40fb1f27f99a0e02b654c683da614e4e7a5e97e38bf42be33556c4c54a03b579",
                 prevStateRoot: hex"749de8c4520e934e38bb7cd42bb62208a408b53f7373fa2b333cc56c62102e46",
                 balancesRoot: hex"a18255dc375d022d3d805eb70bb97aa1d44562a0dc9a6d5b0a3b4a103b6ad319",
                 ordersRoot: hex"1854c9b450264fa6410c58d2f66c3b7f32425fc528d88fac9f5624d2839f93ce",
@@ -864,7 +921,7 @@ contract FunnyRollupVerifierTest is FunnyRollupArtifactFixtures {
                 firstSequenceNo: 7,
                 lastSequenceNo: 7,
                 entryCount: 1,
-                batchDataHash: hex"8a6a2bdede255ffcf3de22c1c07efd93df958681f7582e293ce0bbe19a47ffe0",
+                batchDataHash: hex"40fb1f27f99a0e02b654c683da614e4e7a5e97e38bf42be33556c4c54a03b579",
                 prevStateRoot: hex"749de8c4520e934e38bb7cd42bb62208a408b53f7373fa2b333cc56c62102e46",
                 balancesRoot: hex"a18255dc375d022d3d805eb70bb97aa1d44562a0dc9a6d5b0a3b4a103b6ad319",
                 ordersRoot: hex"1854c9b450264fa6410c58d2f66c3b7f32425fc528d88fac9f5624d2839f93ce",
@@ -994,6 +1051,12 @@ contract WithdrawalClaimer {
         bytes32[] calldata proof
     ) external {
         core.claimAcceptedWithdrawal(batchId, leafIndex, withdrawalId, amount, recipient, proof);
+    }
+}
+
+contract VaultClaimProxy {
+    function process(FunnyVault vault, bytes32 claimId, address wallet, uint256 amount, address recipient) external {
+        vault.processClaim(claimId, wallet, amount, recipient);
     }
 }
 

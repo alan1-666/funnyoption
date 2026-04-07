@@ -11,6 +11,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -47,8 +48,9 @@ type sessionContext struct {
 }
 
 type apiClient struct {
-	baseURL string
-	client  *http.Client
+	baseURL      string
+	client       *http.Client
+	sessionAuths map[int64]string
 }
 
 type collectionResponse[T any] struct {
@@ -108,6 +110,55 @@ type payoutResponse struct {
 	SettledQuantity int64  `json:"settled_quantity"`
 	PayoutAmount    int64  `json:"payout_amount"`
 	Status          string `json:"status"`
+}
+
+type rollupForcedWithdrawalResponse struct {
+	RequestID          int64  `json:"request_id"`
+	WalletAddress      string `json:"wallet_address"`
+	RecipientAddress   string `json:"recipient_address"`
+	Amount             int64  `json:"amount"`
+	RequestedAt        int64  `json:"requested_at"`
+	DeadlineAt         int64  `json:"deadline_at"`
+	SatisfiedClaimID   string `json:"satisfied_claim_id"`
+	SatisfiedAt        int64  `json:"satisfied_at"`
+	FrozenAt           int64  `json:"frozen_at"`
+	Status             string `json:"status"`
+	SatisfactionStatus string `json:"satisfaction_status"`
+}
+
+type rollupEscapeCollateralClaimResponse struct {
+	BatchID           int64    `json:"batch_id"`
+	AccountID         int64    `json:"account_id"`
+	StateRoot         string   `json:"state_root"`
+	CollateralAsset   string   `json:"collateral_asset"`
+	MerkleRoot        string   `json:"merkle_root"`
+	LeafCount         int64    `json:"leaf_count"`
+	TotalAmount       int64    `json:"total_amount"`
+	WalletAddress     string   `json:"wallet_address"`
+	ClaimAmount       int64    `json:"claim_amount"`
+	LeafIndex         int64    `json:"leaf_index"`
+	LeafHash          string   `json:"leaf_hash"`
+	ProofHashes       []string `json:"proof_hashes"`
+	ClaimID           string   `json:"claim_id"`
+	ClaimStatus       string   `json:"claim_status"`
+	ClaimTxHash       string   `json:"claim_tx_hash"`
+	ClaimSubmittedAt  int64    `json:"claim_submitted_at"`
+	ClaimedAt         int64    `json:"claimed_at"`
+	AnchorStatus      string   `json:"anchor_status"`
+	AnchorTxHash      string   `json:"anchor_tx_hash"`
+	AnchorSubmittedAt int64    `json:"anchor_submitted_at"`
+	AnchoredAt        int64    `json:"anchored_at"`
+	LastError         string   `json:"last_error"`
+	LastErrorAt       int64    `json:"last_error_at"`
+	CreatedAt         int64    `json:"created_at"`
+	UpdatedAt         int64    `json:"updated_at"`
+}
+
+type rollupFreezeStateResponse struct {
+	Frozen    bool  `json:"frozen"`
+	FrozenAt  int64 `json:"frozen_at"`
+	RequestID int64 `json:"request_id"`
+	UpdatedAt int64 `json:"updated_at"`
 }
 
 type tradeResponse struct {
@@ -204,7 +255,7 @@ func main() {
 	depositAmount := flag.Int64("deposit-amount", 50000000, "listener-driven deposit amount in chain base units (for example 50000000 = 50.00 USDT)")
 	price := flag.Int64("price", 58, "limit price in cents")
 	quantity := flag.Int64("quantity", 40, "trade quantity")
-	timeout := flag.Duration("timeout", 90*time.Second, "overall lifecycle timeout")
+	timeout := flag.Duration("timeout", 5*time.Minute, "overall lifecycle timeout")
 	flag.Parse()
 
 	if *depositAmount <= 0 || *price <= 0 || *quantity <= 0 {
@@ -655,6 +706,7 @@ func (c *apiClient) createSession(ctx context.Context, wallet walletIdentity, ch
 	if err != nil {
 		return sessionContext{}, err
 	}
+	c.rememberSession(remote.UserID, remote.SessionID)
 
 	return sessionContext{
 		UserID:        remote.UserID,
@@ -763,13 +815,13 @@ func (c *apiClient) listTrades(ctx context.Context, marketID int64) ([]tradeResp
 
 func (c *apiClient) listOrders(ctx context.Context, userID, marketID int64) ([]orderResponse, error) {
 	var result collectionResponse[orderResponse]
-	err := c.doJSON(ctx, http.MethodGet, fmt.Sprintf("/api/v1/orders?user_id=%d&market_id=%d&limit=20", userID, marketID), nil, &result)
+	err := c.doJSONForUser(ctx, userID, http.MethodGet, fmt.Sprintf("/api/v1/orders?user_id=%d&market_id=%d&limit=20", userID, marketID), nil, &result)
 	return result.Items, err
 }
 
 func (c *apiClient) listBalances(ctx context.Context, userID int64) ([]balanceResponse, error) {
 	var result collectionResponse[balanceResponse]
-	err := c.doJSON(ctx, http.MethodGet, fmt.Sprintf("/api/v1/balances?user_id=%d&limit=20", userID), nil, &result)
+	err := c.doJSONForUser(ctx, userID, http.MethodGet, fmt.Sprintf("/api/v1/balances?user_id=%d&limit=20", userID), nil, &result)
 	return result.Items, err
 }
 
@@ -788,23 +840,90 @@ func (c *apiClient) fetchUSDTBalance(ctx context.Context, userID int64) (int64, 
 
 func (c *apiClient) listPositions(ctx context.Context, userID, marketID int64) ([]positionResponse, error) {
 	var result collectionResponse[positionResponse]
-	err := c.doJSON(ctx, http.MethodGet, fmt.Sprintf("/api/v1/positions?user_id=%d&market_id=%d&limit=20", userID, marketID), nil, &result)
+	err := c.doJSONForUser(ctx, userID, http.MethodGet, fmt.Sprintf("/api/v1/positions?user_id=%d&market_id=%d&limit=20", userID, marketID), nil, &result)
 	return result.Items, err
 }
 
 func (c *apiClient) listDeposits(ctx context.Context, userID int64) ([]depositResponse, error) {
 	var result collectionResponse[depositResponse]
-	err := c.doJSON(ctx, http.MethodGet, fmt.Sprintf("/api/v1/deposits?user_id=%d&limit=20", userID), nil, &result)
+	err := c.doJSONForUser(ctx, userID, http.MethodGet, fmt.Sprintf("/api/v1/deposits?user_id=%d&limit=20", userID), nil, &result)
 	return result.Items, err
 }
 
 func (c *apiClient) listPayouts(ctx context.Context, userID, marketID int64) ([]payoutResponse, error) {
 	var result collectionResponse[payoutResponse]
-	err := c.doJSON(ctx, http.MethodGet, fmt.Sprintf("/api/v1/payouts?user_id=%d&market_id=%d&limit=20", userID, marketID), nil, &result)
+	err := c.doJSONForUser(ctx, userID, http.MethodGet, fmt.Sprintf("/api/v1/payouts?user_id=%d&market_id=%d&limit=20", userID, marketID), nil, &result)
 	return result.Items, err
 }
 
+func (c *apiClient) listRollupForcedWithdrawals(ctx context.Context, walletAddress, status string, limit int) ([]rollupForcedWithdrawalResponse, error) {
+	query := url.Values{}
+	if strings.TrimSpace(walletAddress) != "" {
+		query.Set("wallet_address", strings.ToLower(strings.TrimSpace(walletAddress)))
+	}
+	if strings.TrimSpace(status) != "" {
+		query.Set("status", strings.ToUpper(strings.TrimSpace(status)))
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	query.Set("limit", fmt.Sprintf("%d", limit))
+
+	var result collectionResponse[rollupForcedWithdrawalResponse]
+	err := c.doJSON(ctx, http.MethodGet, "/api/v1/rollup/forced-withdrawals?"+query.Encode(), nil, &result)
+	return result.Items, err
+}
+
+func (c *apiClient) listRollupEscapeCollateralClaims(ctx context.Context, userID int64, walletAddress, status string, limit int) ([]rollupEscapeCollateralClaimResponse, error) {
+	query := url.Values{}
+	if userID > 0 {
+		query.Set("user_id", fmt.Sprintf("%d", userID))
+	}
+	if strings.TrimSpace(walletAddress) != "" {
+		query.Set("wallet_address", strings.ToLower(strings.TrimSpace(walletAddress)))
+	}
+	if strings.TrimSpace(status) != "" {
+		query.Set("status", strings.ToUpper(strings.TrimSpace(status)))
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	query.Set("limit", fmt.Sprintf("%d", limit))
+
+	var result collectionResponse[rollupEscapeCollateralClaimResponse]
+	err := c.doJSON(ctx, http.MethodGet, "/api/v1/rollup/escape-collateral?"+query.Encode(), nil, &result)
+	return result.Items, err
+}
+
+func (c *apiClient) getRollupFreezeState(ctx context.Context) (rollupFreezeStateResponse, error) {
+	var result rollupFreezeStateResponse
+	return result, c.doJSON(ctx, http.MethodGet, "/api/v1/rollup/freeze-state", nil, &result)
+}
+
+func (c *apiClient) rememberSession(userID int64, sessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	if userID <= 0 || sessionID == "" {
+		return
+	}
+	if c.sessionAuths == nil {
+		c.sessionAuths = make(map[int64]string)
+	}
+	c.sessionAuths[userID] = sessionID
+}
+
+func (c *apiClient) doJSONForUser(ctx context.Context, userID int64, method, path string, body any, out any) error {
+	sessionID := strings.TrimSpace(c.sessionAuths[userID])
+	if sessionID == "" {
+		return fmt.Errorf("%s %s: missing session authorization for user %d", method, path, userID)
+	}
+	return c.doJSONAuthorized(ctx, sessionID, method, path, body, out)
+}
+
 func (c *apiClient) doJSON(ctx context.Context, method, path string, body any, out any) error {
+	return c.doJSONAuthorized(ctx, "", method, path, body, out)
+}
+
+func (c *apiClient) doJSONAuthorized(ctx context.Context, sessionID, method, path string, body any, out any) error {
 	var reader *strings.Reader
 	if body == nil {
 		reader = strings.NewReader("")
@@ -819,6 +938,9 @@ func (c *apiClient) doJSON(ctx context.Context, method, path string, body any, o
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
 	if err != nil {
 		return err
+	}
+	if strings.TrimSpace(sessionID) != "" {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(sessionID))
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")

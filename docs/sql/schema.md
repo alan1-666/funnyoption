@@ -571,6 +571,29 @@ First proof-lane storage / migration consequence:
     legacy SQL/Kafka mutable-truth advancement after freeze
   - this still does **not** mean full escape-hatch proof claims or global
     production-truth switching are complete
+- `TASK-CHAIN-036` closes the accepted/frozen schema-first gap without adding a
+  new migration:
+  - `rollup_accepted_escape_roots` and `rollup_accepted_escape_leaves` are now
+    part of the truthful frozen exit path, not docs-only placeholders
+  - once accepted batches exist, financial reads now prefer accepted mirrors
+    through:
+    - `rollup_accepted_balances`
+    - `rollup_accepted_positions`
+    - `rollup_accepted_payouts`
+    - `rollup_accepted_escape_leaves`
+  - after an escape collateral claim is `CLAIMED`, the accepted balance read
+    surface for that account is zeroed rather than continuing to show the
+    pre-escape accepted collateral amount
+  - accepted escape / withdrawal leaves now preserve existing runtime claim
+    fields during rematerialization:
+    - `claim_status`
+    - `claim_tx_hash`
+    - `claim_submitted_at`
+    - `claimed_at`
+    - `last_error`
+    - `last_error_at`
+  - that means replay / restart no longer silently resets already submitted or
+    claimed exits back to `CLAIMABLE`
 - deprecated blank-vault `/api/v1/sessions` rows should remain shadow /
   compatibility-only; proof tooling should migrate to V2 trading-key rows
   before those batches are treated as verifier-eligible

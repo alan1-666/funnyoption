@@ -54,3 +54,56 @@ func TestExtractAcceptedWithdrawals(t *testing.T) {
 		t.Fatalf("claim_id should be populated")
 	}
 }
+
+func TestPreserveAcceptedEscapeClaimRuntime(t *testing.T) {
+	existing := AcceptedEscapeCollateralLeafRecord{
+		ClaimID:          "claim_1",
+		ClaimStatus:      EscapeCollateralClaimStatusClaimed,
+		ClaimTxHash:      "deadbeef",
+		ClaimSubmittedAt: 11,
+		ClaimedAt:        22,
+		LastError:        "old error",
+		LastErrorAt:      33,
+	}
+	next := AcceptedEscapeCollateralLeafRecord{
+		ClaimID:     "claim_1",
+		ClaimStatus: EscapeCollateralClaimStatusClaimable,
+	}
+
+	preserved := preserveAcceptedEscapeClaimRuntime(existing, next)
+	if preserved.ClaimStatus != EscapeCollateralClaimStatusClaimed {
+		t.Fatalf("claim_status = %s, want %s", preserved.ClaimStatus, EscapeCollateralClaimStatusClaimed)
+	}
+	if preserved.ClaimTxHash != existing.ClaimTxHash {
+		t.Fatalf("claim_tx_hash = %s, want %s", preserved.ClaimTxHash, existing.ClaimTxHash)
+	}
+	if preserved.ClaimedAt != existing.ClaimedAt {
+		t.Fatalf("claimed_at = %d, want %d", preserved.ClaimedAt, existing.ClaimedAt)
+	}
+}
+
+func TestPreserveAcceptedWithdrawalClaimRuntime(t *testing.T) {
+	existing := AcceptedWithdrawalLeafRecord{
+		ClaimID:          "claim_2",
+		ClaimStatus:      WithdrawalClaimStatusSubmitted,
+		ClaimTxHash:      "cafebabe",
+		ClaimSubmittedAt: 44,
+		LastError:        "pending",
+		LastErrorAt:      55,
+	}
+	next := AcceptedWithdrawalLeafRecord{
+		ClaimID:     "claim_2",
+		ClaimStatus: WithdrawalClaimStatusClaimable,
+	}
+
+	preserved := preserveAcceptedWithdrawalClaimRuntime(existing, next)
+	if preserved.ClaimStatus != WithdrawalClaimStatusSubmitted {
+		t.Fatalf("claim_status = %s, want %s", preserved.ClaimStatus, WithdrawalClaimStatusSubmitted)
+	}
+	if preserved.ClaimTxHash != existing.ClaimTxHash {
+		t.Fatalf("claim_tx_hash = %s, want %s", preserved.ClaimTxHash, existing.ClaimTxHash)
+	}
+	if preserved.ClaimSubmittedAt != existing.ClaimSubmittedAt {
+		t.Fatalf("claim_submitted_at = %d, want %d", preserved.ClaimSubmittedAt, existing.ClaimSubmittedAt)
+	}
+}

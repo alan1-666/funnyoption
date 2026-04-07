@@ -100,4 +100,4 @@ it still does not prove:
 - browser `localStorage` / IndexedDB loss, restore, and hydration behavior
 - live external oracle provider behavior, throttling, or outage handling
 - slow-withdraw claim execution and browser claim UX
-- forced-withdrawal / freeze / escape-hatch runtime
+- unresolved-open-position emergency handling during freeze

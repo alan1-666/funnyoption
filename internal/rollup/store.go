@@ -32,8 +32,8 @@ type sqlQueryer interface {
 }
 
 type Store struct {
-	db             *sql.DB
-	cachedState    *shadowState
+	db              *sql.DB
+	cachedState     *shadowState
 	cachedStateRoot string
 }
 
@@ -514,16 +514,16 @@ func (s *Store) MaterializeAcceptedSubmission(ctx context.Context, submissionID 
 	}
 
 	return AcceptedSubmissionMaterialization{
-		Batch:               acceptedBatch,
-		AcceptedWithdrawals: acceptedWithdrawals,
-		AcceptedBalances:    snapshot.Balances,
-		AcceptedPositions:   snapshot.Positions,
-		AcceptedPayouts:     snapshot.Payouts,
-		EscapeCollateralRoot: snapshot.EscapeCollateralRoot,
+		Batch:                  acceptedBatch,
+		AcceptedWithdrawals:    acceptedWithdrawals,
+		AcceptedBalances:       snapshot.Balances,
+		AcceptedPositions:      snapshot.Positions,
+		AcceptedPayouts:        snapshot.Payouts,
+		EscapeCollateralRoot:   snapshot.EscapeCollateralRoot,
 		EscapeCollateralLeaves: snapshot.EscapeCollateralLeaves,
-		WithdrawalRoot:       withdrawalRoot,
-		WithdrawalLeaves:     withdrawalLeaves,
-		QueuedClaimRefs:     queuedClaimRefs,
+		WithdrawalRoot:         withdrawalRoot,
+		WithdrawalLeaves:       withdrawalLeaves,
+		QueuedClaimRefs:        queuedClaimRefs,
 	}, nil
 }
 
@@ -732,7 +732,7 @@ func (s *Store) upsertSubmission(ctx context.Context, batchID int64, bundle Shad
 	}
 	submissionID := fmt.Sprintf("rsub_%d", batchID)
 
-	batchDataHash, err := solidityBytes32(bundle.Batch.InputHash, "bundle.batch.input_hash")
+	batchDataHash, err := solidityBytes32(bundle.Batch.BatchDataHash, "bundle.batch.batch_data_hash")
 	if err != nil {
 		return StoredSubmission{}, err
 	}
@@ -1279,7 +1279,7 @@ func (s *Store) upsertAcceptedBatch(ctx context.Context, q sqlQueryer, batch Sto
 		batch.FirstSequence,
 		batch.LastSequence,
 		batch.EntryCount,
-		batch.InputHash,
+		submission.BatchDataHash,
 		batch.PrevStateRoot,
 		batch.BalancesRoot,
 		batch.OrdersRoot,
@@ -1542,10 +1542,15 @@ func (s *Store) upsertAcceptedEscapeRoot(ctx context.Context, q sqlQueryer, root
 }
 
 func (s *Store) replaceAcceptedEscapeLeaves(ctx context.Context, q sqlQueryer, batchID int64, leaves []AcceptedEscapeCollateralLeafRecord, acceptedAt int64) error {
+	existingByClaimID, err := s.loadAcceptedEscapeLeavesByClaimID(ctx, q, batchID)
+	if err != nil {
+		return err
+	}
 	if _, err := q.ExecContext(ctx, `DELETE FROM rollup_accepted_escape_leaves WHERE batch_id = $1`, batchID); err != nil {
 		return err
 	}
 	for _, leaf := range leaves {
+		leaf = preserveAcceptedEscapeClaimRuntime(existingByClaimID[leaf.ClaimID], leaf)
 		proofJSON, err := json.Marshal(leaf.ProofHashes)
 		if err != nil {
 			return err
@@ -1583,10 +1588,15 @@ func (s *Store) upsertAcceptedWithdrawalRoot(ctx context.Context, q sqlQueryer, 
 }
 
 func (s *Store) replaceAcceptedWithdrawalLeaves(ctx context.Context, q sqlQueryer, batchID int64, leaves []AcceptedWithdrawalLeafRecord, acceptedAt int64) error {
+	existingByClaimID, err := s.loadAcceptedWithdrawalLeavesByClaimID(ctx, q, batchID)
+	if err != nil {
+		return err
+	}
 	if _, err := q.ExecContext(ctx, `DELETE FROM rollup_accepted_withdrawal_leaves WHERE batch_id = $1`, batchID); err != nil {
 		return err
 	}
 	for _, leaf := range leaves {
+		leaf = preserveAcceptedWithdrawalClaimRuntime(existingByClaimID[leaf.ClaimID], leaf)
 		proofJSON, err := json.Marshal(leaf.ProofHashes)
 		if err != nil {
 			return err
@@ -1607,6 +1617,165 @@ func (s *Store) replaceAcceptedWithdrawalLeaves(ctx context.Context, q sqlQuerye
 		}
 	}
 	return nil
+}
+
+func (s *Store) loadAcceptedEscapeLeavesByClaimID(
+	ctx context.Context,
+	q sqlQueryer,
+	batchID int64,
+) (map[string]AcceptedEscapeCollateralLeafRecord, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT batch_id, account_id, wallet_address, collateral_asset, claim_amount,
+		       leaf_index, leaf_hash, proof_hashes, claim_id, claim_status,
+		       claim_tx_hash, claim_submitted_at, claimed_at, last_error, last_error_at,
+		       created_at, updated_at
+		FROM rollup_accepted_escape_leaves
+		WHERE batch_id = $1
+	`, batchID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make(map[string]AcceptedEscapeCollateralLeafRecord)
+	for rows.Next() {
+		item, err := scanAcceptedEscapeCollateralLeaf(rows)
+		if err != nil {
+			return nil, err
+		}
+		items[item.ClaimID] = item
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func scanAcceptedEscapeCollateralLeaf(scanner rowScanner) (AcceptedEscapeCollateralLeafRecord, error) {
+	var (
+		item      AcceptedEscapeCollateralLeafRecord
+		proofJSON []byte
+	)
+	if err := scanner.Scan(
+		&item.BatchID,
+		&item.AccountID,
+		&item.WalletAddress,
+		&item.CollateralAsset,
+		&item.ClaimAmount,
+		&item.LeafIndex,
+		&item.LeafHash,
+		&proofJSON,
+		&item.ClaimID,
+		&item.ClaimStatus,
+		&item.ClaimTxHash,
+		&item.ClaimSubmittedAt,
+		&item.ClaimedAt,
+		&item.LastError,
+		&item.LastErrorAt,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		return AcceptedEscapeCollateralLeafRecord{}, err
+	}
+	if len(strings.TrimSpace(string(proofJSON))) > 0 {
+		if err := json.Unmarshal(proofJSON, &item.ProofHashes); err != nil {
+			return AcceptedEscapeCollateralLeafRecord{}, err
+		}
+	}
+	return item, nil
+}
+
+func (s *Store) loadAcceptedWithdrawalLeavesByClaimID(
+	ctx context.Context,
+	q sqlQueryer,
+	batchID int64,
+) (map[string]AcceptedWithdrawalLeafRecord, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT batch_id, withdrawal_id, account_id, wallet_address, recipient_address, amount,
+		       leaf_index, leaf_hash, proof_hashes, claim_id, claim_status,
+		       claim_tx_hash, claim_submitted_at, claimed_at, last_error, last_error_at,
+		       created_at, updated_at
+		FROM rollup_accepted_withdrawal_leaves
+		WHERE batch_id = $1
+	`, batchID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make(map[string]AcceptedWithdrawalLeafRecord)
+	for rows.Next() {
+		item, err := scanAcceptedWithdrawalLeaf(rows)
+		if err != nil {
+			return nil, err
+		}
+		items[item.ClaimID] = item
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func scanAcceptedWithdrawalLeaf(scanner rowScanner) (AcceptedWithdrawalLeafRecord, error) {
+	var (
+		item      AcceptedWithdrawalLeafRecord
+		proofJSON []byte
+	)
+	if err := scanner.Scan(
+		&item.BatchID,
+		&item.WithdrawalID,
+		&item.AccountID,
+		&item.WalletAddress,
+		&item.RecipientAddress,
+		&item.Amount,
+		&item.LeafIndex,
+		&item.LeafHash,
+		&proofJSON,
+		&item.ClaimID,
+		&item.ClaimStatus,
+		&item.ClaimTxHash,
+		&item.ClaimSubmittedAt,
+		&item.ClaimedAt,
+		&item.LastError,
+		&item.LastErrorAt,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		return AcceptedWithdrawalLeafRecord{}, err
+	}
+	if len(strings.TrimSpace(string(proofJSON))) > 0 {
+		if err := json.Unmarshal(proofJSON, &item.ProofHashes); err != nil {
+			return AcceptedWithdrawalLeafRecord{}, err
+		}
+	}
+	return item, nil
+}
+
+func preserveAcceptedEscapeClaimRuntime(existing, next AcceptedEscapeCollateralLeafRecord) AcceptedEscapeCollateralLeafRecord {
+	if existing.ClaimID == "" || existing.ClaimID != next.ClaimID {
+		return next
+	}
+	next.ClaimStatus = existing.ClaimStatus
+	next.ClaimTxHash = existing.ClaimTxHash
+	next.ClaimSubmittedAt = existing.ClaimSubmittedAt
+	next.ClaimedAt = existing.ClaimedAt
+	next.LastError = existing.LastError
+	next.LastErrorAt = existing.LastErrorAt
+	return next
+}
+
+func preserveAcceptedWithdrawalClaimRuntime(existing, next AcceptedWithdrawalLeafRecord) AcceptedWithdrawalLeafRecord {
+	if existing.ClaimID == "" || existing.ClaimID != next.ClaimID {
+		return next
+	}
+	next.ClaimStatus = existing.ClaimStatus
+	next.ClaimTxHash = existing.ClaimTxHash
+	next.ClaimSubmittedAt = existing.ClaimSubmittedAt
+	next.ClaimedAt = existing.ClaimedAt
+	next.LastError = existing.LastError
+	next.LastErrorAt = existing.LastErrorAt
+	return next
 }
 
 type rowScanner interface {

@@ -305,8 +305,8 @@ func TestReplayStoredBatchesSettlementDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildShadowBatchContract returned error: %v", err)
 	}
-	if contract.PublicInputs.BatchDataHash != settlementHash {
-		t.Fatalf("expected batch_data_hash %s, got %s", settlementHash, contract.PublicInputs.BatchDataHash)
+	if contract.PublicInputs.BatchDataHash != canonicalBatchDataHash(settlementBatch) {
+		t.Fatalf("expected batch_data_hash %s, got %s", canonicalBatchDataHash(settlementBatch), contract.PublicInputs.BatchDataHash)
 	}
 	if contract.PublicInputs.PrevStateRoot != tradingBatch.StateRoot {
 		t.Fatalf("expected prev_state_root %s, got %s", tradingBatch.StateRoot, contract.PublicInputs.PrevStateRoot)

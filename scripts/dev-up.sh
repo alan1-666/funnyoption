@@ -299,7 +299,7 @@ reset_local_anvil_runtime_state() {
   [[ -f "${LOCAL_CHAIN_FRESH_FILE}" ]] || return 0
 
   echo "==> resetting local anvil runtime state"
-  psql "${FUNNYOPTION_POSTGRES_DSN}" <<SQL
+  psql "${FUNNYOPTION_POSTGRES_DSN}" -v ON_ERROR_STOP=1 <<SQL
 DELETE FROM chain_listener_cursors
  WHERE chain_name = 'anvil'
    AND network_name = 'local'
@@ -313,13 +313,31 @@ DELETE FROM chain_withdrawals
 DELETE FROM chain_deposits
  WHERE chain_name = 'anvil'
    AND network_name = 'local';
-TRUNCATE rollup_accepted_withdrawals,
+TRUNCATE rollup_accepted_escape_leaves,
+         rollup_accepted_escape_roots,
+         rollup_accepted_withdrawal_leaves,
+         rollup_accepted_withdrawal_roots,
+         rollup_accepted_withdrawals,
          rollup_accepted_payouts,
          rollup_accepted_positions,
          rollup_accepted_balances,
          rollup_accepted_batches,
          rollup_forced_withdrawal_requests,
          rollup_freeze_state,
+         account_balance_events,
+         settlement_payouts,
+         ledger_postings,
+         ledger_entries,
+         freeze_records,
+         positions,
+         trades,
+         orders,
+         account_balances,
+         market_resolutions,
+         market_option_sets,
+         markets,
+         trading_key_challenges,
+         wallet_sessions,
          rollup_shadow_submissions,
          rollup_shadow_batches,
          rollup_shadow_journal_entries

@@ -49,18 +49,56 @@ interface IFunnyRollupBatchVerifier {
 }
 
 contract FunnyRollupVerifier is IFunnyRollupBatchVerifier {
+    struct DecodedGroth16Proof {
+        bytes32 transitionWitnessHash;
+        bytes32 entrySetHash;
+        bytes32 acceptedBalancesHash;
+        bytes32 acceptedPositionsHash;
+        bytes32 acceptedPayoutsHash;
+        bytes32 acceptedWithdrawalRootHash;
+        bytes32 acceptedWithdrawalLeavesHash;
+        bytes32 escapeCollateralRootHash;
+        bytes32 escapeCollateralLeavesHash;
+        uint256[2] a;
+        uint256[2][2] b;
+        uint256[2] c;
+        uint256[2] commitments;
+        uint256[2] commitmentPok;
+    }
+
     bytes32 public constant SHADOW_BATCH_V1_HASH = keccak256("shadow-batch-v1");
     bytes32 public constant PROOF_SCHEMA_V1_HASH = keccak256("funny-rollup-proof-envelope-v1");
     bytes32 public constant PUBLIC_SIGNALS_V1_HASH = keccak256("funny-rollup-public-signals-v1");
     bytes32 public constant PROOF_DATA_SCHEMA_V1_HASH = keccak256("funny-rollup-proof-data-v1");
     bytes32 public constant PLACEHOLDER_PROOF_V1_HASH = keccak256("funny-rollup-proof-placeholder-v1");
-    // The first planned cryptographic lane keeps proofData-v1 and uses
-    // proofBytes = abi.encode(bytes32 transitionWitnessHash, uint256[2] a, uint256[2][2] b, uint256[2] c),
+    // The current fixed-vk cryptographic lane keeps proofData-v1 and uses
+    // proofBytes = abi.encode(
+    //   transitionWitnessHash,
+    //   entrySetHash,
+    //   acceptedBalancesHash,
+    //   acceptedPositionsHash,
+    //   acceptedPayoutsHash,
+    //   acceptedWithdrawalRootHash,
+    //   acceptedWithdrawalLeavesHash,
+    //   escapeCollateralRootHash,
+    //   escapeCollateralLeavesHash,
+    //   a,
+    //   b,
+    //   c,
+    //   commitments,
+    //   commitmentPok
+    // ),
     // while proofTypeHash fixes the full verifier-facing contract: proving
     // system/curve, bytes32 signal lifting, exact circuit/vk, and byte codec.
-    bytes32 public constant GROTH16_BN254_2X128_SHADOW_STATE_ROOT_GATE_V1_HASH =
-        keccak256("funny-rollup-proof-groth16-bn254-2x128-shadow-state-root-gate-v1");
-    uint256 internal constant GROTH16_PROOF_BYTES_LENGTH = 0x1A0;
+    // v5 narrows the circuit one step further: it binds one deterministic
+    // transitionContextHash plus one deterministic stateTransitionMaterialHash
+    // while preserving the underlying witness digests in proofBytes so the
+    // verifier can still recompute and constrain the same boundary. The
+    // material hash now folds the eight digests as pair hashes first to avoid
+    // stack blowups in Solidity while keeping the outer envelope unchanged.
+    bytes32 public constant GROTH16_BN254_2X128_SHADOW_STATE_TRANSITION_CONTEXT_MATERIAL_PAIR_HASH_V5_HASH =
+        keccak256("funny-rollup-proof-groth16-bn254-2x128-shadow-state-transition-context-material-pair-hash-v5");
+    uint256 internal constant GROTH16_PROOF_BYTES_LENGTH = 0x2A0;
 
     FunnyRollupGroth16Backend public immutable groth16Backend;
 
@@ -126,24 +164,16 @@ contract FunnyRollupVerifier is IFunnyRollupBatchVerifier {
             return false;
         }
 
-        if (proofData.proofTypeHash != GROTH16_BN254_2X128_SHADOW_STATE_ROOT_GATE_V1_HASH) {
+        if (proofData.proofTypeHash != GROTH16_BN254_2X128_SHADOW_STATE_TRANSITION_CONTEXT_MATERIAL_PAIR_HASH_V5_HASH) {
             return false;
         }
 
-        bytes32 transitionWitnessHash = _hashTransitionWitness(context);
-        (
-            bytes32 proofTransitionWitnessHash,
-            uint256[2] memory a,
-            uint256[2][2] memory b,
-            uint256[2] memory c,
-            uint256[2] memory commitments,
-            uint256[2] memory commitmentPok,
-            bool decodedTupleOk
-        ) = _decodeGroth16ProofTuple(proofData.proofBytes);
+        (DecodedGroth16Proof memory decodedProof, bool decodedTupleOk) = _decodeGroth16ProofTuple(proofData.proofBytes);
         if (!decodedTupleOk) {
             return false;
         }
-        if (proofTransitionWitnessHash != transitionWitnessHash) {
+        bytes32 transitionWitnessHash = _hashTransitionWitnessFromProof(context, decodedProof);
+        if (decodedProof.transitionWitnessHash != transitionWitnessHash) {
             return false;
         }
 
@@ -154,7 +184,14 @@ contract FunnyRollupVerifier is IFunnyRollupBatchVerifier {
             transitionWitnessHash
         );
 
-        return groth16Backend.verifyTupleProofWithCommitments(a, b, c, commitments, commitmentPok, publicInputs);
+        return groth16Backend.verifyTupleProofWithCommitments(
+            decodedProof.a,
+            decodedProof.b,
+            decodedProof.c,
+            decodedProof.commitments,
+            decodedProof.commitmentPok,
+            publicInputs
+        );
     }
 
     function hashVerifierGate(FunnyRollupVerifierTypes.VerifierContext calldata context)
@@ -170,7 +207,41 @@ contract FunnyRollupVerifier is IFunnyRollupBatchVerifier {
         pure
         returns (bytes32)
     {
-        return _hashTransitionWitness(context);
+        return _hashTransitionWitness(
+            context, bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0)
+        );
+    }
+
+    function hashTransitionWitnessWithMaterial(
+        FunnyRollupVerifierTypes.VerifierContext calldata context,
+        bytes32 entrySetHash,
+        bytes32 acceptedBalancesHash,
+        bytes32 acceptedPositionsHash,
+        bytes32 acceptedPayoutsHash,
+        bytes32 acceptedWithdrawalRootHash,
+        bytes32 acceptedWithdrawalLeavesHash,
+        bytes32 escapeCollateralRootHash,
+        bytes32 escapeCollateralLeavesHash
+    ) external pure returns (bytes32) {
+        return _hashTransitionWitness(
+            context,
+            entrySetHash,
+            acceptedBalancesHash,
+            acceptedPositionsHash,
+            acceptedPayoutsHash,
+            acceptedWithdrawalRootHash,
+            acceptedWithdrawalLeavesHash,
+            escapeCollateralRootHash,
+            escapeCollateralLeavesHash
+        );
+    }
+
+    function hashTransitionContext(FunnyRollupVerifierTypes.VerifierContext calldata context)
+        external
+        pure
+        returns (bytes32)
+    {
+        return _hashTransitionContext(context);
     }
 
     function deriveGroth16PublicInputs(
@@ -178,11 +249,7 @@ contract FunnyRollupVerifier is IFunnyRollupBatchVerifier {
         bytes32 authProofHash,
         bytes32 verifierGateHash,
         bytes32 transitionWitnessHash
-    )
-        public
-        pure
-        returns (uint256[8] memory inputs)
-    {
+    ) public pure returns (uint256[8] memory inputs) {
         (inputs[0], inputs[1]) = _splitBytes32(batchEncodingHash);
         (inputs[2], inputs[3]) = _splitBytes32(authProofHash);
         (inputs[4], inputs[5]) = _splitBytes32(verifierGateHash);
@@ -214,7 +281,41 @@ contract FunnyRollupVerifier is IFunnyRollupBatchVerifier {
         );
     }
 
-    function _hashTransitionWitness(FunnyRollupVerifierTypes.VerifierContext calldata context)
+    function _hashTransitionWitness(
+        FunnyRollupVerifierTypes.VerifierContext calldata context,
+        bytes32 entrySetHash,
+        bytes32 acceptedBalancesHash,
+        bytes32 acceptedPositionsHash,
+        bytes32 acceptedPayoutsHash,
+        bytes32 acceptedWithdrawalRootHash,
+        bytes32 acceptedWithdrawalLeavesHash,
+        bytes32 escapeCollateralRootHash,
+        bytes32 escapeCollateralLeavesHash
+    ) internal pure returns (bytes32) {
+        bytes32 transitionContextHash = _hashTransitionContext(context);
+        bytes32 stateTransitionMaterialHash = _hashStateTransitionMaterial(
+            entrySetHash,
+            acceptedBalancesHash,
+            acceptedPositionsHash,
+            acceptedPayoutsHash,
+            acceptedWithdrawalRootHash,
+            acceptedWithdrawalLeavesHash,
+            escapeCollateralRootHash,
+            escapeCollateralLeavesHash
+        );
+        return sha256(abi.encode(transitionContextHash, stateTransitionMaterialHash));
+    }
+
+    function _hashTransitionWitnessFromProof(
+        FunnyRollupVerifierTypes.VerifierContext calldata context,
+        DecodedGroth16Proof memory decodedProof
+    ) internal pure returns (bytes32) {
+        bytes32 transitionContextHash = _hashTransitionContext(context);
+        bytes32 stateTransitionMaterialHash = _hashStateTransitionMaterialFromProof(decodedProof);
+        return sha256(abi.encode(transitionContextHash, stateTransitionMaterialHash));
+    }
+
+    function _hashTransitionContext(FunnyRollupVerifierTypes.VerifierContext calldata context)
         internal
         pure
         returns (bytes32)
@@ -237,6 +338,54 @@ contract FunnyRollupVerifier is IFunnyRollupBatchVerifier {
                 context.authProofHash
             )
         );
+    }
+
+    function _hashStateTransitionMaterial(
+        bytes32 entrySetHash,
+        bytes32 acceptedBalancesHash,
+        bytes32 acceptedPositionsHash,
+        bytes32 acceptedPayoutsHash,
+        bytes32 acceptedWithdrawalRootHash,
+        bytes32 acceptedWithdrawalLeavesHash,
+        bytes32 escapeCollateralRootHash,
+        bytes32 escapeCollateralLeavesHash
+    ) internal pure returns (bytes32) {
+        bytes32 leftHash = sha256(
+            abi.encode(entrySetHash, acceptedBalancesHash, acceptedPositionsHash, acceptedPayoutsHash)
+        );
+        bytes32 rightHash = sha256(
+            abi.encode(
+                acceptedWithdrawalRootHash,
+                acceptedWithdrawalLeavesHash,
+                escapeCollateralRootHash,
+                escapeCollateralLeavesHash
+            )
+        );
+        return sha256(abi.encode(leftHash, rightHash));
+    }
+
+    function _hashStateTransitionMaterialFromProof(DecodedGroth16Proof memory decodedProof)
+        internal
+        pure
+        returns (bytes32)
+    {
+        bytes32 leftHash = sha256(
+            abi.encode(
+                decodedProof.entrySetHash,
+                decodedProof.acceptedBalancesHash,
+                decodedProof.acceptedPositionsHash,
+                decodedProof.acceptedPayoutsHash
+            )
+        );
+        bytes32 rightHash = sha256(
+            abi.encode(
+                decodedProof.acceptedWithdrawalRootHash,
+                decodedProof.acceptedWithdrawalLeavesHash,
+                decodedProof.escapeCollateralRootHash,
+                decodedProof.escapeCollateralLeavesHash
+            )
+        );
+        return sha256(abi.encode(leftHash, rightHash));
     }
 
     function _decodeProof(bytes calldata verifierProof)
@@ -335,23 +484,13 @@ contract FunnyRollupVerifier is IFunnyRollupBatchVerifier {
     function _decodeGroth16ProofTuple(bytes memory proofBytes)
         internal
         pure
-        returns (
-            bytes32 transitionWitnessHash,
-            uint256[2] memory a,
-            uint256[2][2] memory b,
-            uint256[2] memory c,
-            uint256[2] memory commitments,
-            uint256[2] memory commitmentPok,
-            bool ok
-        )
+        returns (DecodedGroth16Proof memory decodedProof, bool ok)
     {
         if (proofBytes.length != GROTH16_PROOF_BYTES_LENGTH) {
-            return (bytes32(0), a, b, c, commitments, commitmentPok, false);
+            return (decodedProof, false);
         }
-        (transitionWitnessHash, a, b, c, commitments, commitmentPok) = abi.decode(
-            proofBytes, (bytes32, uint256[2], uint256[2][2], uint256[2], uint256[2], uint256[2])
-        );
-        return (transitionWitnessHash, a, b, c, commitments, commitmentPok, true);
+        decodedProof = abi.decode(proofBytes, (DecodedGroth16Proof));
+        return (decodedProof, true);
     }
 
     function _splitBytes32(bytes32 value) internal pure returns (uint256 hi, uint256 lo) {

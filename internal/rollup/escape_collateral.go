@@ -11,6 +11,7 @@ import (
 	"funnyoption/internal/shared/assets"
 	sharedauth "funnyoption/internal/shared/auth"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
@@ -125,11 +126,12 @@ func hashAcceptedEscapeCollateralLeaf(batchID, leafIndex int64, input acceptedEs
 	var leafBytes [8]byte
 	binary.BigEndian.PutUint64(batchBytes[:], uint64(batchID))
 	binary.BigEndian.PutUint64(leafBytes[:], uint64(leafIndex))
+	walletAddress := common.HexToAddress(sharedauth.NormalizeHex(input.WalletAddress))
 	return crypto.Keccak256(
 		[]byte("funny-rollup-escape-collateral-v1"),
 		batchBytes[:],
 		leafBytes[:],
-		[]byte(sharedauth.NormalizeHex(input.WalletAddress)),
+		walletAddress.Bytes(),
 		int64ToBytes(input.ClaimAmount),
 	)
 }
@@ -139,11 +141,12 @@ func buildEscapeCollateralClaimID(batchID, leafIndex int64, walletAddress string
 	var leafBytes [8]byte
 	binary.BigEndian.PutUint64(batchBytes[:], uint64(batchID))
 	binary.BigEndian.PutUint64(leafBytes[:], uint64(leafIndex))
+	wallet := common.HexToAddress(sharedauth.NormalizeHex(walletAddress))
 	return crypto.Keccak256Hash(
 		[]byte("funny-rollup-escape-claim-v1"),
 		batchBytes[:],
 		leafBytes[:],
-		[]byte(sharedauth.NormalizeHex(walletAddress)),
+		wallet.Bytes(),
 		int64ToBytes(amount),
 	).Hex()
 }

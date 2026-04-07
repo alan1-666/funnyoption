@@ -54,9 +54,14 @@ func BuildVerifierArtifactBundle(history []StoredBatch, batch StoredBatch) (Veri
 	if err != nil {
 		return VerifierArtifactBundle{}, err
 	}
+	witnessMaterial, err := BuildStateTransitionWitnessMaterial(history, batch)
+	if err != nil {
+		return VerifierArtifactBundle{}, err
+	}
 	verifierInterface, err := buildVerifierInterfaceSolidityExport(
 		acceptanceContract.SolidityExport.Calldata.PublicInputs,
 		verifierGateDigest,
+		witnessMaterial,
 	)
 	if err != nil {
 		return VerifierArtifactBundle{}, err
@@ -71,7 +76,7 @@ func BuildVerifierArtifactBundle(history []StoredBatch, batch StoredBatch) (Veri
 			"the verifier artifact bundle reuses BuildVerifierStateRootAcceptanceContract(...).solidity_export and adds only the deterministic authProofHash/verifierGateHash contract needed by a later prover/verifier worker.",
 			"the verifier export now pins one explicit proof/public-signal schema plus one explicit inner proofData-v1 payload carrying one batch-specific fixed-vk Groth16/BN254 proof artifact derived from the actual outer signals for the current FunnyRollupVerifier contract, but it is still not a general prover pipeline or production Mode B truth switch.",
 			fmt.Sprintf(
-				"proofTypeHash identifies one full verifier-facing proof contract, not just a proving-family label: proving system + curve, bytes32 public-signal lifting rule, exact circuit/verifying-key lane, and proofBytes ABI codec; the first real lane is keccak256(%q) and keeps proof bytes inside proofData-v1 as abi.encode(uint256[2] a, uint256[2][2] b, uint256[2] c).",
+				"proofTypeHash identifies one full verifier-facing proof contract, not just a proving-family label: proving system + curve, bytes32 public-signal lifting rule, exact circuit/verifying-key lane, and proofBytes ABI codec; the current real lane is keccak256(%q) and keeps proof bytes inside proofData-v1 while widening the inner codec to carry deterministic batch/state witness digests plus the Groth16 tuple.",
 				FunnyRollupBatchVerifierFirstGroth16ProofType,
 			),
 			"proofData-v2 is not required for the first fixed-vk Groth16 lane; it only becomes necessary if verifier-relevant metadata such as vk/circuit/aggregation selection must travel separately from proofTypeHash + proofBytes.",
@@ -239,7 +244,11 @@ func buildVerifierGateDigestContract(publicInputs SolidityVerifierPublicInputs, 
 	}, nil
 }
 
-func buildVerifierInterfaceSolidityExport(publicInputs SolidityVerifierPublicInputs, verifierGateDigest VerifierGateDigestContract) (VerifierInterfaceSolidityExport, error) {
+func buildVerifierInterfaceSolidityExport(
+	publicInputs SolidityVerifierPublicInputs,
+	verifierGateDigest VerifierGateDigestContract,
+	witnessMaterial StateTransitionWitnessMaterial,
+) (VerifierInterfaceSolidityExport, error) {
 	proofSchemaHash := crypto.Keccak256Hash([]byte(FunnyRollupBatchVerifierProofSchemaVersion))
 	publicSignalsVersionHash := crypto.Keccak256Hash([]byte(FunnyRollupBatchVerifierPublicSignalsV1))
 	proofDataSchemaHash := crypto.Keccak256Hash([]byte(FunnyRollupBatchVerifierProofDataVersion))
@@ -262,7 +271,7 @@ func buildVerifierInterfaceSolidityExport(publicInputs SolidityVerifierPublicInp
 		AuthProofHash:     verifierGateDigest.AuthProofHash,
 		VerifierGateHash:  verifierGateDigest.VerifierGateHash,
 	}
-	groth16Artifact, err := BuildFixedGroth16Artifact(groth16Context)
+	groth16Artifact, err := BuildFixedGroth16Artifact(groth16Context, witnessMaterial)
 	if err != nil {
 		return VerifierInterfaceSolidityExport{}, err
 	}
@@ -379,7 +388,7 @@ func buildGroth16Fixture(publicInputs []string, proofTuple VerifierGroth16ProofT
 		return VerifierGroth16Fixture{}, fmt.Errorf("expected 8 Groth16 public inputs, got %d", len(publicInputs))
 	}
 	return VerifierGroth16Fixture{
-		ProofBytesEncoding: "abi.encode(bytes32 transitionWitnessHash, uint256[2] a, uint256[2][2] b, uint256[2] c)",
+		ProofBytesEncoding: "abi.encode(bytes32 transitionWitnessHash, bytes32 entrySetHash, bytes32 acceptedBalancesHash, bytes32 acceptedPositionsHash, bytes32 acceptedPayoutsHash, bytes32 acceptedWithdrawalRootHash, bytes32 acceptedWithdrawalLeavesHash, bytes32 escapeCollateralRootHash, bytes32 escapeCollateralLeavesHash, uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[2] commitments, uint256[2] commitmentPok)",
 		PublicInputFieldOrder: []VerifierProofSchemaField{
 			{Name: "batchEncodingHashHi", Type: "uint256"},
 			{Name: "batchEncodingHashLo", Type: "uint256"},

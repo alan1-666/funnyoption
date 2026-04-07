@@ -824,6 +824,38 @@ worker 不必重新决定：
         service
       - accepted state is still the only truthful lane, not every old SQL
         table
+  - `TASK-CHAIN-036` 把 accepted/frozen closeout 真正接到了 one real frozen
+    exit path：
+    - accepted batches 现在会派生并持久化 one escape-collateral Merkle root
+      plus durable leaves / proofs
+    - `FunnyRollupCore` 现在能在 freeze 前锚定这条 accepted collateral root
+    - frozen user 现在可以直接执行：
+      - `claimEscapeCollateral(batchId, leafIndex, amount, recipient, proof)`
+    - local full-flow 现在已经真实跑通：
+      - accepted batch
+      - anchored escape root
+      - forced withdrawal request
+      - freeze
+      - Merkle-proof escape collateral claim
+    - accepted financial read truth 现在不再只等 full freeze 才可见：
+      - once accepted batches exist,
+        `/api/v1/balances`、`/api/v1/positions`、`/api/v1/payouts`、
+        liability reporting 就会优先读 accepted mirrors
+      - once an escape claim is `CLAIMED`, accepted balance readback 会把该用户
+        collateral 归零
+    - accepted withdrawal / escape leaves 在 rematerialization 时现在会保留
+      已存在的 `CLAIM_SUBMITTED` / `CLAIMED` / `CLAIM_FAILED` runtime 状态，
+      不会因为 replay/restart 被洗回 `CLAIMABLE`
+    - preferred prover lane 也已经不再只是 outer digest equality：
+      - it now binds ordered state-transition witness material
+      - while still keeping the stable outer proof/public-signal envelope and
+        `shadow-batch-v1` public-input shape
+    - 但这里仍然保留几条 explicit residual：
+      - unresolved-open-position emergency handling at freeze is still narrow
+      - prover/backend is still repo-local first cut, not a production proving
+        fleet
+      - repo is materially closer to `Mode B`, but should still avoid claiming
+        every live truth boundary is already fully replaced by accepted roots
 
 因此边界明确分成三层：
 

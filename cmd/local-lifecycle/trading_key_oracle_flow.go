@@ -18,6 +18,7 @@ import (
 	"funnyoption/internal/api/dto"
 	chainservice "funnyoption/internal/chain/service"
 	oracleservice "funnyoption/internal/oracle/service"
+	"funnyoption/internal/shared/assets"
 	sharedauth "funnyoption/internal/shared/auth"
 	"funnyoption/internal/shared/config"
 	shareddb "funnyoption/internal/shared/db"
@@ -77,6 +78,7 @@ type localFullFlowSummary struct {
 		TradeID             string `json:"trade_id"`
 		MarketID            int64  `json:"market_id"`
 		PayoutEventID       string `json:"payout_event_id"`
+		EscapeClaimID       string `json:"escape_claim_id"`
 		ResolutionResolver  string `json:"resolution_resolver_ref"`
 		OracleObservationID string `json:"oracle_observation_id"`
 	} `json:"ids"`
@@ -87,6 +89,7 @@ type localFullFlowSummary struct {
 		InitialUSDT      int64  `json:"initial_usdt"`
 		PostDepositUSDT  int64  `json:"post_deposit_usdt"`
 		FinalUSDT        int64  `json:"final_usdt"`
+		EscapedUSDT      int64  `json:"escaped_usdt"`
 		PayoutAmount     int64  `json:"payout_amount"`
 		SettledYesQty    int64  `json:"settled_yes_quantity"`
 		RestoreSessionID string `json:"restore_session_id"`
@@ -130,6 +133,13 @@ type localFullFlowSummary struct {
 		LatestAcceptedBatchID   int64    `json:"latest_accepted_batch_id"`
 		LatestAcceptedStateRoot string   `json:"latest_accepted_state_root"`
 		LatestSubmissionStatus  string   `json:"latest_submission_status"`
+		LatestEscapeBatchID     int64    `json:"latest_escape_batch_id"`
+		LatestEscapeMerkleRoot  string   `json:"latest_escape_merkle_root"`
+		ForcedRequestID         int64    `json:"forced_request_id"`
+		ForcedRequestStatus     string   `json:"forced_request_status"`
+		Frozen                  bool     `json:"frozen"`
+		FrozenAt                int64    `json:"frozen_at"`
+		EscapeClaimStatus       string   `json:"escape_claim_status"`
 		SubmissionActions       []string `json:"submission_actions"`
 	} `json:"rollup"`
 	ReadbackCommands []string `json:"readback_commands"`
@@ -187,12 +197,12 @@ func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cf
 		Flow:             tradingKeyOracleFlowName,
 		RunCommand:       "go run ./cmd/local-lifecycle --flow trading-key-oracle",
 		ProofEnvironment: depositEnv.summary(),
-		PassFailMatrix:   make([]flowStepResult, 0, 7),
+		PassFailMatrix:   make([]flowStepResult, 0, 9),
 		BlindSpots: []string{
 			"trading-key wallet authorization is signed by local deterministic test EOAs, not a browser wallet popup or hardware wallet",
 			"truthful restore is verified through in-process metadata plus GET /api/v1/trading-keys readback, not real localStorage/IndexedDB/React hydration behavior",
 			"oracle settlement uses a local fake Binance HTTP fixture, not the live external provider network path",
-			"the flow now drives local rollup acceptance and accepted readback, but it still does not cover slow-withdraw claim execution or forced-withdraw / escape-hatch runtime",
+			"the flow now drives local rollup acceptance, freeze, and escape-collateral claim execution, but it still does not cover canonical slow-withdraw claim processing",
 		},
 	}
 
@@ -244,6 +254,18 @@ func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cf
 	if err != nil {
 		return fmt.Errorf("fetch initial buyer balance: %w", err)
 	}
+	makerBootstrapDepositAmount := opts.DepositAmount
+	makerRequiredAccounting, err := assets.WinningPayoutAmount(opts.Quantity)
+	if err != nil {
+		return fmt.Errorf("calculate maker first-liquidity collateral: %w", err)
+	}
+	makerRequiredChainAmount, err := assets.AccountingToAssetChainAmount(assets.DefaultCollateralAsset, makerRequiredAccounting)
+	if err != nil {
+		return fmt.Errorf("convert maker first-liquidity collateral to chain units: %w", err)
+	}
+	if makerBootstrapDepositAmount < makerRequiredChainAmount {
+		makerBootstrapDepositAmount = makerRequiredChainAmount
+	}
 	depositTxHash, err := depositEnv.submitDeposit(ctx, buyer, opts.DepositAmount)
 	if err != nil {
 		return fmt.Errorf("submit wallet deposit: %w", err)
@@ -268,11 +290,31 @@ func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cf
 	if err != nil {
 		return fmt.Errorf("fetch buyer balance after deposit: %w", err)
 	}
+	makerDepositTxHash, err := depositEnv.submitDeposit(ctx, maker, makerBootstrapDepositAmount)
+	if err != nil {
+		return fmt.Errorf("submit maker wallet deposit: %w", err)
+	}
+	var creditedMakerDeposit depositResponse
+	if err := waitFor(ctx, 500*time.Millisecond, func() (bool, error) {
+		items, err := client.listDeposits(ctx, makerSession.UserID)
+		if err != nil {
+			return false, err
+		}
+		for _, item := range items {
+			if strings.EqualFold(item.TxHash, normalizeLifecycleTxHash(makerDepositTxHash)) && item.CreditedAt > 0 {
+				creditedMakerDeposit = item
+				return true, nil
+			}
+		}
+		return false, nil
+	}); err != nil {
+		return fmt.Errorf("wait for maker credited deposit: %w", err)
+	}
 	summary.PassFailMatrix = append(summary.PassFailMatrix, flowStepResult{
 		Step:          "3. deposit credit",
 		Status:        "PASS",
-		SignatureMode: "real EVM approve + deposit transactions signed by the buyer test EOA on the persistent local chain",
-		Notes:         fmt.Sprintf("deposit_id=%s tx=%s", creditedDeposit.DepositID, depositTxHash),
+		SignatureMode: "real EVM approve + deposit transactions signed by the buyer and maker test EOAs on the persistent local chain",
+		Notes:         fmt.Sprintf("buyer_deposit_id=%s buyer_tx=%s maker_deposit_id=%s maker_tx=%s", creditedDeposit.DepositID, depositTxHash, creditedMakerDeposit.DepositID, makerDepositTxHash),
 	})
 	summary.IDs.DepositID = creditedDeposit.DepositID
 	summary.IDs.DepositTxHash = depositTxHash
@@ -541,6 +583,11 @@ func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cf
 	if err != nil {
 		return fmt.Errorf("fetch maker final balance: %w", err)
 	}
+	depositAccountingAmount, err := assets.ChainToAssetAccountingAmount(assets.DefaultCollateralAsset, opts.DepositAmount)
+	if err != nil {
+		return fmt.Errorf("convert buyer deposit amount to accounting units: %w", err)
+	}
+	expectedAcceptedBuyerUSDT := depositAccountingAmount - opts.Price*opts.Quantity + buyerPayout.PayoutAmount
 	summary.PassFailMatrix = append(summary.PassFailMatrix, flowStepResult{
 		Step:          "7. payout/readback verification",
 		Status:        "PASS",
@@ -548,66 +595,67 @@ func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cf
 		Notes:         fmt.Sprintf("payout=%s settled_yes=%d", buyerPayout.EventID, buyerPosition.SettledQuantity),
 	})
 
-	rollupRun, err := chainservice.RunRollupSubmissionUntilIdle(ctx, logger.With("component", "local-full-flow-rollup"), cfg)
+	acceptedAfter, err := waitForAcceptedBatchAdvance(ctx, oracleHarness.db, baselineAccepted.LatestAcceptedBatchID)
 	if err != nil {
-		return fmt.Errorf("run rollup submission until idle: %w", err)
-	}
-	acceptedAfter, err := fetchAcceptedBatchReadback(ctx, oracleHarness.db)
-	if err != nil {
-		return fmt.Errorf("fetch accepted batch readback after rollup submission: %w", err)
-	}
-	if acceptedAfter.LatestAcceptedBatchID <= baselineAccepted.LatestAcceptedBatchID {
-		return fmt.Errorf(
-			"rollup acceptance did not advance accepted batches: before=%d after=%d actions=%v",
-			baselineAccepted.LatestAcceptedBatchID,
-			acceptedAfter.LatestAcceptedBatchID,
-			rollupRunActions(rollupRun),
-		)
+		return fmt.Errorf("wait for accepted batch advance: %w", err)
 	}
 
-	acceptedBuyerUSDT, err := client.fetchUSDTBalance(ctx, buyerSession.UserID)
-	if err != nil {
-		return fmt.Errorf("fetch buyer accepted balance readback: %w", err)
-	}
-	acceptedPayouts, err := client.listPayouts(ctx, buyerSession.UserID, market.MarketID)
-	if err != nil {
-		return fmt.Errorf("list accepted payouts: %w", err)
-	}
-	acceptedPositions, err := client.listPositions(ctx, buyerSession.UserID, market.MarketID)
-	if err != nil {
-		return fmt.Errorf("list accepted positions: %w", err)
-	}
 	var acceptedPayout payoutResponse
-	for _, item := range acceptedPayouts {
-		if item.EventID == buyerPayout.EventID {
-			acceptedPayout = item
-			break
-		}
-	}
-	if acceptedPayout.EventID == "" {
-		return fmt.Errorf("accepted payout readback lost event %s after rollup submission", buyerPayout.EventID)
-	}
 	var acceptedPosition positionResponse
-	for _, item := range acceptedPositions {
-		if item.MarketID == market.MarketID && item.Outcome == "YES" {
-			acceptedPosition = item
-			break
+	acceptedBuyerUSDT := int64(0)
+	if err := waitFor(ctx, 500*time.Millisecond, func() (bool, error) {
+		acceptedBuyerUSDT, err = client.fetchUSDTBalance(ctx, buyerSession.UserID)
+		if err != nil {
+			return false, err
 		}
+		acceptedPayouts, err := client.listPayouts(ctx, buyerSession.UserID, market.MarketID)
+		if err != nil {
+			return false, err
+		}
+		acceptedPayout = payoutResponse{}
+		for _, item := range acceptedPayouts {
+			if item.EventID == buyerPayout.EventID {
+				acceptedPayout = item
+				break
+			}
+		}
+		if acceptedPayout.EventID == "" {
+			return false, nil
+		}
+		acceptedPositions, err := client.listPositions(ctx, buyerSession.UserID, market.MarketID)
+		if err != nil {
+			return false, err
+		}
+		acceptedPosition = positionResponse{}
+		for _, item := range acceptedPositions {
+			if item.MarketID == market.MarketID && item.Outcome == "YES" {
+				acceptedPosition = item
+				break
+			}
+		}
+		if acceptedPosition.MarketID == 0 {
+			return false, nil
+		}
+		if acceptedPosition.SettledQuantity < opts.Quantity {
+			return false, nil
+		}
+		return acceptedBuyerUSDT == expectedAcceptedBuyerUSDT, nil
+	}); err != nil {
+		return fmt.Errorf("wait for accepted payout/position/balance readback: %w", err)
 	}
-	if acceptedPosition.MarketID == 0 {
-		return fmt.Errorf("accepted position readback lost YES position for market %d", market.MarketID)
+	if acceptedBuyerUSDT != expectedAcceptedBuyerUSDT {
+		return fmt.Errorf("accepted buyer USDT = %d, want %d", acceptedBuyerUSDT, expectedAcceptedBuyerUSDT)
 	}
-	if acceptedPosition.SettledQuantity < opts.Quantity {
-		return fmt.Errorf("accepted settled quantity = %d, want at least %d", acceptedPosition.SettledQuantity, opts.Quantity)
+	latestAcceptedAfterReadback, err := fetchAcceptedBatchReadback(ctx, oracleHarness.db)
+	if err != nil {
+		return fmt.Errorf("refresh accepted batch readback: %w", err)
 	}
-	if acceptedBuyerUSDT != finalBuyerUSDT {
-		return fmt.Errorf("accepted buyer USDT = %d, want %d", acceptedBuyerUSDT, finalBuyerUSDT)
-	}
+	acceptedAfter = latestAcceptedAfterReadback
 	summary.PassFailMatrix = append(summary.PassFailMatrix, flowStepResult{
 		Step:          "8. rollup acceptance + accepted readback",
 		Status:        "PASS",
-		SignatureMode: "no end-user signature; the harness drives record/accept submission to FunnyRollupCore and re-reads balances, positions, and payouts from accepted mirrors",
-		Notes:         fmt.Sprintf("actions=%s latest_accepted_batch=%d", strings.Join(rollupRunActions(rollupRun), " -> "), acceptedAfter.LatestAcceptedBatchID),
+		SignatureMode: "no end-user signature; the background chain submitter records, publishes, and accepts the batch on FunnyRollupCore and the harness re-reads accepted mirrors",
+		Notes:         fmt.Sprintf("latest_submission=%s latest_accepted_batch=%d accepted_usdt=%d", acceptedAfter.LatestSubmissionStatus, acceptedAfter.LatestAcceptedBatchID, acceptedBuyerUSDT),
 	})
 
 	summary.IDs.PayoutEventID = buyerPayout.EventID
@@ -628,7 +676,175 @@ func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cf
 	summary.Rollup.LatestAcceptedBatchID = acceptedAfter.LatestAcceptedBatchID
 	summary.Rollup.LatestAcceptedStateRoot = acceptedAfter.LatestAcceptedStateRoot
 	summary.Rollup.LatestSubmissionStatus = acceptedAfter.LatestSubmissionStatus
-	summary.Rollup.SubmissionActions = rollupRunActions(rollupRun)
+	summary.Rollup.SubmissionActions = []string{acceptedAfter.LatestSubmissionStatus}
+
+	var anchoredEscapeClaim rollupEscapeCollateralClaimResponse
+	if err := waitFor(ctx, 500*time.Millisecond, func() (bool, error) {
+		items, err := client.listRollupEscapeCollateralClaims(ctx, buyerSession.UserID, buyerSession.WalletAddress, "", 20)
+		if err != nil {
+			return false, err
+		}
+		anchoredEscapeClaim = rollupEscapeCollateralClaimResponse{}
+		for _, item := range items {
+			if item.AccountID == buyerSession.UserID && strings.EqualFold(item.WalletAddress, buyerSession.WalletAddress) {
+				if item.AnchorStatus == "ANCHORED" && item.ClaimAmount > 0 {
+					if anchoredEscapeClaim.ClaimID == "" || item.BatchID > anchoredEscapeClaim.BatchID {
+						anchoredEscapeClaim = item
+					}
+				}
+			}
+		}
+		if anchoredEscapeClaim.ClaimID != "" {
+			if acceptedAfter.LatestAcceptedBatchID > 0 && anchoredEscapeClaim.BatchID < acceptedAfter.LatestAcceptedBatchID {
+				return false, nil
+			}
+			if anchoredEscapeClaim.BatchID > 0 {
+				return true, nil
+			}
+		}
+		return false, nil
+	}); err != nil {
+		return fmt.Errorf("wait for anchored escape collateral root: %w", err)
+	}
+
+	forcedWithdrawalAccounting, err := assets.ChainToAssetAccountingAmount(assets.DefaultCollateralAsset, anchoredEscapeClaim.ClaimAmount)
+	if err != nil {
+		return fmt.Errorf("convert escape collateral claim amount to accounting units: %w", err)
+	}
+	buyerWalletPrivateKey := hexutil.Encode(crypto.FromECDSA(buyer.PrivateKey))
+	requestProgress, err := chainservice.RunRequestForcedWithdrawalOnce(
+		ctx,
+		logger.With("component", "local-full-flow-forced-withdraw"),
+		cfg,
+		buyerWalletPrivateKey,
+		forcedWithdrawalAccounting,
+		buyer.Address,
+	)
+	if err != nil {
+		return fmt.Errorf("request forced withdrawal: %w", err)
+	}
+
+	var forcedWithdrawal rollupForcedWithdrawalResponse
+	if err := waitFor(ctx, 500*time.Millisecond, func() (bool, error) {
+		items, err := client.listRollupForcedWithdrawals(ctx, buyerSession.WalletAddress, "", 20)
+		if err != nil {
+			return false, err
+		}
+		for _, item := range items {
+			if item.RequestID == int64(requestProgress.RequestID) {
+				forcedWithdrawal = item
+				return item.Status == "REQUESTED" && item.DeadlineAt > 0, nil
+			}
+		}
+		return false, nil
+	}); err != nil {
+		return fmt.Errorf("wait for forced-withdrawal mirror readback: %w", err)
+	}
+
+	if err := waitFor(ctx, 250*time.Millisecond, func() (bool, error) {
+		return time.Now().Unix() > forcedWithdrawal.DeadlineAt, nil
+	}); err != nil {
+		return fmt.Errorf("wait for forced-withdrawal deadline: %w", err)
+	}
+
+	freezeProgress, err := chainservice.RunFreezeForcedWithdrawalOnce(
+		ctx,
+		logger.With("component", "local-full-flow-freeze"),
+		cfg,
+		uint64(forcedWithdrawal.RequestID),
+	)
+	if err != nil {
+		return fmt.Errorf("freeze missed forced withdrawal: %w", err)
+	}
+
+	var freezeState rollupFreezeStateResponse
+	if err := waitFor(ctx, 500*time.Millisecond, func() (bool, error) {
+		item, err := client.getRollupFreezeState(ctx)
+		if err != nil {
+			return false, err
+		}
+		freezeState = item
+		return item.Frozen && item.RequestID == forcedWithdrawal.RequestID, nil
+	}); err != nil {
+		return fmt.Errorf("wait for frozen readback: %w", err)
+	}
+
+	if err := waitFor(ctx, 500*time.Millisecond, func() (bool, error) {
+		items, err := client.listRollupForcedWithdrawals(ctx, buyerSession.WalletAddress, "", 20)
+		if err != nil {
+			return false, err
+		}
+		for _, item := range items {
+			if item.RequestID == forcedWithdrawal.RequestID {
+				forcedWithdrawal = item
+				return item.Status == "FROZEN", nil
+			}
+		}
+		return false, nil
+	}); err != nil {
+		return fmt.Errorf("wait for forced-withdrawal frozen status: %w", err)
+	}
+
+	escapeProgress, err := chainservice.RunClaimEscapeCollateralOnce(
+		ctx,
+		logger.With("component", "local-full-flow-escape-claim"),
+		cfg,
+		buyerWalletPrivateKey,
+		buyerSession.UserID,
+		anchoredEscapeClaim.ClaimID,
+		buyer.Address,
+	)
+	if err != nil {
+		return fmt.Errorf("claim escape collateral: %w", err)
+	}
+	if escapeProgress.Action == "ESCAPE_COLLATERAL_CLAIM_FAILED" {
+		return fmt.Errorf("claim escape collateral: %s", strings.TrimSpace(escapeProgress.Note))
+	}
+
+	var claimedEscapeClaim rollupEscapeCollateralClaimResponse
+	postEscapeBuyerUSDT := int64(-1)
+	if err := waitFor(ctx, 500*time.Millisecond, func() (bool, error) {
+		items, err := client.listRollupEscapeCollateralClaims(ctx, buyerSession.UserID, buyerSession.WalletAddress, "", 20)
+		if err != nil {
+			return false, err
+		}
+		for _, item := range items {
+			if item.ClaimID == anchoredEscapeClaim.ClaimID {
+				claimedEscapeClaim = item
+				break
+			}
+		}
+		if claimedEscapeClaim.ClaimID == "" || claimedEscapeClaim.ClaimStatus != "CLAIMED" {
+			return false, nil
+		}
+		postEscapeBuyerUSDT, err = client.fetchUSDTBalance(ctx, buyerSession.UserID)
+		if err != nil {
+			return false, err
+		}
+		return postEscapeBuyerUSDT == 0, nil
+	}); err != nil {
+		return fmt.Errorf("wait for escape collateral claim readback: %w", err)
+	}
+	escapedBuyerAccounting, err := assets.ChainToAssetAccountingAmount(assets.DefaultCollateralAsset, claimedEscapeClaim.ClaimAmount)
+	if err != nil {
+		return fmt.Errorf("convert claimed escape collateral amount to accounting units: %w", err)
+	}
+
+	summary.PassFailMatrix = append(summary.PassFailMatrix, flowStepResult{
+		Step:          "9. forced-withdraw freeze + escape claim",
+		Status:        "PASS",
+		SignatureMode: "buyer wallet signs the forced-withdraw request and escape collateral claim on FunnyRollupCore; operator signs the freeze transaction after the missed deadline",
+		Notes:         fmt.Sprintf("request_id=%d freeze_action=%s escape_action=%s claim_id=%s", forcedWithdrawal.RequestID, freezeProgress.Action, escapeProgress.Action, claimedEscapeClaim.ClaimID),
+	})
+	summary.IDs.EscapeClaimID = claimedEscapeClaim.ClaimID
+	summary.Buyer.EscapedUSDT = escapedBuyerAccounting
+	summary.Rollup.LatestEscapeBatchID = claimedEscapeClaim.BatchID
+	summary.Rollup.LatestEscapeMerkleRoot = claimedEscapeClaim.MerkleRoot
+	summary.Rollup.ForcedRequestID = forcedWithdrawal.RequestID
+	summary.Rollup.ForcedRequestStatus = forcedWithdrawal.Status
+	summary.Rollup.Frozen = freezeState.Frozen
+	summary.Rollup.FrozenAt = freezeState.FrozenAt
+	summary.Rollup.EscapeClaimStatus = claimedEscapeClaim.ClaimStatus
 
 	summary.ReadbackCommands = []string{
 		fmt.Sprintf("curl -sS '%s/api/v1/trading-keys?wallet_address=%s&vault_address=%s&status=ACTIVE&limit=20'", opts.BaseURL, buyerSession.WalletAddress, buyerSession.VaultAddress),
@@ -639,9 +855,12 @@ func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cf
 		fmt.Sprintf("curl -sS '%s/api/v1/balances?user_id=%d&limit=20'", opts.BaseURL, buyerSession.UserID),
 		fmt.Sprintf("curl -sS '%s/api/v1/positions?user_id=%d&market_id=%d&limit=20'", opts.BaseURL, buyerSession.UserID, market.MarketID),
 		fmt.Sprintf("curl -sS '%s/api/v1/payouts?user_id=%d&market_id=%d&limit=20'", opts.BaseURL, buyerSession.UserID, market.MarketID),
-		"go run ./cmd/rollup -mode=submit-until-idle -timeout=20s",
+		"background chain submitter advances record/publish/accept on FunnyRollupCore",
 		fmt.Sprintf("psql '%s' -c \"SELECT batch_id, status, next_state_root FROM rollup_accepted_batches ORDER BY batch_id DESC LIMIT 5;\"", cfg.PostgresDSN),
 		fmt.Sprintf("psql '%s' -c \"SELECT submission_id, batch_id, status, record_tx_hash, accept_tx_hash FROM rollup_shadow_submissions ORDER BY batch_id DESC LIMIT 5;\"", cfg.PostgresDSN),
+		fmt.Sprintf("curl -sS '%s/api/v1/rollup/forced-withdrawals?wallet_address=%s&limit=20'", opts.BaseURL, buyerSession.WalletAddress),
+		fmt.Sprintf("curl -sS '%s/api/v1/rollup/escape-collateral?user_id=%d&wallet_address=%s&limit=20'", opts.BaseURL, buyerSession.UserID, buyerSession.WalletAddress),
+		fmt.Sprintf("curl -sS '%s/api/v1/rollup/freeze-state'", opts.BaseURL),
 		fmt.Sprintf("psql '%s' -c \"SELECT market_id, status, resolved_outcome, resolver_type, resolver_ref FROM market_resolutions WHERE market_id = %d;\"", cfg.PostgresDSN, market.MarketID),
 	}
 
@@ -698,6 +917,7 @@ func (c *apiClient) registerTradingKey(ctx context.Context, wallet walletIdentit
 	if err != nil {
 		return sessionContext{}, tradingKeyChallengeResponse{}, err
 	}
+	c.rememberSession(remote.UserID, remote.SessionID)
 
 	return sessionContext{
 		UserID:        remote.UserID,
@@ -907,13 +1127,30 @@ func fetchAcceptedBatchReadback(ctx context.Context, db *sql.DB) (acceptedBatchR
 	return item, nil
 }
 
-func rollupRunActions(run chainservice.RollupSubmissionRun) []string {
-	if len(run.Steps) == 0 {
-		return nil
+func waitForAcceptedBatchAdvance(ctx context.Context, db *sql.DB, baselineAcceptedBatchID int64) (acceptedBatchReadback, error) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		item, err := fetchAcceptedBatchReadback(ctx, db)
+		if err != nil {
+			return acceptedBatchReadback{}, err
+		}
+		if item.LatestAcceptedBatchID > baselineAcceptedBatchID {
+			return item, nil
+		}
+		switch item.LatestSubmissionStatus {
+		case "FAILED", "FAILED_BLOCKED", "BLOCKED_AUTH":
+			return acceptedBatchReadback{}, fmt.Errorf(
+				"accepted batch did not advance and latest submission is %s",
+				item.LatestSubmissionStatus,
+			)
+		}
+
+		select {
+		case <-ctx.Done():
+			return acceptedBatchReadback{}, ctx.Err()
+		case <-ticker.C:
+		}
 	}
-	actions := make([]string, 0, len(run.Steps))
-	for _, step := range run.Steps {
-		actions = append(actions, step.Action)
-	}
-	return actions
 }

@@ -179,6 +179,7 @@ type rollupCoreAcceptedBatchState struct {
 	PositionsFundingRoot    common.Hash
 	WithdrawalsRoot         common.Hash
 	NextStateRoot           common.Hash
+	ConservationHash        common.Hash
 	AuthProofHash           common.Hash
 	VerifierGateHash        common.Hash
 }
@@ -363,7 +364,10 @@ func (p *RollupSubmissionProcessor) loadAcceptedBatchState(
 	if err != nil {
 		return rollupCoreAcceptedBatchState{}, err
 	}
-	// index 10 is conservationHash (not used in reconciliation)
+	conservationHash, err := decodeABIBytes32Value(acceptedBatchValues[10], "acceptedBatches.conservationHash")
+	if err != nil {
+		return rollupCoreAcceptedBatchState{}, err
+	}
 	authProofHash, err := decodeABIBytes32Value(acceptedBatchValues[11], "acceptedBatches.authProofHash")
 	if err != nil {
 		return rollupCoreAcceptedBatchState{}, err
@@ -386,6 +390,7 @@ func (p *RollupSubmissionProcessor) loadAcceptedBatchState(
 		PositionsFundingRoot:    positionsFundingRoot,
 		WithdrawalsRoot:         withdrawalsRoot,
 		NextStateRoot:           nextStateRoot,
+		ConservationHash:        conservationHash,
 		AuthProofHash:           authProofHash,
 		VerifierGateHash:        verifierGateHash,
 	}, nil

@@ -74,3 +74,27 @@ func TestBuildAcceptedEscapeCollateralSnapshotRequiresWalletMirror(t *testing.T)
 		t.Fatalf("expected missing wallet address to fail")
 	}
 }
+
+func TestHashAcceptedEscapeCollateralLeafMatchesSolidityPackedEncoding(t *testing.T) {
+	leafHash := hashAcceptedEscapeCollateralLeaf(2, 0, acceptedEscapeLeafInput{
+		AccountID:       1001,
+		WalletAddress:   "0x1532d37232c783c531bf0ce9860cb15f5f68aeb3",
+		CollateralAsset: "USDT",
+		ClaimAmount:     66800000,
+	})
+	got := "0x" + bytesToHex(leafHash)
+	want := "0xfb845ad540c5202be994e3f78fa23670a962cb80af39e06c5f220832a0a2594d"
+	if got != want {
+		t.Fatalf("escape leaf hash = %s, want %s", got, want)
+	}
+}
+
+func bytesToHex(value []byte) string {
+	const hex = "0123456789abcdef"
+	out := make([]byte, len(value)*2)
+	for i, b := range value {
+		out[i*2] = hex[b>>4]
+		out[i*2+1] = hex[b&0x0f]
+	}
+	return string(out)
+}

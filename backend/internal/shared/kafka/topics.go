@@ -3,17 +3,18 @@ package kafka
 import "strings"
 
 type Topics struct {
-	OrderCommand   string
-	OrderEvent     string
-	TradeMatched   string
-	PositionChange string
-	QuoteDepth     string
-	QuoteTicker    string
-	QuoteCandle    string
-	MarketEvent    string
-	SettlementDone string
-	ChainDeposit   string
-	ChainWithdraw  string
+	OrderCommand        string
+	OrderEvent          string
+	TradeMatched        string
+	PositionChange      string
+	QuoteDepth          string
+	QuoteTicker         string
+	QuoteCandle         string
+	MarketEvent         string
+	SettlementDone      string
+	ChainDeposit        string
+	ChainWithdraw       string
+	NotificationCreated string
 }
 
 func NewTopics(prefix string) Topics {
@@ -35,7 +36,8 @@ func NewTopics(prefix string) Topics {
 		QuoteCandle:    normalized + "quote.candle",
 		MarketEvent:    normalized + "market.event",
 		SettlementDone: normalized + "settlement.completed",
-		ChainDeposit:   normalized + "chain.deposit",
-		ChainWithdraw:  normalized + "chain.withdrawal",
+		ChainDeposit:        normalized + "chain.deposit",
+		ChainWithdraw:       normalized + "chain.withdrawal",
+		NotificationCreated: normalized + "notification.created",
 	}
 }

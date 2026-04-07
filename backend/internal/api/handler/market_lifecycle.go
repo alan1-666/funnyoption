@@ -13,7 +13,8 @@ func normalizeLifecycleMarketStatus(status string) string {
 	switch normalized {
 	case "", "OPEN":
 		return "OPEN"
-	case "DRAFT", "PAUSED", "CLOSED", "WAITING_RESOLUTION", "RESOLVED":
+	case "DRAFT", "PAUSED", "CLOSED", "WAITING_RESOLUTION", "RESOLVED",
+		"PENDING_REVIEW", "REJECTED":
 		return normalized
 	default:
 		return "OPEN"

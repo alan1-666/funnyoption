@@ -15,13 +15,18 @@ interface AdminMarketOpsProps {
 
 export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
   const router = useRouter();
-  const { wallet, busy: operatorBusy, signResolveMarket } = useOperatorAccess();
+  const { wallet, busy: operatorBusy, signResolveMarket, signGenericMessage } = useOperatorAccess();
   const [status, setStatus] = useState("裁决通道待命");
   const [busyMarketId, setBusyMarketId] = useState<number | null>(null);
   const [outcomes, setOutcomes] = useState<Record<number, "YES" | "NO">>({});
+  const [rejectReasons, setRejectReasons] = useState<Record<number, string>>({});
 
   const waitingResolutionMarkets = useMemo(
     () => markets.filter((market) => market.status === "WAITING_RESOLUTION").sort((left, right) => right.updated_at - left.updated_at),
+    [markets]
+  );
+  const pendingReviewMarkets = useMemo(
+    () => markets.filter((market) => market.status === "PENDING_REVIEW").sort((left, right) => right.created_at - left.created_at),
     [markets]
   );
   const recentResolved = useMemo(
@@ -66,6 +71,71 @@ export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
       startTransition(() => router.refresh());
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "裁决失败");
+    } finally {
+      setBusyMarketId(null);
+    }
+  }
+
+  async function handleApprove(marketId: number) {
+    setBusyMarketId(marketId);
+    setStatus(`等待审核 #${marketId} 的批准签名...`);
+    try {
+      const requestedAt = Date.now();
+      const message = `approve_market:${marketId}:${requestedAt}`;
+      const operator = await signGenericMessage(message);
+      if (!operator) {
+        setStatus("请先连接白名单运营钱包。");
+        return;
+      }
+
+      const response = await fetch(`/api/operator/markets/${marketId}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operator })
+      });
+
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      }
+      setStatus(`市场 #${marketId} 已批准上线。`);
+      startTransition(() => router.refresh());
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "批准失败");
+    } finally {
+      setBusyMarketId(null);
+    }
+  }
+
+  async function handleReject(marketId: number) {
+    setBusyMarketId(marketId);
+    setStatus(`等待审核 #${marketId} 的拒绝签名...`);
+    try {
+      const requestedAt = Date.now();
+      const message = `reject_market:${marketId}:${requestedAt}`;
+      const operator = await signGenericMessage(message);
+      if (!operator) {
+        setStatus("请先连接白名单运营钱包。");
+        return;
+      }
+
+      const response = await fetch(`/api/operator/markets/${marketId}/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reason: rejectReasons[marketId] ?? "",
+          operator
+        })
+      });
+
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      }
+      setStatus(`市场 #${marketId} 提案已拒绝。`);
+      startTransition(() => router.refresh());
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "拒绝失败");
     } finally {
       setBusyMarketId(null);
     }
@@ -160,6 +230,74 @@ export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
 
       <div className={styles.status} aria-live="polite">
         {status}
+      </div>
+
+      <div className={styles.header} style={{ marginTop: 24 }}>
+        <div>
+          <span className="eyebrow">市场提案审核</span>
+          <h2 className={styles.title}>用户提交的市场提案待审核。</h2>
+        </div>
+        <div className={styles.badges}>
+          <span className="pill">待审核 {pendingReviewMarkets.length}</span>
+        </div>
+      </div>
+
+      <div className={styles.list}>
+        {pendingReviewMarkets.length > 0 ? (
+          pendingReviewMarkets.map((market) => (
+            <article key={market.market_id} className={styles.marketRow}>
+              <div className={styles.marketMain}>
+                <div className={styles.marketTitleRow}>
+                  <strong className={styles.marketTitle}>#{market.market_id} {market.title}</strong>
+                  <span className="pill">待审核</span>
+                </div>
+                <p className={styles.marketCopy}>{market.description || "无描述"}</p>
+                <div className={styles.marketMeta}>
+                  <span>{market.category?.display_name ?? "未分类"}</span>
+                  <span>提交于 {formatTimestamp(market.created_at)}</span>
+                  {market.close_at > 0 && <span>截止 {formatTimestamp(market.close_at)}</span>}
+                  <span>提交者 #{market.created_by}</span>
+                </div>
+              </div>
+
+              <div className={styles.actions}>
+                <button
+                  className={styles.resolve}
+                  type="button"
+                  disabled={busyMarketId === market.market_id || operatorBusy === "connect" || operatorBusy === "sign"}
+                  onClick={() => handleApprove(market.market_id)}
+                >
+                  {busyMarketId === market.market_id ? "处理中..." : "批准上线"}
+                </button>
+                <input
+                  type="text"
+                  placeholder="拒绝理由（可选）"
+                  value={rejectReasons[market.market_id] ?? ""}
+                  onChange={(e) => setRejectReasons((cur) => ({ ...cur, [market.market_id]: e.target.value }))}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    border: "1px solid var(--line)",
+                    background: "transparent",
+                    color: "var(--text)",
+                    fontSize: 13
+                  }}
+                />
+                <button
+                  className={styles.toggle}
+                  type="button"
+                  disabled={busyMarketId === market.market_id || operatorBusy === "connect" || operatorBusy === "sign"}
+                  onClick={() => handleReject(market.market_id)}
+                  style={{ color: "#ef4444" }}
+                >
+                  拒绝
+                </button>
+              </div>
+            </article>
+          ))
+        ) : (
+          <div className={styles.empty}>当前没有待审核的市场提案。</div>
+        )}
       </div>
     </section>
   );

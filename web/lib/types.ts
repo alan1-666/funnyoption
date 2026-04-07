@@ -1,4 +1,4 @@
-export type MarketStatus = "DRAFT" | "OPEN" | "PAUSED" | "CLOSED" | "WAITING_RESOLUTION" | "RESOLVED";
+export type MarketStatus = "DRAFT" | "OPEN" | "PAUSED" | "CLOSED" | "WAITING_RESOLUTION" | "RESOLVED" | "PENDING_REVIEW" | "REJECTED";
 
 export interface ApiReadError {
   status?: number;
@@ -231,6 +231,17 @@ export interface SessionGrant {
   revoked_at: number;
   created_at: number;
   updated_at: number;
+}
+
+export interface Notification {
+  notification_id: number;
+  user_id: number;
+  type: string;
+  title: string;
+  body: string;
+  metadata: Record<string, unknown>;
+  is_read: boolean;
+  created_at: number;
 }
 
 export interface ChainTask {

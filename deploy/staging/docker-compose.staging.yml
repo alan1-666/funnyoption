@@ -187,6 +187,19 @@ services:
     ports:
       - "127.0.0.1:8081:8081"
 
+  notification:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/notification.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    env_file:
+      - ./.env.staging
+
   market-maker:
     build:
       context: ../..

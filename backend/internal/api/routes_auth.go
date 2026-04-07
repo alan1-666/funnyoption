@@ -26,6 +26,12 @@ func registerSessionRoutes(api *gin.RouterGroup, orderHandler *handler.OrderHand
 	profile.PUT("/profile", orderHandler.UpdateProfile)
 }
 
+func registerMarketProposeRoutes(api *gin.RouterGroup, orderHandler *handler.OrderHandler) {
+	proposeGroup := api.Group("")
+	proposeGroup.Use(requireSessionAuth(orderHandler.LookupActiveSession))
+	proposeGroup.POST("/markets/propose", orderHandler.ProposeMarket)
+}
+
 func registerTradeRoutes(api *gin.RouterGroup, orderHandler *handler.OrderHandler, limiter *rateLimiter) {
 	// Trade writes accept either end-user session authorization or the narrow
 	// privileged bootstrap envelope used by the dedicated admin service.
@@ -56,4 +62,6 @@ func registerPrivilegedRoutes(api *gin.RouterGroup, orderHandler *handler.OrderH
 	adminWrites.Use(limiter.Middleware(rateLimitPrivilegedWrite))
 	adminWrites.Use(requireOperatorProofEnvelope())
 	adminWrites.POST("/markets/:market_id/first-liquidity", orderHandler.CreateFirstLiquidity)
+	adminWrites.POST("/markets/:market_id/approve", orderHandler.ApproveMarket)
+	adminWrites.POST("/markets/:market_id/reject", orderHandler.RejectMarket)
 }

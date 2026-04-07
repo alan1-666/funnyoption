@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -28,6 +29,7 @@ import (
 
 type Dependencies struct {
 	Logger                *slog.Logger
+	DB                    *sql.DB
 	KafkaPublisher        sharedkafka.Publisher
 	KafkaTopics           sharedkafka.Topics
 	AccountClient         accountclient.AccountClient

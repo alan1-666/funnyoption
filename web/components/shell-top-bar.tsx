@@ -2,12 +2,14 @@
 
 import type { Route } from "next";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useTradingSession } from "@/components/trading-session-provider";
 import { UserAvatar } from "@/components/user-avatar";
+import { NotificationPanel } from "@/components/notification-panel";
+import { MarketProposeForm } from "@/components/market-propose-form";
 import { formatAssetAmount, shortenAddress } from "@/lib/format";
-import { authenticatedFetch, getBalancesRead } from "@/lib/api";
+import { authenticatedFetch, getBalancesRead, getUnreadCount } from "@/lib/api";
 import type { Balance, UserProfile } from "@/lib/types";
 import styles from "@/components/shell-top-bar.module.css";
 
@@ -57,6 +59,10 @@ export function ShellTopBar({
   const [fetchedBalance, setFetchedBalance] = useState<Balance | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(profileProp ?? null);
   const [balanceState, setBalanceState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [proposeOpen, setProposeOpen] = useState(false);
+  const bellWrapRef = useRef<HTMLDivElement>(null);
 
   const controlled = typeof query === "string";
   const value = controlled ? query : internalQuery;
@@ -133,6 +139,20 @@ export function ShellTopBar({
       cancelled = true;
     };
   }, [profileProp, session?.userId]);
+
+  useEffect(() => {
+    if (!session?.userId) {
+      setUnreadCount(0);
+      return;
+    }
+    let cancelled = false;
+    getUnreadCount(session.userId).then((count) => {
+      if (!cancelled) setUnreadCount(count);
+    });
+    return () => { cancelled = true; };
+  }, [session?.userId]);
+
+  const handleCloseNotif = useCallback(() => setNotifOpen(false), []);
 
   async function handleProfileAction() {
     if (session) {
@@ -212,18 +232,42 @@ export function ShellTopBar({
         </label>
 
         <div className={styles.actions}>
-          <button className={styles.iconButton} disabled aria-label="创建市场即将开放">
+          <button
+            className={`${styles.iconButton} ${session ? styles.iconButtonEnabled : ""}`}
+            disabled={!session}
+            aria-label="Propose a market"
+            onClick={() => session && setProposeOpen(true)}
+          >
             <svg viewBox="0 0 20 20" className={styles.iconSvg} aria-hidden="true">
               <path d="M10 4v12M4 10h12" />
             </svg>
           </button>
-          <button className={styles.iconButton} disabled aria-label="站内信即将开放">
-            <svg viewBox="0 0 20 20" className={styles.iconSvg} aria-hidden="true">
-              <path d="M10 16a2.2 2.2 0 0 0 2-1.2M5.6 14h8.8c-.7-.9-1.1-2-1.1-3.2V9.2c0-1.9-1.5-3.4-3.3-3.4S6.7 7.3 6.7 9.2v1.6c0 1.2-.4 2.3-1.1 3.2Z" />
-            </svg>
-          </button>
+          <div className={styles.bellWrap} ref={bellWrapRef}>
+            <button
+              className={`${styles.iconButton} ${session ? styles.iconButtonEnabled : ""}`}
+              disabled={!session}
+              aria-label="Notifications"
+              onClick={() => session && setNotifOpen((prev) => !prev)}
+            >
+              <svg viewBox="0 0 20 20" className={styles.iconSvg} aria-hidden="true">
+                <path d="M10 16a2.2 2.2 0 0 0 2-1.2M5.6 14h8.8c-.7-.9-1.1-2-1.1-3.2V9.2c0-1.9-1.5-3.4-3.3-3.4S6.7 7.3 6.7 9.2v1.6c0 1.2-.4 2.3-1.1 3.2Z" />
+              </svg>
+            </button>
+            {unreadCount > 0 && <span className={styles.badgeDot} />}
+            {session && (
+              <NotificationPanel
+                userId={session.userId}
+                open={notifOpen}
+                onClose={handleCloseNotif}
+                unreadCount={unreadCount}
+                setUnreadCount={setUnreadCount}
+              />
+            )}
+          </div>
           {profileNode}
         </div>
+
+        {proposeOpen && <MarketProposeForm onClose={() => setProposeOpen(false)} />}
       </div>
     </div>
   );

@@ -13,7 +13,8 @@ import {
   getOrdersRead,
   getPayoutsRead,
   getPositionsRead,
-  getProfileRead
+  getProfileRead,
+  getUserProposalsRead
 } from "@/lib/api";
 import { formatAssetAmount, formatTimestamp, formatToken } from "@/lib/format";
 import { presentMarketTitle } from "@/lib/market-display";
@@ -33,7 +34,7 @@ import styles from "@/components/portfolio-shell.module.css";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8080";
 const COLLATERAL_SYMBOL = (process.env.NEXT_PUBLIC_COLLATERAL_SYMBOL ?? "USDT").toUpperCase();
 
-type PortfolioTab = "positions" | "orders" | "history";
+type PortfolioTab = "positions" | "orders" | "history" | "proposals";
 
 const TERMINAL_ORDER_STATUSES = new Set(["FILLED", "CANCELLED", "FAILED", "COMPLETED", "REVOKED"]);
 
@@ -99,6 +100,7 @@ export function PortfolioShell({
   const [ordersResult, setOrdersResult] = useState<ApiCollectionResult<Order>>(() => toCollectionResult(orders));
   const [payoutsResult, setPayoutsResult] = useState<ApiCollectionResult<Payout>>(() => toCollectionResult(payouts));
   const [profileResult, setProfileResult] = useState<ApiItemResult<UserProfile>>(() => toProfileResult(profile));
+  const [proposalsResult, setProposalsResult] = useState<ApiCollectionResult<Market>>(() => toCollectionResult([]));
   const [portfolioSyncing, setPortfolioSyncing] = useState(false);
   const [copiedWallet, setCopiedWallet] = useState(false);
   const [showWalletQr, setShowWalletQr] = useState(false);
@@ -180,6 +182,7 @@ export function PortfolioShell({
       setPositionsResult(toCollectionResult([]));
       setOrdersResult(toCollectionResult([]));
       setPayoutsResult(toCollectionResult([]));
+      setProposalsResult(toCollectionResult([]));
       setProfileResult(toProfileResult(null));
       setPendingClaim({});
       setClaimStatus({});
@@ -192,6 +195,7 @@ export function PortfolioShell({
     setPositionsResult(toCollectionResult([]));
     setOrdersResult(toCollectionResult([]));
     setPayoutsResult(toCollectionResult([]));
+    setProposalsResult(toCollectionResult([]));
     setProfileResult(toProfileResult(null));
     setPendingClaim({});
     setClaimStatus({});
@@ -201,15 +205,17 @@ export function PortfolioShell({
       getPositionsRead(sessionUserId),
       getOrdersRead(sessionUserId),
       getPayoutsRead(sessionUserId),
-      getProfileRead(sessionUserId)
+      getProfileRead(sessionUserId),
+      getUserProposalsRead(sessionUserId)
     ])
-      .then(([nextBalances, nextPositions, nextOrders, nextPayouts, nextProfile]) => {
+      .then(([nextBalances, nextPositions, nextOrders, nextPayouts, nextProfile, nextProposals]) => {
         if (cancelled) return;
         setBalancesResult(nextBalances);
         setPositionsResult(nextPositions);
         setOrdersResult(nextOrders);
         setPayoutsResult(nextPayouts);
         setProfileResult(nextProfile);
+        setProposalsResult(nextProposals);
       })
       .finally(() => {
         if (cancelled) return;
@@ -455,6 +461,12 @@ export function PortfolioShell({
           >
             历史结算
           </button>
+          <button
+            className={`${styles.tabButton} ${activeTab === "proposals" ? styles.tabButtonActive : ""}`}
+            onClick={() => setActiveTab("proposals")}
+          >
+            我的提案
+          </button>
         </div>
 
         <div className={styles.content}>
@@ -580,6 +592,48 @@ export function PortfolioShell({
               </div>
             ) : (
               <div className={styles.empty}>{deferredQuery ? "没有匹配的结算记录。" : "还没有历史结算记录。"}</div>
+            )
+          ) : null}
+
+          {activeTab === "proposals" ? (
+            !sessionUserId ? (
+              <div className={styles.empty}>
+                {wallet ? "钱包已连接，请先授权交易密钥后查看提案。" : "请先连接钱包并授权交易密钥后查看提案。"}
+              </div>
+            ) : portfolioSyncing ? (
+              <div className={styles.empty}>正在同步您的市场提案...</div>
+            ) : proposalsResult.state === "unavailable" ? (
+              <div className={styles.empty}>
+                {proposalsResult.error?.message ?? "提案数据暂不可用，请稍后刷新。"}
+              </div>
+            ) : proposalsResult.items.length > 0 ? (
+              <div className={styles.list}>
+                {proposalsResult.items.map((proposal) => (
+                  <div key={proposal.market_id} className={styles.row}>
+                    <div className={styles.rowMain}>
+                      <strong className={styles.rowTitle}>{proposal.title}</strong>
+                      <span className={styles.rowSub}>
+                        {formatTimestamp(proposal.created_at)}
+                      </span>
+                    </div>
+                    <div className={styles.rowSide}>
+                      <strong style={{
+                        color: proposal.status === "OPEN" ? "#4caf50"
+                          : proposal.status === "REJECTED" ? "#ff6b6b"
+                          : "rgba(255,255,255,0.5)",
+                        fontSize: "0.82rem"
+                      }}>
+                        {proposal.status === "PENDING_REVIEW" ? "审核中"
+                          : proposal.status === "REJECTED" ? "已拒绝"
+                          : proposal.status === "OPEN" ? "已通过"
+                          : zhGenericStatus(proposal.status)}
+                      </strong>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className={styles.empty}>还没有提交过市场提案。点击顶部 + 按钮创建一个！</div>
             )
           ) : null}
         </div>

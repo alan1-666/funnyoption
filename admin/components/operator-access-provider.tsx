@@ -24,6 +24,7 @@ interface OperatorAccessContextValue {
   signCreateMarket: (market: CreateMarketDraft) => Promise<SignedOperatorAction | null>;
   signResolveMarket: (market: ResolveMarketDraft) => Promise<SignedOperatorAction | null>;
   signBootstrapMarket: (bootstrap: BootstrapMarketDraft) => Promise<SignedOperatorAction | null>;
+  signGenericMessage: (message: string) => Promise<SignedOperatorAction | null>;
 }
 
 const OperatorAccessContext = createContext<OperatorAccessContextValue | null>(null);
@@ -227,6 +228,15 @@ export function OperatorAccessProvider({ children }: { children: React.ReactNode
     );
   }
 
+  async function handleSignGenericMessage(message: string) {
+    const activeWallet = wallet ?? (await handleConnect());
+    if (!activeWallet || !ALLOWLISTED_WALLETS.includes(activeWallet.walletAddress)) {
+      return null;
+    }
+    const requestedAt = Date.now();
+    return signAuthorizedMessage(message, requestedAt);
+  }
+
   return (
     <OperatorAccessContext.Provider
       value={{
@@ -238,7 +248,8 @@ export function OperatorAccessProvider({ children }: { children: React.ReactNode
         connect: handleConnect,
         signCreateMarket: handleSignCreateMarket,
         signResolveMarket: handleSignResolveMarket,
-        signBootstrapMarket: handleSignBootstrapMarket
+        signBootstrapMarket: handleSignBootstrapMarket,
+        signGenericMessage: handleSignGenericMessage
       }}
     >
       {children}

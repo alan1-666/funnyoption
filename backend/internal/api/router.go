@@ -48,13 +48,16 @@ func applyGlobalMiddleware(engine *gin.Engine, logger *slog.Logger, opts routerO
 
 func registerRoutes(engine *gin.Engine, meta Meta, deps handler.Dependencies, limiter *rateLimiter) {
 	orderHandler := handler.NewOrderHandler(deps)
+	notifHandler := handler.NewNotificationHandler(deps.DB)
 
 	registerHealthRoutes(engine, meta)
 
 	api := engine.Group("/api/v1")
 	registerMetaRoutes(api, meta)
 	registerPublicReadRoutes(api, orderHandler)
-	registerUserScopedReadRoutes(api, orderHandler)
+	registerUserScopedReadRoutes(api, orderHandler, notifHandler)
+	registerNotificationWriteRoutes(api, orderHandler, notifHandler)
+	registerMarketProposeRoutes(api, orderHandler)
 	registerSessionRoutes(api, orderHandler, limiter)
 	registerTradeRoutes(api, orderHandler, limiter)
 	registerClaimRoutes(api, orderHandler, limiter)

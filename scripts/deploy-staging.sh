@@ -20,8 +20,8 @@ GO_VALIDATION_REQUIRED=0
 WEB_VALIDATION_REQUIRED=0
 ADMIN_VALIDATION_REQUIRED=0
 MIGRATIONS_REQUIRED=1
-APP_SERVICES=(account matching ledger settlement chain api ws market-maker web admin)
-BACKEND_SERVICES=(account matching ledger settlement chain api ws market-maker)
+APP_SERVICES=(account matching ledger settlement chain api ws market-maker notification web admin)
+BACKEND_SERVICES=(account matching ledger settlement chain api ws market-maker notification)
 HEALTHCHECK_URLS=(
   "${FUNNYOPTION_STAGING_WEB_HEALTHCHECK_URL:-https://funnyoption.xyz/healthz}"
   "${FUNNYOPTION_STAGING_ADMIN_HEALTHCHECK_URL:-https://admin.funnyoption.xyz/}"
@@ -72,7 +72,7 @@ require_command() {
 
 is_valid_service() {
   case "$1" in
-    account|matching|ledger|settlement|chain|api|ws|market-maker|web|admin)
+    account|matching|ledger|settlement|chain|api|ws|market-maker|notification|web|admin)
       return 0
       ;;
     *)
@@ -112,7 +112,7 @@ select_service() {
   queue_service "${service}"
 
   case "${service}" in
-    account|matching|ledger|settlement|chain|api|ws|market-maker)
+    account|matching|ledger|settlement|chain|api|ws|market-maker|notification)
       GO_VALIDATION_REQUIRED=1
       ;;
     web)
@@ -262,6 +262,9 @@ classify_changed_path() {
       ;;
     backend/cmd/ws/*|backend/internal/ws/*)
       select_service ws
+      ;;
+    backend/cmd/notification/*|backend/internal/notification/*)
+      select_service notification
       ;;
     web/package.json|web/package-lock.json)
       select_service web

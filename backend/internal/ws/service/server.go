@@ -28,6 +28,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	candleConsumer := sharedkafka.NewJSONConsumer(logger, cfg.KafkaBrokers, cfg.KafkaTopics.QuoteCandle, "funnyoption-ws", hub.HandleCandle)
 	marketConsumer := sharedkafka.NewJSONConsumer(logger, cfg.KafkaBrokers, cfg.KafkaTopics.MarketEvent, "funnyoption-ws", hub.HandleMarketEvent)
 	settlementConsumer := sharedkafka.NewJSONConsumer(logger, cfg.KafkaBrokers, cfg.KafkaTopics.SettlementDone, "funnyoption-ws", hub.HandleSettlementCompleted)
+	notifConsumer := sharedkafka.NewJSONConsumer(logger, cfg.KafkaBrokers, cfg.KafkaTopics.NotificationCreated, "funnyoption-ws", hub.HandleNotification)
 	depthConsumer.Start(ctx)
 	defer depthConsumer.Close()
 	tickerConsumer.Start(ctx)
@@ -38,6 +39,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	defer marketConsumer.Close()
 	settlementConsumer.Start(ctx)
 	defer settlementConsumer.Close()
+	notifConsumer.Start(ctx)
+	defer notifConsumer.Close()
 
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
@@ -50,26 +53,39 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 		stream := c.DefaultQuery("stream", "depth")
 		bookKey := c.Query("book_key")
 		marketID := c.Query("market_id")
-		if bookKey == "" {
-			if stream == "market" && marketID != "" {
-				bookKey = marketID
-			}
-		}
-		if bookKey == "" {
-			if stream == "market" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "market_id is required"})
+		userID := c.Query("user_id")
+
+		var topic string
+		switch stream {
+		case "notifications":
+			if userID == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "user_id is required for notifications stream"})
 				return
 			}
-			c.JSON(http.StatusBadRequest, gin.H{"error": "book_key is required"})
-			return
+			topic = "user:" + userID
+		default:
+			if bookKey == "" {
+				if stream == "market" && marketID != "" {
+					bookKey = marketID
+				}
+			}
+			if bookKey == "" {
+				if stream == "market" {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "market_id is required"})
+					return
+				}
+				c.JSON(http.StatusBadRequest, gin.H{"error": "book_key is required"})
+				return
+			}
+			topic = stream + ":" + bookKey
 		}
+
 		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
 			return
 		}
 		defer conn.Close()
 
-		topic := stream + ":" + bookKey
 		sub, unsubscribe := hub.Subscribe(topic)
 		defer unsubscribe()
 

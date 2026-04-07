@@ -41,6 +41,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 		Env:     cfg.Env,
 	}, handler.Dependencies{
 		Logger:                logger,
+		DB:                    dbConn,
 		KafkaPublisher:        publisher,
 		KafkaTopics:           cfg.KafkaTopics,
 		AccountClient:         accountRPC,

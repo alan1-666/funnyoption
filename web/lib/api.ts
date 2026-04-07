@@ -7,6 +7,7 @@ import type {
   Deposit,
   Market,
   MarketRuntime,
+  Notification,
   Order,
   Payout,
   Position,
@@ -435,4 +436,67 @@ export async function getSessions(userId?: number) {
 
 export async function getChainTasks() {
   return (await getChainTasksRead()).items;
+}
+
+export async function getUserProposalsRead(userId?: number): Promise<ApiCollectionResult<Market>> {
+  if (!hasScopedUserId(userId)) {
+    return normalizeCollectionState<Market>([]);
+  }
+  return normalizeMarketCollection(
+    await fetchCollection<Market>(`/api/v1/markets?created_by=${userId}&limit=20`)
+  );
+}
+
+export async function getUserProposals(userId?: number) {
+  return (await getUserProposalsRead(userId)).items;
+}
+
+export async function getNotificationsRead(userId?: number): Promise<ApiCollectionResult<Notification>> {
+  if (!hasScopedUserId(userId)) {
+    return normalizeCollectionState<Notification>([]);
+  }
+  return fetchCollection<Notification>(`/api/v1/notifications?user_id=${userId}&limit=20`);
+}
+
+export async function getNotifications(userId?: number) {
+  return (await getNotificationsRead(userId)).items;
+}
+
+export async function getUnreadCount(userId?: number): Promise<number> {
+  if (!hasScopedUserId(userId)) return 0;
+  const result = await fetchJson<{ count: number }>(`/api/v1/notifications/unread-count?user_id=${userId}`);
+  if (result.kind === "ok") return result.data.count;
+  return 0;
+}
+
+export async function markNotificationRead(notificationId: number): Promise<void> {
+  await authenticatedFetch(`${API_BASE_URL}/api/v1/notifications/${notificationId}/read`, {
+    method: "PATCH",
+  });
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await authenticatedFetch(`${API_BASE_URL}/api/v1/notifications/read-all`, {
+    method: "PATCH",
+  });
+}
+
+export async function proposeMarket(input: {
+  title: string;
+  description?: string;
+  category_key?: string;
+  close_at?: number;
+  resolve_at?: number;
+  resolution_source?: string;
+}): Promise<Market> {
+  const response = await authenticatedFetch(`${API_BASE_URL}/api/v1/markets/propose`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? `HTTP ${response.status}`);
+  }
+  return (await response.json()) as Market;
 }

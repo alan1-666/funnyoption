@@ -1,4 +1,4 @@
-export type MarketStatus = "DRAFT" | "OPEN" | "PAUSED" | "CLOSED" | "WAITING_RESOLUTION" | "RESOLVED";
+export type MarketStatus = "DRAFT" | "OPEN" | "PAUSED" | "CLOSED" | "WAITING_RESOLUTION" | "RESOLVED" | "PENDING_REVIEW" | "REJECTED";
 
 export interface ApiReadError {
   status?: number;

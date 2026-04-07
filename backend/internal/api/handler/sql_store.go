@@ -2828,7 +2828,7 @@ func normalizeMarketStatus(status string) string {
 		return "OPEN"
 	}
 	switch normalized {
-	case "DRAFT", "OPEN", "PAUSED", "CLOSED":
+	case "DRAFT", "OPEN", "PAUSED", "CLOSED", "PENDING_REVIEW", "REJECTED":
 		return normalized
 	default:
 		return "OPEN"

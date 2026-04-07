@@ -113,6 +113,17 @@ func (h *Hub) HandleSettlementCompleted(_ context.Context, msg sharedkafka.Messa
 	})
 }
 
+func (h *Hub) HandleNotification(_ context.Context, msg sharedkafka.Message) error {
+	var event sharedkafka.NotificationCreatedEvent
+	if err := json.Unmarshal(msg.Value, &event); err != nil {
+		return err
+	}
+	return h.Broadcast("user:"+strconv.FormatInt(event.UserID, 10), streamEnvelope{
+		Type:    "notification",
+		Payload: event,
+	})
+}
+
 func formatMarketKey(marketID int64) string {
 	return strconv.FormatInt(marketID, 10)
 }

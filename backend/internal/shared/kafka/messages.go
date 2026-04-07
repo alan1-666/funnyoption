@@ -184,3 +184,11 @@ type QuoteCandleEvent struct {
 	Candles          []QuoteCandle `json:"candles"`
 	OccurredAtMillis int64         `json:"occurred_at_millis"`
 }
+
+type NotificationCreatedEvent struct {
+	NotificationID int64  `json:"notification_id"`
+	UserID         int64  `json:"user_id"`
+	Type           string `json:"type"`
+	Title          string `json:"title"`
+	CreatedAt      int64  `json:"created_at"`
+}

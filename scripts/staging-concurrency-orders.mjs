@@ -1973,7 +1973,7 @@ async function main() {
     logStep("market_proposal_e2e_start");
 
     const proposerUser = users[0];
-    const proposerSession = proposerUser.sessionId;
+    const proposerSession = proposerUser.session.sessionId;
     const proposalTitle = `E2E Proposal ${Date.now()}`;
 
     logStep("propose_market_start", { user_id: proposerUser.userId, title: proposalTitle });

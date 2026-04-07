@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -17,6 +18,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
+)
+
+const (
+	authenticatedUserIDKey = "api.authenticated_user_id"
+	maxRequestBodySize     = 1 << 20 // 1 MB
 )
 
 const (
@@ -69,14 +75,95 @@ type rateBucket struct {
 	lastSeen time.Time
 }
 
-func corsMiddleware() gin.HandlerFunc {
+type sessionLookupFn func(ctx context.Context, sessionID string) (int64, error)
+
+func requireSessionAuth(lookupSession sessionLookupFn) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		if origin := ctx.GetHeader("Origin"); origin != "" {
-			ctx.Writer.Header().Set("Access-Control-Allow-Origin", origin)
-			ctx.Writer.Header().Set("Vary", "Origin")
-			ctx.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-			ctx.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-			ctx.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		authHeader := strings.TrimSpace(ctx.GetHeader("Authorization"))
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authorization required"})
+			return
+		}
+		sessionID := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+		if sessionID == "" {
+			ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authorization required"})
+			return
+		}
+		userID, err := lookupSession(ctx.Request.Context(), sessionID)
+		if err != nil || userID <= 0 {
+			ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired session"})
+			return
+		}
+		ctx.Set(authenticatedUserIDKey, userID)
+		ctx.Next()
+	}
+}
+
+func enforceUserScope() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		raw, exists := ctx.Get(authenticatedUserIDKey)
+		if !exists {
+			ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authorization required"})
+			return
+		}
+		authUserID := raw.(int64)
+
+		if qUserID := strings.TrimSpace(ctx.Query("user_id")); qUserID != "" {
+			parsed, err := strconv.ParseInt(qUserID, 10, 64)
+			if err != nil || parsed != authUserID {
+				ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "access denied"})
+				return
+			}
+		} else {
+			q := ctx.Request.URL.Query()
+			q.Set("user_id", strconv.FormatInt(authUserID, 10))
+			ctx.Request.URL.RawQuery = q.Encode()
+		}
+		ctx.Next()
+	}
+}
+
+func requestBodyLimitMiddleware() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		if ctx.Request.Body != nil && ctx.Request.ContentLength != 0 {
+			ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, maxRequestBodySize)
+		}
+		ctx.Next()
+	}
+}
+
+var defaultCORSAllowedOrigins = []string{
+	"https://funnyoption.xyz",
+	"https://www.funnyoption.xyz",
+	"https://admin.funnyoption.xyz",
+	"http://localhost:3000",
+	"http://localhost:5173",
+	"http://127.0.0.1:3000",
+	"http://127.0.0.1:5173",
+}
+
+func corsMiddleware(extraOrigins ...string) gin.HandlerFunc {
+	allowed := make(map[string]struct{}, len(defaultCORSAllowedOrigins)+len(extraOrigins))
+	for _, o := range defaultCORSAllowedOrigins {
+		allowed[strings.ToLower(strings.TrimRight(o, "/"))] = struct{}{}
+	}
+	for _, o := range extraOrigins {
+		if o = strings.TrimSpace(o); o != "" {
+			allowed[strings.ToLower(strings.TrimRight(o, "/"))] = struct{}{}
+		}
+	}
+
+	return func(ctx *gin.Context) {
+		origin := strings.TrimSpace(ctx.GetHeader("Origin"))
+		if origin != "" {
+			normalized := strings.ToLower(strings.TrimRight(origin, "/"))
+			if _, ok := allowed[normalized]; ok {
+				ctx.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+				ctx.Writer.Header().Set("Vary", "Origin")
+				ctx.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+				ctx.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+				ctx.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+			}
 		}
 
 		if ctx.Request.Method == http.MethodOptions {

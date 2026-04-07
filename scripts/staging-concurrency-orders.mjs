@@ -442,13 +442,15 @@ function readOperatorAccount(config) {
   return privateKeyToAccount(`0x${secret.trim().replace(/^0x/, "")}`);
 }
 
-async function requestJson(config, url, { method = "GET", body } = {}) {
+async function requestJson(config, url, { method = "GET", body, headers: extraHeaders } = {}) {
   let lastError = null;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
+      const headers = { ...extraHeaders };
+      if (body !== undefined) headers["Content-Type"] = "application/json";
       const response = await fetch(url, {
         method,
-        headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+        headers: Object.keys(headers).length > 0 ? headers : undefined,
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(config.httpTimeoutMs)
       });
@@ -479,8 +481,8 @@ async function requestJson(config, url, { method = "GET", body } = {}) {
   throw new Error(`fetch ${method} ${url} failed: ${message}${cause}`);
 }
 
-async function getJsonOrThrow(config, url, label) {
-  const response = await requestJson(config, url);
+async function getJsonOrThrow(config, url, label, { headers } = {}) {
+  const response = await requestJson(config, url, { headers });
   if (!response.ok) {
     throw new Error(`${label} failed: HTTP ${response.status} ${response.text}`);
   }
@@ -686,56 +688,67 @@ function rpcTransport(config) {
   });
 }
 
-async function fetchBalance(config, userId) {
+function authHeaders(sessionId) {
+  if (!sessionId) return {};
+  return { Authorization: `Bearer ${sessionId}` };
+}
+
+async function fetchBalance(config, userId, sessionId) {
   const payload = await getJsonOrThrow(
     config,
-    `${config.apiBase}/api/v1/balances?user_id=${userId}&limit=20`,
-    `get balances user=${userId}`
+    `${config.apiBase}/api/v1/balances?user_id=${userId}&asset=USDT&limit=5`,
+    `get balances user=${userId}`,
+    { headers: authHeaders(sessionId) }
   );
   return (payload.items ?? []).find((item) => String(item.asset ?? "").toUpperCase() === "USDT") ?? null;
 }
 
-async function fetchOrders(config, userId, marketId) {
+async function fetchOrders(config, userId, marketId, sessionId) {
   const payload = await getJsonOrThrow(
     config,
     `${config.apiBase}/api/v1/orders?user_id=${userId}&market_id=${marketId}&limit=${FETCH_LIMIT}`,
-    `get orders user=${userId} market=${marketId}`
+    `get orders user=${userId} market=${marketId}`,
+    { headers: authHeaders(sessionId) }
   );
   return payload.items ?? [];
 }
 
-async function fetchPositions(config, userId, marketId) {
+async function fetchPositions(config, userId, marketId, sessionId) {
   const payload = await getJsonOrThrow(
     config,
     `${config.apiBase}/api/v1/positions?user_id=${userId}&market_id=${marketId}&limit=${FETCH_LIMIT}`,
-    `get positions user=${userId} market=${marketId}`
+    `get positions user=${userId} market=${marketId}`,
+    { headers: authHeaders(sessionId) }
   );
   return payload.items ?? [];
 }
 
-async function fetchPayouts(config, userId, marketId) {
+async function fetchPayouts(config, userId, marketId, sessionId) {
   const payload = await getJsonOrThrow(
     config,
     `${config.apiBase}/api/v1/payouts?user_id=${userId}&market_id=${marketId}&limit=${FETCH_LIMIT}`,
-    `get payouts user=${userId} market=${marketId}`
+    `get payouts user=${userId} market=${marketId}`,
+    { headers: authHeaders(sessionId) }
   );
   return payload.items ?? [];
 }
 
-async function fetchFreezes(config, userId) {
+async function fetchFreezes(config, userId, sessionId) {
   const payload = await getJsonOrThrow(
     config,
     `${config.apiBase}/api/v1/freezes?user_id=${userId}&limit=${FETCH_LIMIT}`,
-    `get freezes user=${userId}`
+    `get freezes user=${userId}`,
+    { headers: authHeaders(sessionId) }
   );
   return payload.items ?? [];
 }
 
-async function fetchDeposits(config, userId) {
+async function fetchDeposits(config, userId, sessionId) {
   const payload = await getJsonOrThrow(
     config,
     `${config.apiBase}/api/v1/deposits?user_id=${userId}&limit=${FETCH_LIMIT}`,
-    `get deposits user=${userId}`
+    `get deposits user=${userId}`,
+    { headers: authHeaders(sessionId) }
   );
   return payload.items ?? [];
 }
@@ -940,8 +953,8 @@ async function createMarket(config, operatorAccount) {
     status: "OPEN",
     collateralAsset: "USDT",
     openAt: nowSec - 60,
-    closeAt: nowSec + 86_400,
-    resolveAt: nowSec + 90_000,
+    closeAt: nowSec + 180,
+    resolveAt: nowSec + 240,
     options: binaryOptions
   };
 
@@ -1042,10 +1055,10 @@ async function verifyDuplicateBootstrap(config, operatorAccount, marketId, boots
   );
 
   const [makerPositionAfterDuplicate, makerBalanceAfterDuplicate] = await Promise.all([
-    fetchPositions(config, config.makerUserId, marketId).then((items) =>
+    fetchPositions(config, config.makerUserId, marketId, config.makerSessionId).then((items) =>
       items.find((item) => String(item.outcome ?? "").toUpperCase() === "YES") ?? null
     ),
-    fetchBalance(config, config.makerUserId)
+    fetchBalance(config, config.makerUserId, config.makerSessionId)
   ]);
 
   const anomalies = [];
@@ -1115,7 +1128,7 @@ async function fundUserWallet(config, publicClient, operatorWallet, tokenOwner, 
   };
 }
 
-async function approveAndDeposit(config, publicClient, userAccount, userId) {
+async function approveAndDeposit(config, publicClient, userAccount, userId, sessionId) {
   const userWallet = createWalletClient({
     account: userAccount,
     chain: bscTestnet,
@@ -1151,7 +1164,7 @@ async function approveAndDeposit(config, publicClient, userAccount, userId) {
   const deposit = await waitFor(
     `wait deposit credited user=${userId}`,
     async () => {
-      const deposits = await fetchDeposits(config, userId);
+      const deposits = await fetchDeposits(config, userId, sessionId);
       return deposits.find((item) =>
         normalizeAddress(item.wallet_address) === normalizeAddress(userAccount.address) &&
         normalizeHex(item.tx_hash) === normalizeHex(depositTx) &&
@@ -1165,7 +1178,7 @@ async function approveAndDeposit(config, publicClient, userAccount, userId) {
   const balance = await waitFor(
     `wait deposited balance user=${userId}`,
     async () => {
-      const item = await fetchBalance(config, userId);
+      const item = await fetchBalance(config, userId, sessionId);
       if (item && Number(item.available ?? 0) >= config.depositAccounting) {
         return item;
       }
@@ -1214,7 +1227,10 @@ async function prepareUsers(config, publicClient, operatorWallet, tokenOwner) {
       ...(await fundUserWallet(config, publicClient, operatorWallet, tokenOwner, user.account))
     };
     user.session = await createSession(config, user.account, user.userId);
-    user.setup = await approveAndDeposit(config, publicClient, user.account, user.userId);
+    if (user.session.userId && user.session.userId !== user.userId) {
+      user.userId = user.session.userId;
+    }
+    user.setup = await approveAndDeposit(config, publicClient, user.account, user.userId, user.session.sessionId);
     logStep("fund_user_wallet_done", {
       user_id: user.userId,
       role: user.role,
@@ -1244,8 +1260,8 @@ async function preseedSellerPositions(config, marketId, users) {
       `wait seller preseed fill user=${user.userId}`,
       async () => {
         const [orders, positions] = await Promise.all([
-          fetchOrders(config, user.userId, marketId),
-          fetchPositions(config, user.userId, marketId)
+          fetchOrders(config, user.userId, marketId, user.session.sessionId),
+          fetchPositions(config, user.userId, marketId, user.session.sessionId)
         ]);
         const order = orders.find((item) => String(item.order_id ?? "") === user.preseedOrderId);
         const position = positions.find((item) => String(item.outcome ?? "").toUpperCase() === "YES");
@@ -1330,11 +1346,11 @@ async function collectMarketSnapshot(config, marketId, users) {
   const [market, trades, makerOrders, makerPositions, makerFreezes, makerBalance, makerPayouts] = await Promise.all([
     fetchMarket(config, marketId),
     fetchTrades(config, marketId),
-    fetchOrders(config, config.makerUserId, marketId),
-    fetchPositions(config, config.makerUserId, marketId),
-    fetchFreezes(config, config.makerUserId),
-    fetchBalance(config, config.makerUserId),
-    fetchPayouts(config, config.makerUserId, marketId)
+    fetchOrders(config, config.makerUserId, marketId, config.makerSessionId),
+    fetchPositions(config, config.makerUserId, marketId, config.makerSessionId),
+    fetchFreezes(config, config.makerUserId, config.makerSessionId),
+    fetchBalance(config, config.makerUserId, config.makerSessionId),
+    fetchPayouts(config, config.makerUserId, marketId, config.makerSessionId)
   ]);
 
   const userSnapshots = await runWithConcurrency(
@@ -1342,11 +1358,11 @@ async function collectMarketSnapshot(config, marketId, users) {
     Math.min(config.concurrency, users.length),
     async (user) => {
       const [orders, positions, freezes, balance, payouts] = await Promise.all([
-        fetchOrders(config, user.userId, marketId),
-        fetchPositions(config, user.userId, marketId),
-        fetchFreezes(config, user.userId),
-        fetchBalance(config, user.userId),
-        fetchPayouts(config, user.userId, marketId)
+        fetchOrders(config, user.userId, marketId, user.session.sessionId),
+        fetchPositions(config, user.userId, marketId, user.session.sessionId),
+        fetchFreezes(config, user.userId, user.session.sessionId),
+        fetchBalance(config, user.userId, user.session.sessionId),
+        fetchPayouts(config, user.userId, marketId, user.session.sessionId)
       ]);
       return {
         user_id: user.userId,
@@ -1668,7 +1684,14 @@ async function main() {
     matrix.operator_wallet_funded = "PASS";
     ids.operator_wallet = operatorAccount.address;
 
-    reads.maker_balance_before = summarizeBalance(await fetchBalance(config, config.makerUserId));
+    const makerSession = await createSession(config, operatorAccount, config.makerUserId);
+    if (makerSession.userId && makerSession.userId !== config.makerUserId) {
+      config.makerUserId = makerSession.userId;
+    }
+    config.makerSessionId = makerSession.sessionId;
+    logStep("maker_session_created", { session_id: makerSession.sessionId, user_id: config.makerUserId });
+
+    reads.maker_balance_before = summarizeBalance(await fetchBalance(config, config.makerUserId, config.makerSessionId));
 
     logStep("create_market_start");
     const createdMarket = await createMarket(config, operatorAccount);
@@ -1707,9 +1730,9 @@ async function main() {
       "wait maker bootstrap order and inventory",
       async () => {
         const [orders, positions, balance] = await Promise.all([
-          fetchOrders(config, config.makerUserId, ids.market_id),
-          fetchPositions(config, config.makerUserId, ids.market_id),
-          fetchBalance(config, config.makerUserId)
+          fetchOrders(config, config.makerUserId, ids.market_id, config.makerSessionId),
+          fetchPositions(config, config.makerUserId, ids.market_id, config.makerSessionId),
+          fetchBalance(config, config.makerUserId, config.makerSessionId)
         ]);
         const order = orders.find((item) => String(item.order_id ?? "") === ids.bootstrap_order_id);
         const position = positions.find((item) => String(item.outcome ?? "").toUpperCase() === "YES");
@@ -1897,6 +1920,14 @@ async function main() {
       remaining_open_orders_after_match: metrics.remaining_open_orders_after_match,
       latency_summary_ms: metrics.latency_summary_ms
     });
+
+    const marketDetail = await fetchMarket(config, ids.market_id);
+    const resolveAtSec = Number(marketDetail.resolve_at ?? 0);
+    const resolveWaitSec = Math.max(0, resolveAtSec - Math.floor(Date.now() / 1000) + 2);
+    if (resolveWaitSec > 0) {
+      logStep("wait_market_resolution_window", { resolve_at: resolveAtSec, wait_seconds: resolveWaitSec });
+      await sleep(resolveWaitSec * 1000);
+    }
 
     logStep("resolve_market_start", {
       market_id: ids.market_id,

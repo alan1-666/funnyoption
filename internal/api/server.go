@@ -49,7 +49,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 		DefaultOperatorUserID: cfg.DefaultOperatorUserID,
 		ExpectedChainID:       cfg.ChainID,
 		ExpectedVaultAddress:  cfg.VaultAddress,
-	})
+	}, cfg.CORSExtraOrigins)
 
 	server := &http.Server{
 		Addr:    cfg.HTTPAddr,

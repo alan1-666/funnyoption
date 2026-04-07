@@ -46,8 +46,8 @@ contract FunnyVault {
 
     function deposit(uint256 amount) external {
         if (amount == 0) revert InvalidAmount();
-        depositedBalance[msg.sender] += amount;
         require(collateralToken.transferFrom(msg.sender, address(this), amount), "TRANSFER_FROM_FAILED");
+        depositedBalance[msg.sender] += amount;
         emit Deposited(msg.sender, amount);
     }
 

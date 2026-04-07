@@ -84,6 +84,17 @@ func writeCollectionResponse[T any](ctx *gin.Context, statusCode int, items []T)
 	ctx.JSON(statusCode, collectionResponse[T]{Items: normalizeCollectionItems(items)})
 }
 
+func (h *OrderHandler) LookupActiveSession(ctx context.Context, sessionID string) (int64, error) {
+	session, err := h.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	if session.Status != "ACTIVE" {
+		return 0, fmt.Errorf("session is not active")
+	}
+	return session.UserID, nil
+}
+
 func (h *OrderHandler) validateTradingKeyDomain(chainID int64, vaultAddress string) error {
 	if chainID != h.expectedChainID {
 		return fmt.Errorf("chain_id does not match target chain")

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 
 import { proposeMarket } from "@/lib/api";
 import styles from "@/components/shell-top-bar.module.css";
@@ -36,7 +37,7 @@ export function MarketProposeForm({ onClose }: { onClose: () => void }) {
     }
   }
 
-  return (
+  return createPortal(
     <div className={styles.proposeOverlay} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className={styles.proposeModal}>
         <h2>Propose a Market</h2>
@@ -128,6 +129,7 @@ export function MarketProposeForm({ onClose }: { onClose: () => void }) {
           </form>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

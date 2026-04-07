@@ -33,7 +33,7 @@
   - added a keyed in-handler replay gate so concurrent duplicate bootstrap submissions on the same API instance serialize before the persisted replay check runs
   - extended API SQL/test stores with `GetOrder` and `GetLatestFreezeByRef`; left the admin bootstrap route source unchanged because it already forwards the signed fields the derived key depends on
 - validated:
-  - `gofmt -w /Users/zhangza/code/funnyoption/internal/api/dto/operator_auth.go /Users/zhangza/code/funnyoption/internal/api/handler/bootstrap_replay.go /Users/zhangza/code/funnyoption/internal/api/handler/order_handler.go /Users/zhangza/code/funnyoption/internal/api/handler/sql_store.go /Users/zhangza/code/funnyoption/internal/api/handler/order_handler_test.go /Users/zhangza/code/funnyoption/internal/api/router_test.go`
+  - `gofmt -w /Users/zhangza/code/funnyoption/backend/internal/api/dto/operator_auth.go /Users/zhangza/code/funnyoption/backend/internal/api/handler/bootstrap_replay.go /Users/zhangza/code/funnyoption/backend/internal/api/handler/order_handler.go /Users/zhangza/code/funnyoption/backend/internal/api/handler/sql_store.go /Users/zhangza/code/funnyoption/backend/internal/api/handler/order_handler_test.go /Users/zhangza/code/funnyoption/backend/internal/api/router_test.go`
   - `go test ./internal/api/...`
   - `go test ./internal/api/... -run 'Test(CreateOrderWithOperatorBootstrapProofPublishesCommand|CreateOrderRejectsReplayedOperatorBootstrapOrder|CreateOrderWithSessionSignaturePublishesCommand|EngineTradeWriteRejectsReplayedOperatorBootstrapOrder)$'`
   - `cd /Users/zhangza/code/funnyoption/admin && npm run build`

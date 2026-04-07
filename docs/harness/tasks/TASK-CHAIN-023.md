@@ -47,7 +47,7 @@ keeping the outer proof/public-signal envelope, `proofData-v1`, fixed
 - [/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-022.md](/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-022.md)
 - [/Users/zhangza/code/funnyoption/docs/architecture/mode-b-zk-rollup.md](/Users/zhangza/code/funnyoption/docs/architecture/mode-b-zk-rollup.md)
 - [/Users/zhangza/code/funnyoption/docs/sql/schema.md](/Users/zhangza/code/funnyoption/docs/sql/schema.md)
-- [/Users/zhangza/code/funnyoption/internal/rollup](/Users/zhangza/code/funnyoption/internal/rollup)
+- [/Users/zhangza/code/funnyoption/backend/internal/rollup](/Users/zhangza/code/funnyoption/backend/internal/rollup)
 - [/Users/zhangza/code/funnyoption/contracts/src/FunnyRollupGroth16Backend.sol](/Users/zhangza/code/funnyoption/contracts/src/FunnyRollupGroth16Backend.sol)
 - [/Users/zhangza/code/funnyoption/contracts/src/FunnyRollupVerifier.sol](/Users/zhangza/code/funnyoption/contracts/src/FunnyRollupVerifier.sol)
 - [/Users/zhangza/code/funnyoption/contracts/test](/Users/zhangza/code/funnyoption/contracts/test)

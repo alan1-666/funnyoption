@@ -15,8 +15,8 @@ Current repo DDL expects:
 
 That shape comes from:
 
-- [`migrations/003_wallet_sessions_and_deposits.sql`](/Users/zhangza/code/funnyoption/migrations/003_wallet_sessions_and_deposits.sql)
-- [`migrations/010_chain_deposits_tx_hash_width_repair.sql`](/Users/zhangza/code/funnyoption/migrations/010_chain_deposits_tx_hash_width_repair.sql)
+- [`migrations/003_wallet_sessions_and_deposits.sql`](/Users/zhangza/code/funnyoption/backend/migrations/003_wallet_sessions_and_deposits.sql)
+- [`migrations/010_chain_deposits_tx_hash_width_repair.sql`](/Users/zhangza/code/funnyoption/backend/migrations/010_chain_deposits_tx_hash_width_repair.sql)
 
 ## Observed local drift
 
@@ -132,7 +132,7 @@ Apply the repo migration once the dry run looks correct:
 
 ```bash
 psql "$FUNNYOPTION_POSTGRES_DSN" -v ON_ERROR_STOP=1 -f \
-  /Users/zhangza/code/funnyoption/migrations/010_chain_deposits_tx_hash_width_repair.sql
+  /Users/zhangza/code/funnyoption/backend/migrations/010_chain_deposits_tx_hash_width_repair.sql
 ```
 
 This migration is intentionally narrow and idempotent:

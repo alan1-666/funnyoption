@@ -53,7 +53,7 @@
 - changed:
   - no new code changes; finalized validation and handoff notes
 - validated:
-  - `gofmt -w /Users/zhangza/code/funnyoption/internal/api/dto/operator_auth.go /Users/zhangza/code/funnyoption/internal/api/handler/order_handler.go /Users/zhangza/code/funnyoption/internal/api/handler/order_handler_test.go /Users/zhangza/code/funnyoption/internal/api/router_test.go`
+  - `gofmt -w /Users/zhangza/code/funnyoption/backend/internal/api/dto/operator_auth.go /Users/zhangza/code/funnyoption/backend/internal/api/handler/order_handler.go /Users/zhangza/code/funnyoption/backend/internal/api/handler/order_handler_test.go /Users/zhangza/code/funnyoption/backend/internal/api/router_test.go`
   - `go test ./internal/api/...`
   - `go test ./internal/api/... -run 'Test(CreateOrderWithOperatorBootstrapProofPublishesCommand|CreateOrderRejectsReplayedOperatorBootstrapOrder|CreateOrderRejectsSemanticDuplicateBootstrapOrderWithFreshProof|CreateOrderWithSessionSignaturePublishesCommand|EngineTradeWriteSupportsOperatorBootstrapOrder|EngineTradeWriteRejectsReplayedOperatorBootstrapOrder|EngineTradeWriteRejectsSemanticDuplicateOperatorBootstrapOrderWithFreshProof|EngineTradeWriteSupportsSessionSignedOrder)$'`
   - `cd /Users/zhangza/code/funnyoption/admin && npm run build`

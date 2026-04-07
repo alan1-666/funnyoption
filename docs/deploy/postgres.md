@@ -26,4 +26,4 @@ export FUNNYOPTION_POSTGRES_DSN='postgres://funnyoption:funnyoption@127.0.0.1:54
 
 ## Test environment example
 
-See `/Users/zhangza/code/funnyoption/configs/test/funnyoption.env.example`.
+See `/Users/zhangza/code/funnyoption/backend/configs/test/funnyoption.env.example`.

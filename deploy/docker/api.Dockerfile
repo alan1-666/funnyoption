@@ -7,11 +7,11 @@ FROM golang:${GO_VERSION}-bookworm AS builder
 WORKDIR /src
 ENV CGO_ENABLED=0 GOFLAGS=-trimpath
 
-COPY go.mod go.sum ./
+COPY backend/go.mod backend/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
-COPY . .
+COPY backend/ .
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64

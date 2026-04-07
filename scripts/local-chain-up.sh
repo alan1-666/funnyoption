@@ -122,7 +122,7 @@ read_env_value() {
 
 compile_contracts() {
   local output
-  if ! output="$(cd "${ROOT_DIR}" && forge build 2>&1)"; then
+  if ! output="$(cd "${ROOT_DIR}/contracts" && forge build 2>&1)"; then
     echo "${output}" >&2
     cat >&2 <<EOF
 
@@ -139,7 +139,7 @@ deploy_contract() {
   local contract="$1"
   shift
   local output
-  if ! output="$(cd "${ROOT_DIR}" && forge create "${contract}" --broadcast --rpc-url "${RPC_URL}" --private-key "${OPERATOR_PRIVATE_KEY}" "$@" 2>&1)"; then
+  if ! output="$(cd "${ROOT_DIR}/contracts" && forge create "${contract}" --broadcast --rpc-url "${RPC_URL}" --private-key "${OPERATOR_PRIVATE_KEY}" "$@" 2>&1)"; then
     echo "${output}" >&2
     exit 1
   fi
@@ -276,8 +276,8 @@ DEPLOYED_FRESH=0
 if ! contract_exists "${TOKEN_ADDRESS}" || ! contract_exists "${VAULT_ADDRESS}"; then
   DEPLOYED_FRESH=1
   compile_contracts
-  TOKEN_ADDRESS="$(deploy_contract "contracts/src/MockUSDT.sol:MockUSDT")"
-  VAULT_ADDRESS="$(deploy_contract "contracts/src/FunnyVault.sol:FunnyVault" --constructor-args "${TOKEN_ADDRESS}" "${OPERATOR_ADDRESS}")"
+  TOKEN_ADDRESS="$(deploy_contract "src/MockUSDT.sol:MockUSDT")"
+  VAULT_ADDRESS="$(deploy_contract "src/FunnyVault.sol:FunnyVault" --constructor-args "${TOKEN_ADDRESS}" "${OPERATOR_ADDRESS}")"
 
   send_eth "${BUYER_ADDRESS}" "10ether"
   send_eth "${MAKER_ADDRESS}" "10ether"
@@ -289,13 +289,13 @@ fi
 
 if ! contract_exists "${ROLLUP_CORE_ADDRESS}" || ! contract_exists "${ROLLUP_VERIFIER_ADDRESS}" || ! rollup_core_supports_forced_withdrawal "${ROLLUP_CORE_ADDRESS}"; then
   compile_contracts
-  GENESIS_STATE_ROOT="$(cd "${ROOT_DIR}" && go run ./cmd/rollup -mode=print-genesis-root | sed -n 's/.*"genesis_state_root": *"\([^"]*\)".*/\1/p' | tail -n 1)"
+  GENESIS_STATE_ROOT="$(cd "${ROOT_DIR}/backend" && go run ./cmd/rollup -mode=print-genesis-root | sed -n 's/.*"genesis_state_root": *"\([^"]*\)".*/\1/p' | tail -n 1)"
   if [[ -z "${GENESIS_STATE_ROOT}" ]]; then
     echo "failed to compute rollup genesis state root" >&2
     exit 1
   fi
-  ROLLUP_CORE_ADDRESS="$(deploy_contract "contracts/src/FunnyRollupCore.sol:FunnyRollupCore" --constructor-args "${OPERATOR_ADDRESS}" "${GENESIS_STATE_ROOT}")"
-  ROLLUP_VERIFIER_ADDRESS="$(deploy_contract "contracts/src/FunnyRollupVerifier.sol:FunnyRollupVerifier")"
+  ROLLUP_CORE_ADDRESS="$(deploy_contract "src/FunnyRollupCore.sol:FunnyRollupCore" --constructor-args "${OPERATOR_ADDRESS}" "${GENESIS_STATE_ROOT}")"
+  ROLLUP_VERIFIER_ADDRESS="$(deploy_contract "src/FunnyRollupVerifier.sol:FunnyRollupVerifier")"
 fi
 
 cast send --rpc-url "${RPC_URL}" --private-key "${OPERATOR_PRIVATE_KEY}" "${ROLLUP_CORE_ADDRESS}" "setVerifier(address)" "${ROLLUP_VERIFIER_ADDRESS}" >/dev/null

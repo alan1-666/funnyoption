@@ -38,8 +38,8 @@ queue / freeze state without claiming full escape-hatch runtime.
 - [/Users/zhangza/code/funnyoption/docs/sql/schema.md](/Users/zhangza/code/funnyoption/docs/sql/schema.md)
 - [/Users/zhangza/code/funnyoption/contracts/src/FunnyRollupCore.sol](/Users/zhangza/code/funnyoption/contracts/src/FunnyRollupCore.sol)
 - [/Users/zhangza/code/funnyoption/contracts/src/FunnyVault.sol](/Users/zhangza/code/funnyoption/contracts/src/FunnyVault.sol)
-- [/Users/zhangza/code/funnyoption/internal/chain/service/**](/Users/zhangza/code/funnyoption/internal/chain/service)
-- [/Users/zhangza/code/funnyoption/internal/api/handler/**](/Users/zhangza/code/funnyoption/internal/api/handler)
+- [/Users/zhangza/code/funnyoption/backend/internal/chain/service/**](/Users/zhangza/code/funnyoption/backend/internal/chain/service)
+- [/Users/zhangza/code/funnyoption/backend/internal/api/handler/**](/Users/zhangza/code/funnyoption/backend/internal/api/handler)
 
 ## Owned files
 

@@ -38,8 +38,8 @@ escape claims and full exit guarantees are still follow-up work.
 - [/Users/zhangza/code/funnyoption/docs/sql/schema.md](/Users/zhangza/code/funnyoption/docs/sql/schema.md)
 - [/Users/zhangza/code/funnyoption/contracts/src/FunnyRollupCore.sol](/Users/zhangza/code/funnyoption/contracts/src/FunnyRollupCore.sol)
 - [/Users/zhangza/code/funnyoption/contracts/src/FunnyVault.sol](/Users/zhangza/code/funnyoption/contracts/src/FunnyVault.sol)
-- [/Users/zhangza/code/funnyoption/internal/chain/service/server.go](/Users/zhangza/code/funnyoption/internal/chain/service/server.go)
-- [/Users/zhangza/code/funnyoption/internal/chain/service/sql_store.go](/Users/zhangza/code/funnyoption/internal/chain/service/sql_store.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/chain/service/server.go](/Users/zhangza/code/funnyoption/backend/internal/chain/service/server.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/chain/service/sql_store.go](/Users/zhangza/code/funnyoption/backend/internal/chain/service/sql_store.go)
 
 ## Owned files
 

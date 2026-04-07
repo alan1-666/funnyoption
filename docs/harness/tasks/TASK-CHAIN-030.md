@@ -41,9 +41,9 @@ visible.
 - [/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-029.md](/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-029.md)
 - [/Users/zhangza/code/funnyoption/docs/architecture/mode-b-zk-rollup.md](/Users/zhangza/code/funnyoption/docs/architecture/mode-b-zk-rollup.md)
 - [/Users/zhangza/code/funnyoption/docs/sql/schema.md](/Users/zhangza/code/funnyoption/docs/sql/schema.md)
-- [/Users/zhangza/code/funnyoption/internal/rollup](/Users/zhangza/code/funnyoption/internal/rollup)
-- [/Users/zhangza/code/funnyoption/internal/api/handler/sql_store.go](/Users/zhangza/code/funnyoption/internal/api/handler/sql_store.go)
-- [/Users/zhangza/code/funnyoption/internal/api/dto/order.go](/Users/zhangza/code/funnyoption/internal/api/dto/order.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/rollup](/Users/zhangza/code/funnyoption/backend/internal/rollup)
+- [/Users/zhangza/code/funnyoption/backend/internal/api/handler/sql_store.go](/Users/zhangza/code/funnyoption/backend/internal/api/handler/sql_store.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/api/dto/order.go](/Users/zhangza/code/funnyoption/backend/internal/api/dto/order.go)
 
 ## Owned files
 

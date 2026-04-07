@@ -43,7 +43,7 @@ attempting a full-repo service-directory migration.
 - [/Users/zhangza/code/funnyoption/docs/architecture/order-flow.md](/Users/zhangza/code/funnyoption/docs/architecture/order-flow.md)
 - [/Users/zhangza/code/funnyoption/docs/architecture/direct-deposit-session-key.md](/Users/zhangza/code/funnyoption/docs/architecture/direct-deposit-session-key.md)
 - [/Users/zhangza/code/funnyoption/docs/sql/schema.md](/Users/zhangza/code/funnyoption/docs/sql/schema.md)
-- [/Users/zhangza/code/funnyoption/internal/api](/Users/zhangza/code/funnyoption/internal/api)
+- [/Users/zhangza/code/funnyoption/backend/internal/api](/Users/zhangza/code/funnyoption/backend/internal/api)
 - [/Users/zhangza/code/funnyoption/docs/harness/handshakes/HANDSHAKE-CHAIN-024.md](/Users/zhangza/code/funnyoption/docs/harness/handshakes/HANDSHAKE-CHAIN-024.md)
 - [/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-024.md](/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-024.md)
 

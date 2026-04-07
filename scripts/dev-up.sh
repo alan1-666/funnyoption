@@ -273,7 +273,7 @@ build_go_service() {
   local pkg="$2"
   local output="${BIN_DIR}/${name}"
   (
-    cd "${ROOT_DIR}"
+    cd "${ROOT_DIR}/backend"
     go build -o "${output}" "${pkg}"
   )
   echo "${output}"

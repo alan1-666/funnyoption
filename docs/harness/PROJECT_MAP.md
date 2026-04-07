@@ -17,42 +17,42 @@ FunnyOption is a prediction-market MVP with:
 
 ### API and product entry
 
-- [`cmd/api`](/Users/zhangza/code/funnyoption/cmd/api)
-- [`internal/api`](/Users/zhangza/code/funnyoption/internal/api)
+- [`backend/cmd/api`](/Users/zhangza/code/funnyoption/backend/cmd/api)
+- [`backend/internal/api`](/Users/zhangza/code/funnyoption/backend/internal/api)
 
 ### Matching and market data
 
-- [`cmd/matching`](/Users/zhangza/code/funnyoption/cmd/matching)
-- [`internal/matching/engine`](/Users/zhangza/code/funnyoption/internal/matching/engine)
-- [`internal/matching/service`](/Users/zhangza/code/funnyoption/internal/matching/service)
-- [`internal/shared/kafka`](/Users/zhangza/code/funnyoption/internal/shared/kafka)
+- [`backend/cmd/matching`](/Users/zhangza/code/funnyoption/backend/cmd/matching)
+- [`backend/internal/matching/engine`](/Users/zhangza/code/funnyoption/backend/internal/matching/engine)
+- [`backend/internal/matching/service`](/Users/zhangza/code/funnyoption/backend/internal/matching/service)
+- [`backend/internal/shared/kafka`](/Users/zhangza/code/funnyoption/backend/internal/shared/kafka)
 
 ### Account snapshot and freezes
 
-- [`cmd/account`](/Users/zhangza/code/funnyoption/cmd/account)
-- [`internal/account/service`](/Users/zhangza/code/funnyoption/internal/account/service)
-- [`proto/account/v1/account.proto`](/Users/zhangza/code/funnyoption/proto/account/v1/account.proto)
+- [`backend/cmd/account`](/Users/zhangza/code/funnyoption/backend/cmd/account)
+- [`backend/internal/account/service`](/Users/zhangza/code/funnyoption/backend/internal/account/service)
+- [`backend/proto/account/v1/account.proto`](/Users/zhangza/code/funnyoption/backend/proto/account/v1/account.proto)
 
 ### Ledger and reconciliation
 
-- [`cmd/ledger`](/Users/zhangza/code/funnyoption/cmd/ledger)
-- [`internal/ledger/service`](/Users/zhangza/code/funnyoption/internal/ledger/service)
+- [`backend/cmd/ledger`](/Users/zhangza/code/funnyoption/backend/cmd/ledger)
+- [`backend/internal/ledger/service`](/Users/zhangza/code/funnyoption/backend/internal/ledger/service)
 
 ### Settlement
 
-- [`cmd/settlement`](/Users/zhangza/code/funnyoption/cmd/settlement)
-- [`internal/settlement/service`](/Users/zhangza/code/funnyoption/internal/settlement/service)
+- [`backend/cmd/settlement`](/Users/zhangza/code/funnyoption/backend/cmd/settlement)
+- [`backend/internal/settlement/service`](/Users/zhangza/code/funnyoption/backend/internal/settlement/service)
 
 ### Chain integration
 
-- [`cmd/chain`](/Users/zhangza/code/funnyoption/cmd/chain)
-- [`internal/chain/service`](/Users/zhangza/code/funnyoption/internal/chain/service)
+- [`backend/cmd/chain`](/Users/zhangza/code/funnyoption/backend/cmd/chain)
+- [`backend/internal/chain/service`](/Users/zhangza/code/funnyoption/backend/internal/chain/service)
 - [`contracts/src/FunnyVault.sol`](/Users/zhangza/code/funnyoption/contracts/src/FunnyVault.sol)
 
 ### Realtime fanout
 
-- [`cmd/ws`](/Users/zhangza/code/funnyoption/cmd/ws)
-- [`internal/ws/service`](/Users/zhangza/code/funnyoption/internal/ws/service)
+- [`backend/cmd/ws`](/Users/zhangza/code/funnyoption/backend/cmd/ws)
+- [`backend/internal/ws/service`](/Users/zhangza/code/funnyoption/backend/internal/ws/service)
 
 ### Frontend
 

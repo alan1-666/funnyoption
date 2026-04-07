@@ -46,9 +46,9 @@ boundary now that `shadow-batch-v1` and truthful nonce shadowing are stable.
 - [/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-011.md](/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-011.md)
 - [/Users/zhangza/code/funnyoption/docs/architecture/mode-b-zk-rollup.md](/Users/zhangza/code/funnyoption/docs/architecture/mode-b-zk-rollup.md)
 - [/Users/zhangza/code/funnyoption/docs/sql/schema.md](/Users/zhangza/code/funnyoption/docs/sql/schema.md)
-- [/Users/zhangza/code/funnyoption/internal/rollup](/Users/zhangza/code/funnyoption/internal/rollup)
-- [/Users/zhangza/code/funnyoption/internal/api](/Users/zhangza/code/funnyoption/internal/api)
-- [/Users/zhangza/code/funnyoption/internal/shared/auth](/Users/zhangza/code/funnyoption/internal/shared/auth)
+- [/Users/zhangza/code/funnyoption/backend/internal/rollup](/Users/zhangza/code/funnyoption/backend/internal/rollup)
+- [/Users/zhangza/code/funnyoption/backend/internal/api](/Users/zhangza/code/funnyoption/backend/internal/api)
+- [/Users/zhangza/code/funnyoption/backend/internal/shared/auth](/Users/zhangza/code/funnyoption/backend/internal/shared/auth)
 - [/Users/zhangza/code/funnyoption/contracts/src/FunnyRollupCore.sol](/Users/zhangza/code/funnyoption/contracts/src/FunnyRollupCore.sol)
 
 ## Owned files

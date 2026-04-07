@@ -212,7 +212,7 @@ leaf 至少包含：
 - replay protection 必须是 proof-enforced，不再只是 SQL nonce
 - 任何会长期占用 collateral 的 resting order，都必须有 state commitment
 
-当前 [`CreateOrder`](/Users/zhangza/code/funnyoption/internal/api/handler/order_handler.go) 里的流程：
+当前 [`CreateOrder`](/Users/zhangza/code/funnyoption/backend/internal/api/handler/order_handler.go) 里的流程：
 
 - 校验 trading key
 - 递增 `wallet_sessions.last_order_nonce`
@@ -283,7 +283,7 @@ leaf 至少包含：
 
 这棵树替代当前“operator 记账后再调合约打款”的提款事实。
 
-当前 [`chain_withdrawals`](/Users/zhangza/code/funnyoption/migrations/006_chain_withdrawals.sql) 和 `FunnyVault.processClaim()` 只适合作为 direct-vault 模式的队列/镜像，不足以构成 `Mode B` canonical withdrawal truth。
+当前 [`chain_withdrawals`](/Users/zhangza/code/funnyoption/backend/migrations/006_chain_withdrawals.sql) 和 `FunnyVault.processClaim()` 只适合作为 direct-vault 模式的队列/镜像，不足以构成 `Mode B` canonical withdrawal truth。
 
 ## 4. Batch truth model
 
@@ -425,7 +425,7 @@ worker 不必重新决定：
     `authorization_ref + trading_key_id + account_id + wallet_address +
     chain_id + vault_address + trading_public_key + trading_key_scheme +
     scope + key_status`
-  - [`BuildVerifierAuthProofContract(history, batch)`](/Users/zhangza/code/funnyoption/internal/rollup/verifier_contract.go)
+  - [`BuildVerifierAuthProofContract(history, batch)`](/Users/zhangza/code/funnyoption/backend/internal/rollup/verifier_contract.go)
     会消费：
     - prior `TRADING_KEY_AUTHORIZED` witness refs
     - target batch 里的 `NONCE_ADVANCED.payload.order_authorization`
@@ -443,7 +443,7 @@ worker 不必重新决定：
 为什么不先收紧成 gapless：
 
 - 当前 API truth 就不是 gapless：
-  [`AdvanceSessionNonce`](/Users/zhangza/code/funnyoption/internal/api/handler/sql_store.go)
+  [`AdvanceSessionNonce`](/Users/zhangza/code/funnyoption/backend/internal/api/handler/sql_store.go)
   只要求 `last_order_nonce < nonce`
 - `NONCE_ADVANCED` 发生在 order freeze / Kafka publish 之前，后续失败不会回滚
   nonce；因此它代表的是“accepted auth attempt floor”，不是“最终成功落成的
@@ -495,12 +495,12 @@ worker 不必重新决定：
   - proof 同时证明上节固定下来的 monotonic-floor nonce/auth contract
 - repo 当前已经补出一条 future acceptance worker 可直接消费的 code
   boundary：
-  - [`BuildVerifierGateBatchContract(history, batch)`](/Users/zhangza/code/funnyoption/internal/rollup/verifier_contract.go)
+  - [`BuildVerifierGateBatchContract(history, batch)`](/Users/zhangza/code/funnyoption/backend/internal/rollup/verifier_contract.go)
     组合了：
     - stable `public_inputs`
     - current `l1_batch_metadata`
     - target-batch `auth_proof`
-  - [`BuildVerifierStateRootAcceptanceContract(history, batch)`](/Users/zhangza/code/funnyoption/internal/rollup/verifier_contract.go)
+  - [`BuildVerifierStateRootAcceptanceContract(history, batch)`](/Users/zhangza/code/funnyoption/backend/internal/rollup/verifier_contract.go)
     further narrows that boundary down to:
     - unchanged `public_inputs`
     - unchanged `l1_batch_metadata`
@@ -511,7 +511,7 @@ worker 不必重新决定：
       - exact struct field names and Solidity types
       - `AuthJoinStatus` enum ordinals
       - `0x`-prefixed `bytes32` material for the exported args
-  - [`BuildVerifierArtifactBundle(history, batch)`](/Users/zhangza/code/funnyoption/internal/rollup/verifier_contract.go)
+  - [`BuildVerifierArtifactBundle(history, batch)`](/Users/zhangza/code/funnyoption/backend/internal/rollup/verifier_contract.go)
     now directly consumes that `solidity_export` and materializes the first
     deterministic prover/verifier artifact bundle:
     - unchanged acceptance contract
@@ -620,7 +620,7 @@ worker 不必重新决定：
       - 还没有 production withdrawal rewrite
   - `TASK-CHAIN-026` 再把 shadow batch / verifier artifact 往 runtime 方向
     推进一步，但仍然不切 production truth：
-    - [`BuildShadowBatchSubmissionBundle(history, batch)`](/Users/zhangza/code/funnyoption/internal/rollup/submission.go)
+    - [`BuildShadowBatchSubmissionBundle(history, batch)`](/Users/zhangza/code/funnyoption/backend/internal/rollup/submission.go)
       把已有的:
       - `ShadowBatchContract`
       - `VerifierArtifactBundle`
@@ -632,7 +632,7 @@ worker 不必重新决定：
       - 还给 ABI-encoded calldata bytes
       - 这样后续 live submitter/runtime 不需要重新猜参数顺序、enum 编码
         或 `bytes32` 规范化
-    - [`Store.PrepareNextSubmission(...)`](/Users/zhangza/code/funnyoption/internal/rollup/store.go)
+    - [`Store.PrepareNextSubmission(...)`](/Users/zhangza/code/funnyoption/backend/internal/rollup/store.go)
       现在把这条 offchain -> onchain acceptance path 落成 durable lane：
       - 优先复用最早一个还没 submission row 的 materialized batch
       - 如果还没有 batch，就先 materialize next batch
@@ -640,7 +640,7 @@ worker 不必重新决定：
       - readiness 固定为：
         - `READY`
         - `BLOCKED_AUTH`
-    - repo command [`cmd/rollup`](/Users/zhangza/code/funnyoption/cmd/rollup/main.go)
+    - repo command [`cmd/rollup`](/Users/zhangza/code/funnyoption/backend/cmd/rollup/main.go)
       已经能直接 prepare/persist/print 下一条 submission bundle
     - 这条 lane 仍然只是在补“链下撮合 -> 链上 acceptance payload”的核心
       runtime bridge：
@@ -649,7 +649,7 @@ worker 不必重新决定：
       - 还没有 withdrawal runtime rewrite
   - `TASK-CHAIN-027` 再把这条 lane 推到真正的 live runtime，但仍然不切
     production truth：
-    - [`RollupSubmissionProcessor`](/Users/zhangza/code/funnyoption/internal/chain/service/rollup_submitter.go)
+    - [`RollupSubmissionProcessor`](/Users/zhangza/code/funnyoption/backend/internal/chain/service/rollup_submitter.go)
       现在直接消费 `rollup_shadow_submissions`
     - runtime state machine 固定为：
       - `READY`
@@ -663,7 +663,7 @@ worker 不必重新决定：
       - `BLOCKED_AUTH` / `FAILED` 会 truthfully block 后续 batch
       - metadata leg 必须先上链并拿到成功 receipt
       - acceptance leg 只能在 metadata receipt 成功后再提交
-    - repo command [`cmd/rollup -mode=submit-next`](/Users/zhangza/code/funnyoption/cmd/rollup/main.go)
+    - repo command [`cmd/rollup -mode=submit-next`](/Users/zhangza/code/funnyoption/backend/cmd/rollup/main.go)
       和 chain service optional bootstrap 现在都能驱动这条 live lane
     - 但这仍然不是 production Mode B finality：
       - accepted root 还不会接管 SQL/Kafka truth
@@ -688,7 +688,7 @@ worker 不必重新决定：
       - 只有 visible onchain accepted state 和 persisted bundle 对齐后，
         submission 才会被标记为 `ACCEPTED`
     - repo command
-      [`cmd/rollup -mode=submit-until-idle`](/Users/zhangza/code/funnyoption/cmd/rollup/main.go)
+      [`cmd/rollup -mode=submit-until-idle`](/Users/zhangza/code/funnyoption/backend/cmd/rollup/main.go)
       现在可以把当前 lane 一直推到稳定停止状态：
       - `NOOP`
       - `BLOCKED_AUTH`
@@ -699,13 +699,13 @@ worker 不必重新决定：
       - 但 accepted roots 仍然没有接管当前 production truth
   - `TASK-CHAIN-029` 把 accepted lane 真正接到 slow-withdraw claim rewrite 上，
     但仍然只切 withdrawal 子路径，不切 balances / settlement production truth：
-    - [`Store.MaterializeAcceptedSubmission(...)`](/Users/zhangza/code/funnyoption/internal/rollup/store.go)
+    - [`Store.MaterializeAcceptedSubmission(...)`](/Users/zhangza/code/funnyoption/backend/internal/rollup/store.go)
       现在会把 accepted submission 落成：
       - `rollup_accepted_batches`
       - `rollup_accepted_withdrawals`
     - 只有当 withdrawal leaf 已经存在于 accepted batch 时，才会派生一条
       canonical `WITHDRAWAL_CLAIM` queue row
-    - [`DepositStore.MarkClaimSubmitted(...)`](/Users/zhangza/code/funnyoption/internal/chain/service/sql_store.go)
+    - [`DepositStore.MarkClaimSubmitted(...)`](/Users/zhangza/code/funnyoption/backend/internal/chain/service/sql_store.go)
       / `MarkClaimConfirmedByTxHash(...)` 现在会把 accepted withdrawal 的
       runtime 真相继续推进成：
       - `CLAIM_SUBMITTED`
@@ -729,12 +729,12 @@ worker 不必重新决定：
   - `TASK-CHAIN-030` 继续把 accepted lane 从 withdrawal truth 扩到
     balances / positions / payout read truth，但仍然只切读面，不切 mutable
     backend 写路径：
-    - [`BuildAcceptedReplaySnapshot(...)`](/Users/zhangza/code/funnyoption/internal/rollup/accepted_snapshot.go)
+    - [`BuildAcceptedReplaySnapshot(...)`](/Users/zhangza/code/funnyoption/backend/internal/rollup/accepted_snapshot.go)
       现在会从 ordered accepted batches deterministic 导出：
       - accepted balances snapshot
       - accepted positions snapshot
       - accepted settlement payout snapshot
-    - [`Store.MaterializeAcceptedSubmission(...)`](/Users/zhangza/code/funnyoption/internal/rollup/store.go)
+    - [`Store.MaterializeAcceptedSubmission(...)`](/Users/zhangza/code/funnyoption/backend/internal/rollup/store.go)
       现在除了 accepted batch / withdrawal 物化，还会重建：
       - `rollup_accepted_balances`
       - `rollup_accepted_positions`
@@ -1090,7 +1090,7 @@ first-cut limit：
 - fast withdrawal 不能制造第二份可兑付 claim
 - forced withdrawal 要么在 deadline 内被满足，要么进入可 freeze 的 onchain state
 
-当前 [`VerifyOrderIntentSignature`](/Users/zhangza/code/funnyoption/internal/api/handler/order_handler.go) + SQL nonce 只能算 operator-side auth gate，不足以单独构成 proof truth。
+当前 [`VerifyOrderIntentSignature`](/Users/zhangza/code/funnyoption/backend/internal/api/handler/order_handler.go) + SQL nonce 只能算 operator-side auth gate，不足以单独构成 proof truth。
 
 因此一个明确的 follow-up contract 是：
 

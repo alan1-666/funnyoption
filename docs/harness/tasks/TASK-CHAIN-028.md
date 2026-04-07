@@ -50,9 +50,9 @@ stable stop without changing current production truth.
 - [/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-027.md](/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-027.md)
 - [/Users/zhangza/code/funnyoption/docs/architecture/mode-b-zk-rollup.md](/Users/zhangza/code/funnyoption/docs/architecture/mode-b-zk-rollup.md)
 - [/Users/zhangza/code/funnyoption/docs/sql/schema.md](/Users/zhangza/code/funnyoption/docs/sql/schema.md)
-- [/Users/zhangza/code/funnyoption/internal/rollup](/Users/zhangza/code/funnyoption/internal/rollup)
-- [/Users/zhangza/code/funnyoption/internal/chain/service](/Users/zhangza/code/funnyoption/internal/chain/service)
-- [/Users/zhangza/code/funnyoption/cmd/rollup](/Users/zhangza/code/funnyoption/cmd/rollup)
+- [/Users/zhangza/code/funnyoption/backend/internal/rollup](/Users/zhangza/code/funnyoption/backend/internal/rollup)
+- [/Users/zhangza/code/funnyoption/backend/internal/chain/service](/Users/zhangza/code/funnyoption/backend/internal/chain/service)
+- [/Users/zhangza/code/funnyoption/backend/cmd/rollup](/Users/zhangza/code/funnyoption/backend/cmd/rollup)
 - [/Users/zhangza/code/funnyoption/contracts/src/FunnyRollupCore.sol](/Users/zhangza/code/funnyoption/contracts/src/FunnyRollupCore.sol)
 
 ## Owned files

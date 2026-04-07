@@ -10,7 +10,7 @@ if [[ -z "${DSN}" ]]; then
   exit 1
 fi
 
-for migration in $(find "${ROOT_DIR}/migrations" -maxdepth 1 -type f -name '*.sql' | sort); do
+for migration in $(find "${ROOT_DIR}/backend/migrations" -maxdepth 1 -type f -name '*.sql' | sort); do
   echo "applying ${migration}"
   psql "${DSN}" -v ON_ERROR_STOP=1 -f "${migration}"
 done

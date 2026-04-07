@@ -40,7 +40,7 @@
     - operator-authenticated bootstrap order success
     - bare `POST /api/v1/orders` rejection without session or operator proof
 - validated:
-  - `gofmt -w /Users/zhangza/code/funnyoption/internal/api/dto/order.go /Users/zhangza/code/funnyoption/internal/api/dto/operator_auth.go /Users/zhangza/code/funnyoption/internal/api/middleware.go /Users/zhangza/code/funnyoption/internal/api/routes_auth.go /Users/zhangza/code/funnyoption/internal/api/handler/order_handler.go /Users/zhangza/code/funnyoption/internal/api/handler/order_handler_test.go /Users/zhangza/code/funnyoption/internal/api/router_test.go`
+  - `gofmt -w /Users/zhangza/code/funnyoption/backend/internal/api/dto/order.go /Users/zhangza/code/funnyoption/backend/internal/api/dto/operator_auth.go /Users/zhangza/code/funnyoption/backend/internal/api/middleware.go /Users/zhangza/code/funnyoption/backend/internal/api/routes_auth.go /Users/zhangza/code/funnyoption/backend/internal/api/handler/order_handler.go /Users/zhangza/code/funnyoption/backend/internal/api/handler/order_handler_test.go /Users/zhangza/code/funnyoption/backend/internal/api/router_test.go`
   - `go test ./internal/api/...`
   - `cd /Users/zhangza/code/funnyoption/admin && npm run build`
   - focused proof:

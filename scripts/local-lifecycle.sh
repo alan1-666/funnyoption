@@ -21,5 +21,5 @@ if [[ -f "${ROOT_DIR}/.run/dev/local-chain-wallets.env" ]]; then
   set +a
 fi
 
-cd "${ROOT_DIR}"
+cd "${ROOT_DIR}/backend"
 exec go run ./cmd/local-lifecycle "$@"

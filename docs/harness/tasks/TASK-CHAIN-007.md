@@ -32,10 +32,10 @@ event can be retried safely without duplicate settlement side effects.
 - [/Users/zhangza/code/funnyoption/docs/architecture/oracle-settled-crypto-markets.md](/Users/zhangza/code/funnyoption/docs/architecture/oracle-settled-crypto-markets.md)
 - [/Users/zhangza/code/funnyoption/docs/harness/handshakes/HANDSHAKE-CHAIN-006.md](/Users/zhangza/code/funnyoption/docs/harness/handshakes/HANDSHAKE-CHAIN-006.md)
 - [/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-006.md](/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-006.md)
-- [/Users/zhangza/code/funnyoption/internal/oracle/service/worker.go](/Users/zhangza/code/funnyoption/internal/oracle/service/worker.go)
-- [/Users/zhangza/code/funnyoption/internal/oracle/service/sql_store.go](/Users/zhangza/code/funnyoption/internal/oracle/service/sql_store.go)
-- [/Users/zhangza/code/funnyoption/internal/settlement/service/processor.go](/Users/zhangza/code/funnyoption/internal/settlement/service/processor.go)
-- [/Users/zhangza/code/funnyoption/internal/account/service/event_processor.go](/Users/zhangza/code/funnyoption/internal/account/service/event_processor.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/oracle/service/worker.go](/Users/zhangza/code/funnyoption/backend/internal/oracle/service/worker.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/oracle/service/sql_store.go](/Users/zhangza/code/funnyoption/backend/internal/oracle/service/sql_store.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/settlement/service/processor.go](/Users/zhangza/code/funnyoption/backend/internal/settlement/service/processor.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/account/service/event_processor.go](/Users/zhangza/code/funnyoption/backend/internal/account/service/event_processor.go)
 
 ## Owned files
 

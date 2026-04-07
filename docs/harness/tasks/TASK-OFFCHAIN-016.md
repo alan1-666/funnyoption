@@ -37,8 +37,8 @@ stopping active-key rotation / lookup from collapsing to `wallet + chain`.
 - [/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-OFFCHAIN-015.md](/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-OFFCHAIN-015.md)
 - [/Users/zhangza/code/funnyoption/docs/harness/handshakes/HANDSHAKE-OFFCHAIN-013.md](/Users/zhangza/code/funnyoption/docs/harness/handshakes/HANDSHAKE-OFFCHAIN-013.md)
 - [/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-OFFCHAIN-013.md](/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-OFFCHAIN-013.md)
-- [/Users/zhangza/code/funnyoption/internal/api/handler/sql_store.go](/Users/zhangza/code/funnyoption/internal/api/handler/sql_store.go)
-- [/Users/zhangza/code/funnyoption/internal/api/handler/order_handler.go](/Users/zhangza/code/funnyoption/internal/api/handler/order_handler.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/api/handler/sql_store.go](/Users/zhangza/code/funnyoption/backend/internal/api/handler/sql_store.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/api/handler/order_handler.go](/Users/zhangza/code/funnyoption/backend/internal/api/handler/order_handler.go)
 - [/Users/zhangza/code/funnyoption/web/lib/session-client.ts](/Users/zhangza/code/funnyoption/web/lib/session-client.ts)
 
 ## Owned files

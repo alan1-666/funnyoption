@@ -39,9 +39,9 @@ truth through local API readbacks.
 - [/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-030.md](/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-030.md)
 - [/Users/zhangza/code/funnyoption/docs/architecture/mode-b-zk-rollup.md](/Users/zhangza/code/funnyoption/docs/architecture/mode-b-zk-rollup.md)
 - [/Users/zhangza/code/funnyoption/docs/operations/local-full-flow-acceptance.md](/Users/zhangza/code/funnyoption/docs/operations/local-full-flow-acceptance.md)
-- [/Users/zhangza/code/funnyoption/cmd/local-lifecycle/main.go](/Users/zhangza/code/funnyoption/cmd/local-lifecycle/main.go)
-- [/Users/zhangza/code/funnyoption/cmd/local-lifecycle/trading_key_oracle_flow.go](/Users/zhangza/code/funnyoption/cmd/local-lifecycle/trading_key_oracle_flow.go)
-- [/Users/zhangza/code/funnyoption/internal/chain/service/rollup_submitter.go](/Users/zhangza/code/funnyoption/internal/chain/service/rollup_submitter.go)
+- [/Users/zhangza/code/funnyoption/backend/cmd/local-lifecycle/main.go](/Users/zhangza/code/funnyoption/backend/cmd/local-lifecycle/main.go)
+- [/Users/zhangza/code/funnyoption/backend/cmd/local-lifecycle/trading_key_oracle_flow.go](/Users/zhangza/code/funnyoption/backend/cmd/local-lifecycle/trading_key_oracle_flow.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/chain/service/rollup_submitter.go](/Users/zhangza/code/funnyoption/backend/internal/chain/service/rollup_submitter.go)
 
 ## Owned files
 

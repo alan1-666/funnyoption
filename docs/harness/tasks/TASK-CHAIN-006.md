@@ -49,9 +49,9 @@ resolution event path, and harden manual fallback semantics.
 - [/Users/zhangza/code/funnyoption/foundry.toml](/Users/zhangza/code/funnyoption/foundry.toml)
 - [/Users/zhangza/code/funnyoption/admin/app/api/operator/markets/route.ts](/Users/zhangza/code/funnyoption/admin/app/api/operator/markets/route.ts)
 - [/Users/zhangza/code/funnyoption/admin/app/api/operator/markets/[marketId]/resolve/route.ts](/Users/zhangza/code/funnyoption/admin/app/api/operator/markets/[marketId]/resolve/route.ts)
-- [/Users/zhangza/code/funnyoption/internal/api/handler/order_handler.go](/Users/zhangza/code/funnyoption/internal/api/handler/order_handler.go)
-- [/Users/zhangza/code/funnyoption/internal/api/handler/sql_store.go](/Users/zhangza/code/funnyoption/internal/api/handler/sql_store.go)
-- [/Users/zhangza/code/funnyoption/internal/settlement/service/sql_store.go](/Users/zhangza/code/funnyoption/internal/settlement/service/sql_store.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/api/handler/order_handler.go](/Users/zhangza/code/funnyoption/backend/internal/api/handler/order_handler.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/api/handler/sql_store.go](/Users/zhangza/code/funnyoption/backend/internal/api/handler/sql_store.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/settlement/service/sql_store.go](/Users/zhangza/code/funnyoption/backend/internal/settlement/service/sql_store.go)
 - [/Users/zhangza/code/funnyoption/docs/harness/handshakes/HANDSHAKE-CHAIN-006.md](/Users/zhangza/code/funnyoption/docs/harness/handshakes/HANDSHAKE-CHAIN-006.md)
 - [/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-006.md](/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-006.md)
 

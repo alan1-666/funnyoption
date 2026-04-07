@@ -62,7 +62,7 @@
   - deleted the old mixed route-registration file:
     - `internal/api/handler/routes.go`
 - validated:
-  - `gofmt -w /Users/zhangza/code/funnyoption/internal/api/server.go /Users/zhangza/code/funnyoption/internal/api/router.go /Users/zhangza/code/funnyoption/internal/api/routes_meta.go /Users/zhangza/code/funnyoption/internal/api/routes_reads.go /Users/zhangza/code/funnyoption/internal/api/routes_auth.go /Users/zhangza/code/funnyoption/internal/api/middleware.go /Users/zhangza/code/funnyoption/internal/api/router_test.go`
+  - `gofmt -w /Users/zhangza/code/funnyoption/backend/internal/api/server.go /Users/zhangza/code/funnyoption/backend/internal/api/router.go /Users/zhangza/code/funnyoption/backend/internal/api/routes_meta.go /Users/zhangza/code/funnyoption/backend/internal/api/routes_reads.go /Users/zhangza/code/funnyoption/backend/internal/api/routes_auth.go /Users/zhangza/code/funnyoption/backend/internal/api/middleware.go /Users/zhangza/code/funnyoption/backend/internal/api/router_test.go`
   - `go test ./internal/api/...`
   - router-level proof now exists in tests for:
     - `GET /api/v1/markets` returning public data

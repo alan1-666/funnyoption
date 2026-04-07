@@ -44,8 +44,8 @@ pending submission broadcast.
 - [/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-028.md](/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-028.md)
 - [/Users/zhangza/code/funnyoption/docs/architecture/mode-b-zk-rollup.md](/Users/zhangza/code/funnyoption/docs/architecture/mode-b-zk-rollup.md)
 - [/Users/zhangza/code/funnyoption/docs/sql/schema.md](/Users/zhangza/code/funnyoption/docs/sql/schema.md)
-- [/Users/zhangza/code/funnyoption/internal/rollup](/Users/zhangza/code/funnyoption/internal/rollup)
-- [/Users/zhangza/code/funnyoption/internal/chain/service](/Users/zhangza/code/funnyoption/internal/chain/service)
+- [/Users/zhangza/code/funnyoption/backend/internal/rollup](/Users/zhangza/code/funnyoption/backend/internal/rollup)
+- [/Users/zhangza/code/funnyoption/backend/internal/chain/service](/Users/zhangza/code/funnyoption/backend/internal/chain/service)
 - [/Users/zhangza/code/funnyoption/contracts/src/FunnyVault.sol](/Users/zhangza/code/funnyoption/contracts/src/FunnyVault.sol)
 - [/Users/zhangza/code/funnyoption/scripts/local-full-flow.sh](/Users/zhangza/code/funnyoption/scripts/local-full-flow.sh)
 

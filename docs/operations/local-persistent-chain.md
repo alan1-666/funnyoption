@@ -419,7 +419,7 @@ curl http://127.0.0.1:8080/healthz
 1. `buyer` 钱包先对 `MockUSDT` 执行 `approve`
 2. 然后对 `FunnyVault` 执行 `deposit`
 3. `FunnyVault` 发出 `Deposited(address,uint256)` 事件
-4. [listener.go](/Users/zhangza/code/funnyoption/internal/chain/service/listener.go) 里的 `DepositListener` 轮询链上日志
+4. [listener.go](/Users/zhangza/code/funnyoption/backend/internal/chain/service/listener.go) 里的 `DepositListener` 轮询链上日志
 5. 监听器拿到钱包地址后，会去查有没有活动中的 wallet session
 6. 找到对应用户后，写入 `chain_deposits`
 7. 再通过 processor 调用 account 入账
@@ -491,7 +491,7 @@ go run ./cmd/local-lifecycle
 
 ### 这个自动脚本会做什么
 
-在持久本地链模式下，[persistent_env.go](/Users/zhangza/code/funnyoption/cmd/local-lifecycle/persistent_env.go) 里的逻辑会被启用。
+在持久本地链模式下，[persistent_env.go](/Users/zhangza/code/funnyoption/backend/cmd/local-lifecycle/persistent_env.go) 里的逻辑会被启用。
 
 也就是说，它会：
 
@@ -545,7 +545,7 @@ go run ./cmd/local-lifecycle
 
 当前监听逻辑在：
 
-- [listener.go](/Users/zhangza/code/funnyoption/internal/chain/service/listener.go)
+- [listener.go](/Users/zhangza/code/funnyoption/backend/internal/chain/service/listener.go)
 
 核心行为是：
 

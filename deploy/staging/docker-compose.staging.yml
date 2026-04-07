@@ -65,7 +65,7 @@ services:
       - /bin/sh
       - -ec
       - |
-        for file in /workspace/migrations/*.sql; do
+        for file in /workspace/backend/migrations/*.sql; do
           echo "applying $${file}"
           psql "$$FUNNYOPTION_POSTGRES_DSN" -v ON_ERROR_STOP=1 -f "$$file"
         done

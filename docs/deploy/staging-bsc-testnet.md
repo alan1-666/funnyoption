@@ -127,7 +127,7 @@ Prepare the server once before enabling the workflow:
 
 1. Clone this repository to `/opt/funnyoption-staging`.
 2. Create `deploy/staging/.env.staging` inside that clone from
-   [configs/staging/funnyoption.env.example](/Users/zhangza/code/funnyoption/configs/staging/funnyoption.env.example)
+   [configs/staging/funnyoption.env.example](/Users/zhangza/code/funnyoption/backend/configs/staging/funnyoption.env.example)
    and fill all secret-bearing values on the server only.
 3. Install or refresh the fixed host-side entrypoint and lock file:
 
@@ -222,7 +222,7 @@ Before building or starting containers, prepare these values:
 
 The backend runtime template lives here:
 
-- [configs/staging/funnyoption.env.example](/Users/zhangza/code/funnyoption/configs/staging/funnyoption.env.example)
+- [configs/staging/funnyoption.env.example](/Users/zhangza/code/funnyoption/backend/configs/staging/funnyoption.env.example)
 
 Copy it to a server-only file such as `.env.staging`, then replace all
 `replace-me` placeholders.
@@ -438,4 +438,4 @@ This repo now ships a staging compose stack and a deploy helper:
 - service Dockerfiles in [deploy/docker](/Users/zhangza/code/funnyoption/deploy/docker)
 - staging compose file in [deploy/staging/docker-compose.staging.yml](/Users/zhangza/code/funnyoption/deploy/staging/docker-compose.staging.yml)
 - reverse proxy template in [deploy/staging/funnyoption.xyz.conf](/Users/zhangza/code/funnyoption/deploy/staging/funnyoption.xyz.conf)
-- server env template in [configs/staging/funnyoption.env.example](/Users/zhangza/code/funnyoption/configs/staging/funnyoption.env.example)
+- server env template in [configs/staging/funnyoption.env.example](/Users/zhangza/code/funnyoption/backend/configs/staging/funnyoption.env.example)

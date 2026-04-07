@@ -38,11 +38,11 @@ legacy SQL/Kafka truth.
 - [/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-034.md](/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-034.md)
 - [/Users/zhangza/code/funnyoption/docs/architecture/mode-b-zk-rollup.md](/Users/zhangza/code/funnyoption/docs/architecture/mode-b-zk-rollup.md)
 - [/Users/zhangza/code/funnyoption/docs/sql/schema.md](/Users/zhangza/code/funnyoption/docs/sql/schema.md)
-- [/Users/zhangza/code/funnyoption/internal/api/handler/order_handler.go](/Users/zhangza/code/funnyoption/internal/api/handler/order_handler.go)
-- [/Users/zhangza/code/funnyoption/internal/account/service/event_processor.go](/Users/zhangza/code/funnyoption/internal/account/service/event_processor.go)
-- [/Users/zhangza/code/funnyoption/internal/oracle/service/worker.go](/Users/zhangza/code/funnyoption/internal/oracle/service/worker.go)
-- [/Users/zhangza/code/funnyoption/internal/settlement/service/processor.go](/Users/zhangza/code/funnyoption/internal/settlement/service/processor.go)
-- [/Users/zhangza/code/funnyoption/internal/chain/service/rollup_submitter.go](/Users/zhangza/code/funnyoption/internal/chain/service/rollup_submitter.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/api/handler/order_handler.go](/Users/zhangza/code/funnyoption/backend/internal/api/handler/order_handler.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/account/service/event_processor.go](/Users/zhangza/code/funnyoption/backend/internal/account/service/event_processor.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/oracle/service/worker.go](/Users/zhangza/code/funnyoption/backend/internal/oracle/service/worker.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/settlement/service/processor.go](/Users/zhangza/code/funnyoption/backend/internal/settlement/service/processor.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/chain/service/rollup_submitter.go](/Users/zhangza/code/funnyoption/backend/internal/chain/service/rollup_submitter.go)
 
 ## Owned files
 

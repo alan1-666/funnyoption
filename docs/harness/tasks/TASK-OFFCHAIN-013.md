@@ -40,9 +40,9 @@ current session-key trust model, expiry rules, and replay protections.
 - [/Users/zhangza/code/funnyoption/docs/architecture/direct-deposit-session-key.md](/Users/zhangza/code/funnyoption/docs/architecture/direct-deposit-session-key.md)
 - [/Users/zhangza/code/funnyoption/web/lib/session-client.ts](/Users/zhangza/code/funnyoption/web/lib/session-client.ts)
 - [/Users/zhangza/code/funnyoption/web/components/trading-session-provider.tsx](/Users/zhangza/code/funnyoption/web/components/trading-session-provider.tsx)
-- [/Users/zhangza/code/funnyoption/internal/shared/auth/session.go](/Users/zhangza/code/funnyoption/internal/shared/auth/session.go)
-- [/Users/zhangza/code/funnyoption/internal/api/handler/order_handler.go](/Users/zhangza/code/funnyoption/internal/api/handler/order_handler.go)
-- [/Users/zhangza/code/funnyoption/internal/api/handler/sql_store.go](/Users/zhangza/code/funnyoption/internal/api/handler/sql_store.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/shared/auth/session.go](/Users/zhangza/code/funnyoption/backend/internal/shared/auth/session.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/api/handler/order_handler.go](/Users/zhangza/code/funnyoption/backend/internal/api/handler/order_handler.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/api/handler/sql_store.go](/Users/zhangza/code/funnyoption/backend/internal/api/handler/sql_store.go)
 - [/Users/zhangza/code/funnyoption/docs/harness/handshakes/HANDSHAKE-OFFCHAIN-013.md](/Users/zhangza/code/funnyoption/docs/harness/handshakes/HANDSHAKE-OFFCHAIN-013.md)
 - [/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-OFFCHAIN-013.md](/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-OFFCHAIN-013.md)
 

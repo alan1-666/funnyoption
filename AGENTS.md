@@ -32,13 +32,13 @@ Read it first, then follow the linked files in order.
 
 ## Domain map
 
-- Order ingress and API: [`internal/api`](/Users/zhangza/code/funnyoption/internal/api)
-- Matching core: [`internal/matching`](/Users/zhangza/code/funnyoption/internal/matching)
-- Mutable balances and freezes: [`internal/account`](/Users/zhangza/code/funnyoption/internal/account)
-- Settlement and payouts: [`internal/settlement`](/Users/zhangza/code/funnyoption/internal/settlement)
-- Ledger and reconciliation: [`internal/ledger`](/Users/zhangza/code/funnyoption/internal/ledger)
-- Chain listener and claim flow: [`internal/chain`](/Users/zhangza/code/funnyoption/internal/chain)
-- WebSocket fanout: [`internal/ws`](/Users/zhangza/code/funnyoption/internal/ws)
+- Order ingress and API: [`backend/internal/api`](/Users/zhangza/code/funnyoption/backend/internal/api)
+- Matching core: [`backend/internal/matching`](/Users/zhangza/code/funnyoption/backend/internal/matching)
+- Mutable balances and freezes: [`backend/internal/account`](/Users/zhangza/code/funnyoption/backend/internal/account)
+- Settlement and payouts: [`backend/internal/settlement`](/Users/zhangza/code/funnyoption/backend/internal/settlement)
+- Ledger and reconciliation: [`backend/internal/ledger`](/Users/zhangza/code/funnyoption/backend/internal/ledger)
+- Chain listener and claim flow: [`backend/internal/chain`](/Users/zhangza/code/funnyoption/backend/internal/chain)
+- WebSocket fanout: [`backend/internal/ws`](/Users/zhangza/code/funnyoption/backend/internal/ws)
 - Frontend: [`web`](/Users/zhangza/code/funnyoption/web)
 - Contracts: [`contracts`](/Users/zhangza/code/funnyoption/contracts)
 

@@ -21,7 +21,7 @@ Build GitHub push-to-deploy automation for the current staging server deployment
 - [/Users/zhangza/code/funnyoption/docs/harness/PROJECT_MAP.md](/Users/zhangza/code/funnyoption/docs/harness/PROJECT_MAP.md)
 - [/Users/zhangza/code/funnyoption/docs/harness/THREAD_PROTOCOL.md](/Users/zhangza/code/funnyoption/docs/harness/THREAD_PROTOCOL.md)
 - [/Users/zhangza/code/funnyoption/docs/deploy/staging-bsc-testnet.md](/Users/zhangza/code/funnyoption/docs/deploy/staging-bsc-testnet.md)
-- [/Users/zhangza/code/funnyoption/configs/staging/funnyoption.env.example](/Users/zhangza/code/funnyoption/configs/staging/funnyoption.env.example)
+- [/Users/zhangza/code/funnyoption/backend/configs/staging/funnyoption.env.example](/Users/zhangza/code/funnyoption/backend/configs/staging/funnyoption.env.example)
 - [/Users/zhangza/code/funnyoption/docs/harness/handshakes/HANDSHAKE-CICD-001.md](/Users/zhangza/code/funnyoption/docs/harness/handshakes/HANDSHAKE-CICD-001.md)
 - [/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CICD-001.md](/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CICD-001.md)
 

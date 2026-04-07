@@ -218,15 +218,15 @@ classify_changed_path() {
   local path="$1"
 
   case "${path}" in
-    go.mod|go.sum|internal/shared/*|proto/*)
+    backend/go.mod|backend/go.sum|backend/internal/shared/*|backend/proto/*)
       select_backend_services
       ;;
-    internal/gen/accountv1/*)
+    backend/internal/gen/accountv1/*)
       select_service account
       select_service api
       select_service chain
       ;;
-    migrations/*)
+    backend/migrations/*)
       queue_backend_services
       MIGRATIONS_REQUIRED=1
       ;;
@@ -234,33 +234,33 @@ classify_changed_path() {
       select_all_services
       MIGRATIONS_REQUIRED=1
       ;;
-    cmd/account/*|internal/account/model/*|internal/account/repository/*|internal/account/service/*)
+    backend/cmd/account/*|backend/internal/account/model/*|backend/internal/account/repository/*|backend/internal/account/service/*)
       select_service account
       ;;
-    internal/account/client/*)
+    backend/internal/account/client/*)
       select_service account
       select_service api
       select_service chain
       ;;
-    cmd/matching/*|internal/matching/*)
+    backend/cmd/matching/*|backend/internal/matching/*)
       select_service matching
       ;;
-    cmd/market-maker/*|internal/marketmaker/*)
+    backend/cmd/market-maker/*|backend/internal/marketmaker/*)
       select_service market-maker
       ;;
-    cmd/ledger/*|internal/ledger/*)
+    backend/cmd/ledger/*|backend/internal/ledger/*)
       select_service ledger
       ;;
-    cmd/settlement/*|internal/settlement/*)
+    backend/cmd/settlement/*|backend/internal/settlement/*)
       select_service settlement
       ;;
-    cmd/chain/*|internal/chain/*)
+    backend/cmd/chain/*|backend/internal/chain/*)
       select_service chain
       ;;
-    cmd/api/*|internal/api/*)
+    backend/cmd/api/*|backend/internal/api/*)
       select_service api
       ;;
-    cmd/ws/*|internal/ws/*)
+    backend/cmd/ws/*|backend/internal/ws/*)
       select_service ws
       ;;
     web/package.json|web/package-lock.json)
@@ -273,7 +273,7 @@ classify_changed_path() {
     admin/*)
       select_service admin
       ;;
-    *.go|cmd/*|internal/*)
+    *.go|backend/cmd/*|backend/internal/*)
       select_backend_services
       ;;
   esac

@@ -59,8 +59,8 @@ source with auditable evidence and a manual operator override.
 - [/Users/zhangza/code/funnyoption/contracts/src/MockUSDT.sol](/Users/zhangza/code/funnyoption/contracts/src/MockUSDT.sol)
 - [/Users/zhangza/code/funnyoption/admin/components/market-studio.tsx](/Users/zhangza/code/funnyoption/admin/components/market-studio.tsx)
 - [/Users/zhangza/code/funnyoption/admin/app/api/operator/markets/route.ts](/Users/zhangza/code/funnyoption/admin/app/api/operator/markets/route.ts)
-- [/Users/zhangza/code/funnyoption/internal/api/handler/sql_store.go](/Users/zhangza/code/funnyoption/internal/api/handler/sql_store.go)
-- [/Users/zhangza/code/funnyoption/internal/settlement/service/processor.go](/Users/zhangza/code/funnyoption/internal/settlement/service/processor.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/api/handler/sql_store.go](/Users/zhangza/code/funnyoption/backend/internal/api/handler/sql_store.go)
+- [/Users/zhangza/code/funnyoption/backend/internal/settlement/service/processor.go](/Users/zhangza/code/funnyoption/backend/internal/settlement/service/processor.go)
 - [/Users/zhangza/code/funnyoption/docs/harness/handshakes/HANDSHAKE-CHAIN-005.md](/Users/zhangza/code/funnyoption/docs/harness/handshakes/HANDSHAKE-CHAIN-005.md)
 - [/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-005.md](/Users/zhangza/code/funnyoption/docs/harness/worklogs/WORKLOG-CHAIN-005.md)
 

@@ -1,32 +1,32 @@
 # SQL Schema Notes
 
-`/Users/zhangza/code/funnyoption/migrations/001_init.sql` is the first cut of the PostgreSQL core schema.
+`/Users/zhangza/code/funnyoption/backend/migrations/001_init.sql` is the first cut of the PostgreSQL core schema.
 
-`/Users/zhangza/code/funnyoption/migrations/002_ownership.sql` is the follow-up grant/ownership migration for the `funnyoption` app role.
+`/Users/zhangza/code/funnyoption/backend/migrations/002_ownership.sql` is the follow-up grant/ownership migration for the `funnyoption` app role.
 
-`/Users/zhangza/code/funnyoption/migrations/003_wallet_sessions_and_deposits.sql` adds session authorization and direct-vault deposit mirrors.
+`/Users/zhangza/code/funnyoption/backend/migrations/003_wallet_sessions_and_deposits.sql` adds session authorization and direct-vault deposit mirrors.
 
-`/Users/zhangza/code/funnyoption/migrations/004_account_balance_events.sql` adds idempotent external balance credit tracking.
+`/Users/zhangza/code/funnyoption/backend/migrations/004_account_balance_events.sql` adds idempotent external balance credit tracking.
 
-`/Users/zhangza/code/funnyoption/migrations/005_chain_transaction_queue.sql` hardens the claim queue with retry metadata.
+`/Users/zhangza/code/funnyoption/backend/migrations/005_chain_transaction_queue.sql` hardens the claim queue with retry metadata.
 
-`/Users/zhangza/code/funnyoption/migrations/006_chain_withdrawals.sql` adds on-chain withdrawal queue mirrors.
+`/Users/zhangza/code/funnyoption/backend/migrations/006_chain_withdrawals.sql` adds on-chain withdrawal queue mirrors.
 
-`/Users/zhangza/code/funnyoption/migrations/007_market_taxonomy_and_options.sql` adds formal market categories plus per-market option-set JSON storage.
+`/Users/zhangza/code/funnyoption/backend/migrations/007_market_taxonomy_and_options.sql` adds formal market categories plus per-market option-set JSON storage.
 
-`/Users/zhangza/code/funnyoption/migrations/008_user_profiles.sql` adds user profile display metadata.
+`/Users/zhangza/code/funnyoption/backend/migrations/008_user_profiles.sql` adds user profile display metadata.
 
-`/Users/zhangza/code/funnyoption/migrations/009_chain_listener_cursors.sql` adds a persisted restart cursor for vault event scans.
+`/Users/zhangza/code/funnyoption/backend/migrations/009_chain_listener_cursors.sql` adds a persisted restart cursor for vault event scans.
 
-`/Users/zhangza/code/funnyoption/migrations/010_chain_deposits_tx_hash_width_repair.sql` reconciles reused local `chain_deposits.tx_hash` width drift back to the repo truth.
+`/Users/zhangza/code/funnyoption/backend/migrations/010_chain_deposits_tx_hash_width_repair.sql` reconciles reused local `chain_deposits.tx_hash` width drift back to the repo truth.
 
-`/Users/zhangza/code/funnyoption/migrations/011_trading_key_challenges.sql` adds one-time V2 trading-key challenge storage.
+`/Users/zhangza/code/funnyoption/backend/migrations/011_trading_key_challenges.sql` adds one-time V2 trading-key challenge storage.
 
-`/Users/zhangza/code/funnyoption/migrations/012_wallet_sessions_vault_scope.sql` adds durable `vault_address` scope to the `wallet_sessions` compatibility carrier.
+`/Users/zhangza/code/funnyoption/backend/migrations/012_wallet_sessions_vault_scope.sql` adds durable `vault_address` scope to the `wallet_sessions` compatibility carrier.
 
-`/Users/zhangza/code/funnyoption/migrations/013_wallet_sessions_vault_key_uniqueness.sql` replaces the legacy wallet/public-key uniqueness rule with durable `wallet + chain + vault + public key` uniqueness.
+`/Users/zhangza/code/funnyoption/backend/migrations/013_wallet_sessions_vault_key_uniqueness.sql` replaces the legacy wallet/public-key uniqueness rule with durable `wallet + chain + vault + public key` uniqueness.
 
-`/Users/zhangza/code/funnyoption/migrations/019_rollup_forced_withdrawal_foundations.sql` adds local mirrors for rollup forced-withdrawal requests and global freeze state.
+`/Users/zhangza/code/funnyoption/backend/migrations/019_rollup_forced_withdrawal_foundations.sql` adds local mirrors for rollup forced-withdrawal requests and global freeze state.
 
 ## Trading domain
 
@@ -90,7 +90,7 @@
   - deterministic deposit ids that fit within `VARCHAR(64)`
   - normalized lowercase tx hashes without the `0x` prefix, which fit within `VARCHAR(64)`
 - repo-local repair path:
-  - [`migrations/010_chain_deposits_tx_hash_width_repair.sql`](/Users/zhangza/code/funnyoption/migrations/010_chain_deposits_tx_hash_width_repair.sql)
+  - [`migrations/010_chain_deposits_tx_hash_width_repair.sql`](/Users/zhangza/code/funnyoption/backend/migrations/010_chain_deposits_tx_hash_width_repair.sql)
   - [`docs/operations/local-chain-deposits-schema-repair.md`](/Users/zhangza/code/funnyoption/docs/operations/local-chain-deposits-schema-repair.md)
 
 ## Wallet and session domain
@@ -402,15 +402,15 @@ First proof-lane storage / migration consequence:
     `authorization_ref + trading_key_id + account_id + wallet_address +
     chain_id + vault_address + trading_public_key + trading_key_scheme +
     scope + key_status`
-  - [`BuildVerifierAuthProofContract(history, batch)`](/Users/zhangza/code/funnyoption/internal/rollup/verifier_contract.go)
+  - [`BuildVerifierAuthProofContract(history, batch)`](/Users/zhangza/code/funnyoption/backend/internal/rollup/verifier_contract.go)
     classifies each target-batch nonce auth row as:
     - `JOINED`
     - `MISSING_TRADING_KEY_AUTHORIZED`
     - `NON_VERIFIER_ELIGIBLE`
-  - [`BuildVerifierGateBatchContract(history, batch)`](/Users/zhangza/code/funnyoption/internal/rollup/verifier_contract.go)
+  - [`BuildVerifierGateBatchContract(history, batch)`](/Users/zhangza/code/funnyoption/backend/internal/rollup/verifier_contract.go)
     then packages that auth-proof view next to the unchanged batch public
     inputs / metadata surface
-  - [`BuildVerifierStateRootAcceptanceContract(history, batch)`](/Users/zhangza/code/funnyoption/internal/rollup/verifier_contract.go)
+  - [`BuildVerifierStateRootAcceptanceContract(history, batch)`](/Users/zhangza/code/funnyoption/backend/internal/rollup/verifier_contract.go)
     projects that same boundary down to the minimal acceptance-facing shape:
     - unchanged `public_inputs`
     - unchanged `l1_batch_metadata`
@@ -420,7 +420,7 @@ First proof-lane storage / migration consequence:
       - struct field names and Solidity types
       - `AuthJoinStatus` enum ordinals
       - normalized `0x`-prefixed `bytes32` calldata values
-  - [`BuildVerifierArtifactBundle(history, batch)`](/Users/zhangza/code/funnyoption/internal/rollup/verifier_contract.go)
+  - [`BuildVerifierArtifactBundle(history, batch)`](/Users/zhangza/code/funnyoption/backend/internal/rollup/verifier_contract.go)
     now directly consumes that `solidity_export` and materializes the first
     deterministic prover/verifier artifact contract:
     - unchanged acceptance contract
@@ -492,24 +492,24 @@ First proof-lane storage / migration consequence:
   `proofTypeHash`, limb splitting, proof-bytes codec, and verifier verdict
   parity aligned across both runtimes
 - `TASK-CHAIN-026` adds the next durable bridge:
-  - [`BuildShadowBatchSubmissionBundle(history, batch)`](/Users/zhangza/code/funnyoption/internal/rollup/submission.go)
+  - [`BuildShadowBatchSubmissionBundle(history, batch)`](/Users/zhangza/code/funnyoption/backend/internal/rollup/submission.go)
     consumes the existing shadow batch contract plus verifier artifact bundle
     and emits:
     - one stable `recordBatchMetadata(...)` export
     - one stable `acceptVerifiedBatch(...)` export
     - ABI-encoded calldata for both calls
-  - [`Store.PrepareNextSubmission(...)`](/Users/zhangza/code/funnyoption/internal/rollup/store.go)
+  - [`Store.PrepareNextSubmission(...)`](/Users/zhangza/code/funnyoption/backend/internal/rollup/store.go)
     now:
     - reuses the earliest materialized batch that has no submission yet, or
       materializes the next batch first if needed
     - persists a deterministic row in `rollup_shadow_submissions`
     - keeps submission readiness explicit as `READY` vs `BLOCKED_AUTH`
   - the repo command
-    [`cmd/rollup`](/Users/zhangza/code/funnyoption/cmd/rollup/main.go)
+    [`cmd/rollup`](/Users/zhangza/code/funnyoption/backend/cmd/rollup/main.go)
     can now prepare the next shadow submission and print the full bundle as
     JSON for later chain/runtime integration
 - `TASK-CHAIN-027` extends the same lane into a restart-safe runtime:
-  - [`RollupSubmissionProcessor.PollOnce(...)`](/Users/zhangza/code/funnyoption/internal/chain/service/rollup_submitter.go)
+  - [`RollupSubmissionProcessor.PollOnce(...)`](/Users/zhangza/code/funnyoption/backend/internal/chain/service/rollup_submitter.go)
     now:
     - stops on the earliest non-accepted submission so batch order stays
       truthful
@@ -518,7 +518,7 @@ First proof-lane storage / migration consequence:
     - waits for the metadata receipt before submitting
       `acceptVerifiedBatch(...)`
     - only marks `ACCEPTED` after the acceptance receipt succeeds
-  - [`cmd/rollup -mode=submit-next`](/Users/zhangza/code/funnyoption/cmd/rollup/main.go)
+  - [`cmd/rollup -mode=submit-next`](/Users/zhangza/code/funnyoption/backend/cmd/rollup/main.go)
     can now drive one live submission step when chain RPC, operator key, and
     `rollup_core_address` config are present
 - `TASK-CHAIN-028` hardens that runtime with visible onchain reconciliation:
@@ -530,7 +530,7 @@ First proof-lane storage / migration consequence:
   - the runtime now re-reads `latestAcceptedBatchId`,
     `latestAcceptedStateRoot`, and `acceptedBatches(batchId)` and only marks
     `ACCEPTED` once they match the persisted submission expectation
-  - [`cmd/rollup -mode=submit-until-idle`](/Users/zhangza/code/funnyoption/cmd/rollup/main.go)
+  - [`cmd/rollup -mode=submit-until-idle`](/Users/zhangza/code/funnyoption/backend/cmd/rollup/main.go)
     can now keep polling until the lane reaches a stable stop condition
 - `TASK-CHAIN-029` extends the same lane into accepted-withdrawal truth:
   - accepted submissions are now materialized into `rollup_accepted_batches`

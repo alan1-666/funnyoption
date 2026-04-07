@@ -18,6 +18,23 @@ import type {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8080";
 
+let _sessionId: string | undefined;
+
+export function setApiSessionId(id: string | undefined) {
+  _sessionId = id;
+}
+
+export function authenticatedFetch(url: string, init?: RequestInit): Promise<Response> {
+  const merged = { ...init };
+  if (_sessionId) {
+    const existing = merged.headers instanceof Headers
+      ? Object.fromEntries(merged.headers.entries())
+      : (merged.headers as Record<string, string>) ?? {};
+    merged.headers = { ...existing, Authorization: `Bearer ${_sessionId}` };
+  }
+  return fetch(url, merged);
+}
+
 const EMPTY_MARKET_RUNTIME: MarketRuntime = {
   trade_count: 0,
   matched_quantity: 0,
@@ -92,7 +109,7 @@ async function fetchJson<T>(path: string): Promise<FetchResult<T>> {
   let response: Response;
 
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
+    response = await authenticatedFetch(`${API_BASE_URL}${path}`, {
       cache: "no-store"
     });
   } catch {
@@ -337,7 +354,7 @@ export async function updateProfile(input: {
   displayName?: string;
   avatarPreset: string;
 }) {
-  const response = await fetch(`${API_BASE_URL}/api/v1/profile`, {
+  const response = await authenticatedFetch(`${API_BASE_URL}/api/v1/profile`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTradingSession } from "@/components/trading-session-provider";
 import { UserAvatar } from "@/components/user-avatar";
 import { formatAssetAmount, shortenAddress } from "@/lib/format";
-import { getBalancesRead } from "@/lib/api";
+import { authenticatedFetch, getBalancesRead } from "@/lib/api";
 import type { Balance, UserProfile } from "@/lib/types";
 import styles from "@/components/shell-top-bar.module.css";
 
@@ -26,7 +26,7 @@ async function fetchAvailableBalance(userId: number) {
 }
 
 async function fetchUserProfile(userId: number) {
-  const response = await fetch(`${API_BASE_URL}/api/v1/profile?user_id=${userId}`, {
+  const response = await authenticatedFetch(`${API_BASE_URL}/api/v1/profile?user_id=${userId}`, {
     cache: "no-store"
   });
   if (response.status === 404) {

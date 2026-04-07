@@ -17,6 +17,7 @@ import {
   signOrderWithSession,
   type WalletConnection
 } from "@/lib/session-client";
+import { setApiSessionId } from "@/lib/api";
 
 interface TradingSessionContextValue {
   wallet: WalletConnection | null;
@@ -74,6 +75,10 @@ export function TradingSessionProvider({ children }: { children: React.ReactNode
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    setApiSessionId(session?.sessionId);
+  }, [session?.sessionId]);
 
   function assignWallet(nextWallet: WalletConnection | null, source: "none" | "provider" | "restored") {
     walletSourceRef.current = source;

@@ -8,6 +8,7 @@ import { ShellTopBar } from "@/components/shell-top-bar";
 import { useTradingSession } from "@/components/trading-session-provider";
 import { UserAvatar } from "@/components/user-avatar";
 import {
+  authenticatedFetch,
   getBalancesRead,
   getOrdersRead,
   getPayoutsRead,
@@ -266,7 +267,7 @@ export function PortfolioShell({
     setClaimStatus((current) => ({ ...current, [eventId]: "正在提交领取请求…" }));
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/payouts/${eventId}/claim`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/v1/payouts/${eventId}/claim`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

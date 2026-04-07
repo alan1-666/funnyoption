@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { useTradingSession } from "@/components/trading-session-provider";
+import { authenticatedFetch } from "@/lib/api";
 import { formatAssetAmount, formatToken } from "@/lib/format";
 import { zhMarketStatus, zhOutcome } from "@/lib/locale";
 import type { Market } from "@/lib/types";
@@ -91,7 +92,7 @@ export function OrderTicket({ market }: { market: Market }) {
         throw new Error("Failed to sign order with trading key");
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/v1/orders`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/v1/orders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

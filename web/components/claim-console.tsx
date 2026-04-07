@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { useTradingSession } from "@/components/trading-session-provider";
+import { authenticatedFetch } from "@/lib/api";
 import { formatAssetAmount, formatTimestamp, formatToken, shortenAddress } from "@/lib/format";
 import { zhGenericStatus, zhOutcome } from "@/lib/locale";
 import type { Deposit, Payout } from "@/lib/types";
@@ -31,7 +32,7 @@ export function ClaimConsole({ payouts, deposits }: ClaimConsoleProps) {
     setStatusMap((current) => ({ ...current, [eventId]: "正在提交领取请求..." }));
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/payouts/${eventId}/claim`, {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/v1/payouts/${eventId}/claim`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

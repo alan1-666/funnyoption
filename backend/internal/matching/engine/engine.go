@@ -51,7 +51,7 @@ type cancelEnvelope struct {
 
 type Engine struct {
 	logger   *slog.Logger
-	books    map[string]*model.OrderBook
+	books    map[string]*model.OrderBookDirect
 	sequence *uint64
 }
 
@@ -74,7 +74,7 @@ func New(logger *slog.Logger) *Engine {
 	seq := uint64(0)
 	return &Engine{
 		logger:   logger,
-		books:    make(map[string]*model.OrderBook),
+		books:    make(map[string]*model.OrderBookDirect),
 		sequence: &seq,
 	}
 }
@@ -86,17 +86,17 @@ func (e *Engine) SetSequence(seq uint64) {
 func (e *Engine) BookCount() int {
 	count := 0
 	for _, book := range e.books {
-		if len(book.OrderMap) > 0 {
+		if book.OrderCount() > 0 {
 			count++
 		}
 	}
 	return count
 }
 
-func newEngineWithSequence(logger *slog.Logger, sequence *uint64) *Engine {
+func NewWithSequence(logger *slog.Logger, sequence *uint64) *Engine {
 	return &Engine{
 		logger:   logger,
-		books:    make(map[string]*model.OrderBook),
+		books:    make(map[string]*model.OrderBookDirect),
 		sequence: sequence,
 	}
 }
@@ -166,7 +166,7 @@ func (e *AsyncEngine) getOrCreateWorkerUnsafe(bookKey string) *bookWorker {
 	if w, ok := e.workers[bookKey]; ok {
 		return w
 	}
-	eng := newEngineWithSequence(e.logger, &e.sequence)
+	eng := NewWithSequence(e.logger, &e.sequence)
 	w := &bookWorker{
 		bookKey: bookKey,
 		engine:  eng,
@@ -270,7 +270,7 @@ func (e *AsyncEngine) BookCount() int {
 	count := 0
 	for _, w := range e.workers {
 		for _, book := range w.engine.books {
-			if len(book.OrderMap) > 0 {
+			if book.OrderCount() > 0 {
 				count++
 			}
 		}
@@ -360,15 +360,16 @@ func (e *Engine) CancelOrders(orders []*model.Order, reason model.CancelReason) 
 		if !ok {
 			continue
 		}
-		existing, ok := book.OrderMap[candidate.OrderID]
+		existing, ok := book.GetDirectOrder(candidate.OrderID)
 		if !ok || existing.RemainingQuantity() <= 0 {
 			continue
 		}
 
 		existing.Cancel(reason)
 		existing.UpdatedAtMillis = nowMillis
-		book.RemoveOrder(existing)
-		cancelled = append(cancelled, cloneOrder(existing))
+		result := existing.ToOrder()
+		book.RemoveDirectOrder(existing)
+		cancelled = append(cancelled, result)
 
 		if _, already := seenBooks[book.Key]; !already {
 			seenBooks[book.Key] = struct{}{}
@@ -383,7 +384,7 @@ func (e *Engine) CancelOrders(orders []*model.Order, reason model.CancelReason) 
 			continue
 		}
 		snapshots = append(snapshots, book.Snapshot(5))
-		if len(book.OrderMap) == 0 {
+		if book.OrderCount() == 0 {
 			delete(e.books, key)
 		}
 	}
@@ -394,7 +395,7 @@ func (e *Engine) CancelOrders(orders []*model.Order, reason model.CancelReason) 
 	}, nil
 }
 
-func (e *Engine) processLimitOrder(order *model.Order, book *model.OrderBook) ([]model.Trade, []*model.Order) {
+func (e *Engine) processLimitOrder(order *model.Order, book *model.OrderBookDirect) ([]model.Trade, []*model.Order) {
 	trades, affected := e.match(order, book)
 	if order.RemainingQuantity() == 0 {
 		return trades, affected
@@ -418,7 +419,7 @@ func (e *Engine) processLimitOrder(order *model.Order, book *model.OrderBook) ([
 	return trades, affected
 }
 
-func (e *Engine) processMarketOrder(order *model.Order, book *model.OrderBook) ([]model.Trade, []*model.Order) {
+func (e *Engine) processMarketOrder(order *model.Order, book *model.OrderBookDirect) ([]model.Trade, []*model.Order) {
 	trades, affected := e.match(order, book)
 	if order.RemainingQuantity() > 0 {
 		order.Cancel(model.CancelReasonMarketNoLiquidity)
@@ -426,87 +427,118 @@ func (e *Engine) processMarketOrder(order *model.Order, book *model.OrderBook) (
 	return trades, affected
 }
 
-func (e *Engine) match(order *model.Order, book *model.OrderBook) ([]model.Trade, []*model.Order) {
-	opposite := book.OppositeLevels(order)
-	if len(opposite) == 0 {
+func (e *Engine) match(order *model.Order, book *model.OrderBookDirect) ([]model.Trade, []*model.Order) {
+	if !book.IsCross(order) {
 		return nil, nil
 	}
 
-	trades := make([]model.Trade, 0)
-	affected := make([]*model.Order, 0)
-	for i := 0; i < len(opposite); i++ {
-		level := opposite[i]
-		if !book.IsCrossWithPrice(order, level.Price) {
-			break
+	trades := make([]model.Trade, 0, 4)
+	affected := make([]*model.Order, 0, 4)
+	var toRemove []*model.DirectOrder
+
+	if order.IsBuy() {
+		bucket := book.FirstAskBucket()
+		for bucket != nil && order.RemainingQuantity() > 0 {
+			if !order.IsMarket() && order.Price < bucket.Price {
+				break
+			}
+			maker := bucket.Head
+			for maker != nil && order.RemainingQuantity() > 0 {
+				nextMaker := maker.Next()
+				if order.UserID == maker.UserID {
+					maker = nextMaker
+					continue
+				}
+				tradeQty := min(order.RemainingQuantity(), maker.RemainingQuantity())
+				if tradeQty <= 0 {
+					maker = nextMaker
+					continue
+				}
+				order.ApplyFill(tradeQty)
+				maker.ApplyFill(tradeQty)
+				trades = append(trades, model.Trade{
+					Sequence:        atomic.AddUint64(e.sequence, 1),
+					MarketID:        order.MarketID,
+					Outcome:         order.Outcome,
+					BookKey:         order.BookKey(),
+					Price:           maker.Price,
+					Quantity:        tradeQty,
+					TakerOrderID:    order.OrderID,
+					MakerOrderID:    maker.OrderID,
+					TakerUserID:     order.UserID,
+					MakerUserID:     maker.UserID,
+					TakerSide:       order.Side,
+					MakerSide:       maker.Side,
+					MatchedAtMillis: time.Now().UnixMilli(),
+				})
+				affected = append(affected, maker.ToOrder())
+				if maker.RemainingQuantity() == 0 {
+					toRemove = append(toRemove, maker)
+				}
+				maker = nextMaker
+			}
+			bucket = book.NextAskBucket(bucket.Price)
 		}
-
-		remaining := level.Orders[:0]
-		for _, maker := range level.Orders {
-			if order.RemainingQuantity() == 0 {
-				remaining = append(remaining, maker)
-				continue
+	} else {
+		bucket := book.FirstBidBucket()
+		for bucket != nil && order.RemainingQuantity() > 0 {
+			if !order.IsMarket() && order.Price > bucket.Price {
+				break
 			}
-			if order.UserID == maker.UserID {
-				remaining = append(remaining, maker)
-				continue
+			maker := bucket.Head
+			for maker != nil && order.RemainingQuantity() > 0 {
+				nextMaker := maker.Next()
+				if order.UserID == maker.UserID {
+					maker = nextMaker
+					continue
+				}
+				tradeQty := min(order.RemainingQuantity(), maker.RemainingQuantity())
+				if tradeQty <= 0 {
+					maker = nextMaker
+					continue
+				}
+				order.ApplyFill(tradeQty)
+				maker.ApplyFill(tradeQty)
+				trades = append(trades, model.Trade{
+					Sequence:        atomic.AddUint64(e.sequence, 1),
+					MarketID:        order.MarketID,
+					Outcome:         order.Outcome,
+					BookKey:         order.BookKey(),
+					Price:           maker.Price,
+					Quantity:        tradeQty,
+					TakerOrderID:    order.OrderID,
+					MakerOrderID:    maker.OrderID,
+					TakerUserID:     order.UserID,
+					MakerUserID:     maker.UserID,
+					TakerSide:       order.Side,
+					MakerSide:       maker.Side,
+					MatchedAtMillis: time.Now().UnixMilli(),
+				})
+				affected = append(affected, maker.ToOrder())
+				if maker.RemainingQuantity() == 0 {
+					toRemove = append(toRemove, maker)
+				}
+				maker = nextMaker
 			}
-			tradeQty := min(order.RemainingQuantity(), maker.RemainingQuantity())
-			if tradeQty <= 0 {
-				remaining = append(remaining, maker)
-				continue
-			}
-
-			order.ApplyFill(tradeQty)
-			maker.ApplyFill(tradeQty)
-			trade := model.Trade{
-				Sequence:        atomic.AddUint64(e.sequence, 1),
-				MarketID:        order.MarketID,
-				Outcome:         order.Outcome,
-				BookKey:         order.BookKey(),
-				Price:           maker.Price,
-				Quantity:        tradeQty,
-				TakerOrderID:    order.OrderID,
-				MakerOrderID:    maker.OrderID,
-				TakerUserID:     order.UserID,
-				MakerUserID:     maker.UserID,
-				TakerSide:       order.Side,
-				MakerSide:       maker.Side,
-				MatchedAtMillis: time.Now().UnixMilli(),
-			}
-			trades = append(trades, trade)
-
-			if maker.RemainingQuantity() > 0 {
-				remaining = append(remaining, maker)
-			} else {
-				book.RemoveFromMap(maker.OrderID)
-			}
-			affected = append(affected, cloneOrder(maker))
+			bucket = book.NextBidBucket(bucket.Price)
 		}
-		level.Orders = remaining
 	}
 
-	book.SetOppositeLevels(order, clearEmptyLevels(book.OppositeLevels(order)))
+	for _, do := range toRemove {
+		book.RemoveDirectOrder(do)
+	}
+
 	return trades, affected
 }
 
-func (e *Engine) getOrCreateBook(key string) *model.OrderBook {
+func (e *Engine) getOrCreateBook(key string) *model.OrderBookDirect {
 	book, ok := e.books[key]
 	if ok {
 		return book
 	}
-	book = model.NewOrderBook(key)
+	book = model.NewOrderBookDirect(key)
 	e.books[key] = book
 	return book
-}
-
-func clearEmptyLevels(levels []*model.DepthLevel) []*model.DepthLevel {
-	result := levels[:0]
-	for _, level := range levels {
-		if !level.IsEmpty() {
-			result = append(result, level)
-		}
-	}
-	return result
 }
 
 func min(a, b int64) int64 {

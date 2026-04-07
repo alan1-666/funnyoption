@@ -150,6 +150,10 @@ func (b *OrderBook) findLevelIndex(price int64, isBuy bool) int {
 	return -1
 }
 
+func (b *OrderBook) OrderCount() int {
+	return len(b.OrderMap)
+}
+
 func (b *OrderBook) Snapshot(limit int) BookSnapshot {
 	if limit <= 0 {
 		limit = 5

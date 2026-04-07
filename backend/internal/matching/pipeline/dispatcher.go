@@ -8,7 +8,6 @@ import (
 
 	"funnyoption/internal/matching/engine"
 	"funnyoption/internal/matching/model"
-	"funnyoption/internal/matching/ringbuffer"
 	"funnyoption/internal/shared/assets"
 	"funnyoption/internal/shared/fee"
 	sharedkafka "funnyoption/internal/shared/kafka"
@@ -19,17 +18,16 @@ type CandleTracker interface {
 	ApplyTrade(trade model.Trade) sharedkafka.QuoteCandleEvent
 }
 
-// OutputDispatcher drains MatchResults from the Output Ring Buffer
+// OutputDispatcher drains MatchResults from the shared fan-in channel
 // and performs all IO: DB persist + Kafka publish.
 type OutputDispatcher struct {
 	logger    *slog.Logger
-	outputRB  *ringbuffer.RingBuffer[MatchResult]
+	outputCh  <-chan MatchResult
 	publisher sharedkafka.Publisher
 	topics    sharedkafka.Topics
 	store     PersistStore
 	candles   CandleTracker
 	feeSched  fee.Schedule
-	idle      *ringbuffer.IdleStrategy
 
 	dispatched atomic.Uint64
 	errors     atomic.Uint64
@@ -40,11 +38,9 @@ type PersistStore interface {
 	PersistResult(ctx context.Context, command sharedkafka.OrderCommand, result engine.Result) error
 }
 
-const dispatchDrainBatch = 64
-
 func NewOutputDispatcher(
 	logger *slog.Logger,
-	outputRB *ringbuffer.RingBuffer[MatchResult],
+	outputCh <-chan MatchResult,
 	publisher sharedkafka.Publisher,
 	topics sharedkafka.Topics,
 	store PersistStore,
@@ -53,13 +49,12 @@ func NewOutputDispatcher(
 ) *OutputDispatcher {
 	return &OutputDispatcher{
 		logger:    logger,
-		outputRB:  outputRB,
+		outputCh:  outputCh,
 		publisher: publisher,
 		topics:    topics,
 		store:     store,
 		candles:   candles,
 		feeSched:  feeSched,
-		idle:      ringbuffer.NewIdleStrategy(50, 10, 100*time.Microsecond),
 	}
 }
 
@@ -67,23 +62,17 @@ func (d *OutputDispatcher) Run(ctx context.Context) {
 	d.logger.Info("output dispatcher started")
 	defer d.logger.Info("output dispatcher stopped")
 
-	buf := make([]MatchResult, dispatchDrainBatch)
-
 	for {
-		n := d.outputRB.DrainTo(buf, dispatchDrainBatch)
-		if n == 0 {
-			d.idle.Idle()
-			if ctx.Err() != nil {
+		select {
+		case <-ctx.Done():
+			return
+		case mr, ok := <-d.outputCh:
+			if !ok {
 				return
 			}
-			continue
-		}
-		d.idle.Reset()
-
-		for i := 0; i < n; i++ {
-			if err := d.dispatch(ctx, &buf[i]); err != nil {
+			if err := d.dispatch(ctx, &mr); err != nil {
 				d.errors.Add(1)
-				d.logger.Error("dispatcher: failed", "err", err, "order_id", buf[i].Command.OrderID)
+				d.logger.Error("dispatcher: failed", "err", err, "order_id", mr.Command.OrderID)
 			}
 			d.dispatched.Add(1)
 		}

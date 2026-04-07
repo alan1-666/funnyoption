@@ -13,15 +13,21 @@ import (
 	kafkago "github.com/segmentio/kafka-go"
 )
 
-// InputGateway is the IO-thread that sits between Kafka and the Input Ring Buffer.
-// It does: FetchMessage → JSON decode → MarketIsTradable → MatchCommand → TryPublish.
-// When the RB is full, it pauses the Kafka consumer (backpressure).
+// CommandRouter is the interface the gateway uses to route commands.
+// BookSupervisor implements this.
+type CommandRouter interface {
+	Route(cmd MatchCommand) bool
+}
+
+// InputGateway is the IO-thread that sits between Kafka and the BookSupervisor.
+// It does: FetchMessage → JSON decode → MarketIsTradable → MatchCommand → Route.
+// When the book's RB is full, it spins/yields (backpressure).
 type InputGateway struct {
-	logger  *slog.Logger
-	reader  *kafkago.Reader
-	inputRB *ringbuffer.RingBuffer[MatchCommand]
-	store   TradableChecker
-	idle    *ringbuffer.IdleStrategy
+	logger *slog.Logger
+	reader *kafkago.Reader
+	router CommandRouter
+	store  TradableChecker
+	idle   *ringbuffer.IdleStrategy
 
 	received atomic.Uint64
 	dropped  atomic.Uint64
@@ -37,7 +43,7 @@ func NewInputGateway(
 	logger *slog.Logger,
 	brokers []string,
 	topic, groupID string,
-	inputRB *ringbuffer.RingBuffer[MatchCommand],
+	router CommandRouter,
 	store TradableChecker,
 ) *InputGateway {
 	reader := kafkago.NewReader(kafkago.ReaderConfig{
@@ -48,11 +54,11 @@ func NewInputGateway(
 		MaxBytes: 10e6,
 	})
 	return &InputGateway{
-		logger:  logger,
-		reader:  reader,
-		inputRB: inputRB,
-		store:   store,
-		idle:    ringbuffer.NewIdleStrategy(200, 20, 100*time.Microsecond),
+		logger: logger,
+		reader: reader,
+		router: router,
+		store:  store,
+		idle:   ringbuffer.NewIdleStrategy(200, 20, 100*time.Microsecond),
 	}
 }
 
@@ -103,7 +109,7 @@ func (g *InputGateway) run(ctx context.Context) {
 
 		mc := CommandFromKafka(cmd)
 
-		for !g.inputRB.TryPublish(mc) {
+		for !g.router.Route(mc) {
 			g.paused.Add(1)
 			g.idle.Idle()
 			if ctx.Err() != nil {

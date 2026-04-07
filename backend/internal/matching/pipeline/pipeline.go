@@ -5,37 +5,33 @@ import (
 	"log/slog"
 	"time"
 
-	"funnyoption/internal/matching/engine"
 	"funnyoption/internal/matching/model"
-	"funnyoption/internal/matching/ringbuffer"
 	"funnyoption/internal/shared/fee"
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
 
 // Config tunes the ring buffer sizes.
 type Config struct {
-	InputRBSize  int // default 8192
-	OutputRBSize int // default 8192
+	InputRBSize  int // per-book input RB (default 1024)
+	OutputRBSize int // shared output channel size (default 8192)
 }
 
 func (c Config) withDefaults() Config {
 	if c.InputRBSize <= 0 {
-		c.InputRBSize = 8192
+		c.InputRBSize = bookRBSize
 	}
 	if c.OutputRBSize <= 0 {
-		c.OutputRBSize = 8192
+		c.OutputRBSize = outputChSize
 	}
 	return c
 }
 
 // Pipeline owns the three-stage matching pipeline:
-// InputGateway → MatchLoop → OutputDispatcher
+// InputGateway → BookSupervisor (per-book MatchLoops) → OutputDispatcher
 type Pipeline struct {
 	gateway    *InputGateway
-	matchLoop  *MatchLoop
+	supervisor *BookSupervisor
 	dispatcher *OutputDispatcher
-	eng        *engine.Engine
-	inputRB    *ringbuffer.RingBuffer[MatchCommand]
 
 	cancel context.CancelFunc
 }
@@ -55,48 +51,34 @@ func New(
 ) *Pipeline {
 	cfg = cfg.withDefaults()
 
-	inputRB := ringbuffer.New[MatchCommand](cfg.InputRBSize)
-	outputRB := ringbuffer.New[MatchResult](cfg.OutputRBSize)
-
-	eng := engine.New(logger)
-
-	gateway := NewInputGateway(logger, brokers, topic, groupID, inputRB, tradableStore)
-	matchLoop := NewMatchLoop(logger, eng, inputRB, outputRB)
-	dispatcher := NewOutputDispatcher(logger, outputRB, publisher, topics, persistStore, candles, feeSched)
+	supervisor := NewBookSupervisor(logger)
+	gateway := NewInputGateway(logger, brokers, topic, groupID, supervisor, tradableStore)
+	dispatcher := NewOutputDispatcher(logger, supervisor.OutputCh(), publisher, topics, persistStore, candles, feeSched)
 
 	return &Pipeline{
 		gateway:    gateway,
-		matchLoop:  matchLoop,
+		supervisor: supervisor,
 		dispatcher: dispatcher,
-		eng:        eng,
-		inputRB:    inputRB,
 	}
 }
 
-// Restore loads resting orders into the engine and sets the trade sequence.
+// Restore loads resting orders into the per-book engines and sets the trade sequence.
 func (p *Pipeline) Restore(sequence uint64, orders []*model.Order) error {
-	p.eng.SetSequence(sequence)
-	for _, order := range orders {
-		if err := p.matchLoop.RestoreOrder(order); err != nil {
-			return err
-		}
-	}
-	return nil
+	return p.supervisor.Restore(sequence, orders)
 }
 
-// Start launches all three goroutines.
+// Start launches the gateway, all book engines, and the dispatcher.
 func (p *Pipeline) Start(ctx context.Context) {
 	ctx, p.cancel = context.WithCancel(ctx)
+	p.supervisor.Start(ctx)
 	p.gateway.Start(ctx)
-	go p.matchLoop.Run(ctx)
 	go p.dispatcher.Run(ctx)
 }
 
-// SubmitCancel injects a cancel command into the input ring buffer.
+// SubmitCancel injects a cancel command into the correct book engine.
 // Used by the expiry sweeper to cancel expired resting orders through the pipeline.
 func (p *Pipeline) SubmitCancel(cmd MatchCommand) bool {
-	cmd.Action = ActionCancel
-	return p.inputRB.TryPublish(cmd)
+	return p.supervisor.SubmitCancel(cmd)
 }
 
 // Close shuts down the pipeline gracefully.
@@ -107,18 +89,18 @@ func (p *Pipeline) Close() error {
 	return p.gateway.Close()
 }
 
-// LogStats logs counters from all three stages. Call periodically.
+// LogStats logs counters from all stages. Call periodically.
 func (p *Pipeline) LogStats(logger *slog.Logger) {
 	recv, drop, pause := p.gateway.Stats()
-	matched, batches, outStall := p.matchLoop.Stats()
+	matched, batches := p.supervisor.Stats()
 	dispatched, errs := p.dispatcher.Stats()
 	logger.Info("pipeline stats",
 		"gw_received", recv,
 		"gw_dropped", drop,
 		"gw_paused", pause,
-		"ml_matched", matched,
-		"ml_batches", batches,
-		"ml_out_stall", outStall,
+		"sv_books", p.supervisor.BookCount(),
+		"sv_matched", matched,
+		"sv_batches", batches,
 		"disp_dispatched", dispatched,
 		"disp_errors", errs,
 	)

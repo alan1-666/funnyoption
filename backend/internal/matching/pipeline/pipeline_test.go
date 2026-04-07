@@ -4,12 +4,12 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"funnyoption/internal/matching/engine"
 	"funnyoption/internal/matching/model"
-	"funnyoption/internal/matching/ringbuffer"
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
 
@@ -34,18 +34,16 @@ func (n *nullCandle) ApplyTrade(trade model.Trade) sharedkafka.QuoteCandleEvent 
 	return sharedkafka.QuoteCandleEvent{}
 }
 
-func TestMatchLoopProcessesPlaceCommand(t *testing.T) {
+func TestBookEngineProcessesPlaceCommand(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	eng := engine.New(logger)
 
-	inputRB := ringbuffer.New[MatchCommand](64)
-	outputRB := ringbuffer.New[MatchResult](64)
-
-	loop := NewMatchLoop(logger, eng, inputRB, outputRB)
+	outputCh := make(chan MatchResult, 64)
+	var seq uint64
+	be := NewBookEngine("1:YES", logger, &seq, outputCh)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go loop.Run(ctx)
+	go be.Run(ctx)
 
 	makerCmd := MatchCommand{
 		Action:          ActionPlace,
@@ -61,7 +59,7 @@ func TestMatchLoopProcessesPlaceCommand(t *testing.T) {
 		OrderID:         "ord_maker_1",
 		CollateralAsset: "USDT",
 	}
-	inputRB.TryPublish(makerCmd)
+	be.TryPublish(makerCmd)
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -79,7 +77,7 @@ func TestMatchLoopProcessesPlaceCommand(t *testing.T) {
 		OrderID:         "ord_taker_1",
 		CollateralAsset: "USDT",
 	}
-	inputRB.TryPublish(takerCmd)
+	be.TryPublish(takerCmd)
 
 	deadline := time.After(2 * time.Second)
 	results := make([]MatchResult, 0)
@@ -87,12 +85,8 @@ func TestMatchLoopProcessesPlaceCommand(t *testing.T) {
 		select {
 		case <-deadline:
 			t.Fatalf("timed out waiting for results, got %d", len(results))
-		default:
-		}
-		if r, ok := outputRB.TryConsume(); ok {
+		case r := <-outputCh:
 			results = append(results, r)
-		} else {
-			time.Sleep(10 * time.Millisecond)
 		}
 	}
 
@@ -119,6 +113,144 @@ func TestMatchLoopProcessesPlaceCommand(t *testing.T) {
 	}
 	if trade.TakerOrderID != "ord_taker_1" || trade.MakerOrderID != "ord_maker_1" {
 		t.Fatalf("unexpected trade participants: taker=%s maker=%s", trade.TakerOrderID, trade.MakerOrderID)
+	}
+}
+
+func TestSupervisorRoutesToCorrectBook(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	sv := NewBookSupervisor(logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sv.Start(ctx)
+
+	// Place ask on book "1:YES"
+	sv.Route(MatchCommand{
+		Action:   ActionPlace,
+		UserID:   1,
+		MarketID: 1,
+		Outcome:  "YES",
+		BookKey:  "1:YES",
+		Side:     SideSell,
+		Type:     TypeLimit,
+		TimeInForce: TIFGTC,
+		Price:    60,
+		Quantity: 10,
+		OrderID:  "ask-1",
+	})
+
+	// Place ask on book "2:NO"
+	sv.Route(MatchCommand{
+		Action:   ActionPlace,
+		UserID:   2,
+		MarketID: 2,
+		Outcome:  "NO",
+		BookKey:  "2:NO",
+		Side:     SideSell,
+		Type:     TypeLimit,
+		TimeInForce: TIFGTC,
+		Price:    40,
+		Quantity: 5,
+		OrderID:  "ask-2",
+	})
+
+	time.Sleep(50 * time.Millisecond)
+
+	if sv.BookCount() != 2 {
+		t.Fatalf("expected 2 books, got %d", sv.BookCount())
+	}
+
+	// Cross on book "1:YES" — should match against ask-1
+	sv.Route(MatchCommand{
+		Action:   ActionPlace,
+		UserID:   3,
+		MarketID: 1,
+		Outcome:  "YES",
+		BookKey:  "1:YES",
+		Side:     SideBuy,
+		Type:     TypeLimit,
+		TimeInForce: TIFGTC,
+		Price:    60,
+		Quantity: 5,
+		OrderID:  "bid-1",
+	})
+
+	deadline := time.After(2 * time.Second)
+	var tradeResult *MatchResult
+	collected := 0
+	for collected < 3 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out, collected %d results", collected)
+		case r := <-sv.OutputCh():
+			collected++
+			if len(r.Result.Trades) > 0 {
+				tradeResult = &r
+			}
+		}
+	}
+
+	if tradeResult == nil {
+		t.Fatal("expected a trade result")
+	}
+	if tradeResult.Result.Trades[0].MakerOrderID != "ask-1" {
+		t.Fatalf("expected trade with ask-1, got %s", tradeResult.Result.Trades[0].MakerOrderID)
+	}
+}
+
+func TestSupervisorSubmitCancel(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	sv := NewBookSupervisor(logger)
+
+	var seq uint64
+	atomic.StoreUint64(&seq, 0)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Restore a resting order
+	sv.Restore(0, []*model.Order{{
+		OrderID:     "resting-1",
+		UserID:      100,
+		MarketID:    1,
+		Outcome:     "YES",
+		Side:        model.OrderSideBuy,
+		Type:        model.OrderTypeLimit,
+		TimeInForce: model.TimeInForceGTC,
+		Price:       50,
+		Quantity:    10,
+		Status:      model.OrderStatusNew,
+	}})
+
+	sv.Start(ctx)
+
+	// Submit a cancel
+	ok := sv.SubmitCancel(MatchCommand{
+		OrderID:  "resting-1",
+		MarketID: 1,
+		Outcome:  "YES",
+		BookKey:  "1:YES",
+		Side:     SideBuy,
+		Price:    50,
+		CancelReason: CancelReasonMarketClosed,
+	})
+	if !ok {
+		t.Fatal("SubmitCancel returned false")
+	}
+
+	deadline := time.After(2 * time.Second)
+	gotCancel := false
+	for !gotCancel {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for cancel result")
+		case r := <-sv.OutputCh():
+			if r.Result.Order != nil && r.Result.Order.Status == model.OrderStatusCancelled {
+				gotCancel = true
+			}
+		}
 	}
 }
 

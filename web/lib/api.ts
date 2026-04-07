@@ -488,6 +488,7 @@ export async function proposeMarket(input: {
   close_at?: number;
   resolve_at?: number;
   resolution_source?: string;
+  options?: { label: string; short_label?: string }[];
 }): Promise<Market> {
   const response = await authenticatedFetch(`${API_BASE_URL}/api/v1/markets/propose`, {
     method: "POST",

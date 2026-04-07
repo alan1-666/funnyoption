@@ -15,13 +15,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type ProposeMarketOption struct {
+	Label      string `json:"label"`
+	ShortLabel string `json:"short_label,omitempty"`
+}
+
 type ProposeMarketRequest struct {
-	Title            string `json:"title" binding:"required"`
-	Description      string `json:"description"`
-	CategoryKey      string `json:"category_key"`
-	CloseAt          int64  `json:"close_at"`
-	ResolveAt        int64  `json:"resolve_at"`
-	ResolutionSource string `json:"resolution_source"`
+	Title            string               `json:"title" binding:"required"`
+	Description      string               `json:"description"`
+	CategoryKey      string               `json:"category_key"`
+	CloseAt          int64                `json:"close_at"`
+	ResolveAt        int64                `json:"resolve_at"`
+	ResolutionSource string               `json:"resolution_source"`
+	Options          []ProposeMarketOption `json:"options"`
 }
 
 func (h *OrderHandler) ProposeMarket(ctx *gin.Context) {
@@ -54,6 +60,29 @@ func (h *OrderHandler) ProposeMarket(ctx *gin.Context) {
 		return
 	}
 
+	var options []dto.MarketOption
+	for i, opt := range req.Options {
+		label := strings.TrimSpace(opt.Label)
+		if label == "" {
+			continue
+		}
+		short := strings.TrimSpace(opt.ShortLabel)
+		if short == "" {
+			short = label
+		}
+		key := strings.ToUpper(strings.ReplaceAll(label, " ", "_"))
+		if len(key) > 32 {
+			key = key[:32]
+		}
+		options = append(options, dto.MarketOption{
+			Key:        key,
+			Label:      label,
+			ShortLabel: short,
+			SortOrder:  (i + 1) * 10,
+			IsActive:   true,
+		})
+	}
+
 	metadata := map[string]any{}
 	if src := strings.TrimSpace(req.ResolutionSource); src != "" {
 		metadata["resolution_source"] = src
@@ -71,6 +100,7 @@ func (h *OrderHandler) ProposeMarket(ctx *gin.Context) {
 		ResolveAt:   req.ResolveAt,
 		CreatedBy:   userID,
 		Metadata:    metadataJSON,
+		Options:     options,
 	}
 
 	market, err := h.store.CreateMarket(ctx, createReq)
@@ -101,20 +131,14 @@ func (h *OrderHandler) ApproveMarket(ctx *gin.Context) {
 	}
 
 	now := time.Now().Unix()
-	binaryOptions := []dto.MarketOption{
-		{Key: "YES", Label: "Yes", ShortLabel: "Y", SortOrder: 1, IsActive: true},
-		{Key: "NO", Label: "No", ShortLabel: "N", SortOrder: 2, IsActive: true},
-	}
-	optionsJSON, _ := json.Marshal(binaryOptions)
 
 	_, err = h.store.(*SQLStore).db.ExecContext(ctx.Request.Context(), `
 		UPDATE markets SET
 			status = 'OPEN',
-			options = $1::jsonb,
-			open_at = $2,
-			updated_at = $3
-		WHERE market_id = $4 AND status = 'PENDING_REVIEW'
-	`, string(optionsJSON), now, now, marketID)
+			open_at = $1,
+			updated_at = $2
+		WHERE market_id = $3 AND status = 'PENDING_REVIEW'
+	`, now, now, marketID)
 	if err != nil {
 		h.logger.Error("approve market failed", "market_id", marketID, "err", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to approve market"})

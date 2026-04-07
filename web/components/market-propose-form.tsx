@@ -1,10 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { proposeMarket } from "@/lib/api";
 import styles from "@/components/shell-top-bar.module.css";
+
+interface OptionEntry {
+  label: string;
+  shortLabel: string;
+}
+
+const DEFAULT_OPTIONS: OptionEntry[] = [
+  { label: "是", shortLabel: "是" },
+  { label: "否", shortLabel: "否" },
+];
 
 export function MarketProposeForm({ onClose }: { onClose: () => void }) {
   const [title, setTitle] = useState("");
@@ -12,15 +22,50 @@ export function MarketProposeForm({ onClose }: { onClose: () => void }) {
   const [resolutionSource, setResolutionSource] = useState("");
   const [closeAt, setCloseAt] = useState("");
   const [resolveAt, setResolveAt] = useState("");
+  const [options, setOptions] = useState<OptionEntry[]>(() =>
+    DEFAULT_OPTIONS.map((o) => ({ ...o }))
+  );
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const updateOption = useCallback(
+    (idx: number, field: keyof OptionEntry, value: string) => {
+      setOptions((prev) => {
+        const next = [...prev];
+        next[idx] = { ...next[idx], [field]: value };
+        return next;
+      });
+    },
+    []
+  );
+
+  const addOption = useCallback(() => {
+    setOptions((prev) => {
+      if (prev.length >= 6) return prev;
+      return [...prev, { label: "", shortLabel: "" }];
+    });
+  }, []);
+
+  const removeOption = useCallback((idx: number) => {
+    setOptions((prev) => {
+      if (prev.length <= 2) return prev;
+      return prev.filter((_, i) => i !== idx);
+    });
+  }, []);
+
+  const validOptions = options.filter((o) => o.label.trim().length > 0);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setSubmitting(true);
 
+    if (validOptions.length < 2) {
+      setError("At least 2 options are required");
+      return;
+    }
+
+    setSubmitting(true);
     try {
       await proposeMarket({
         title: title.trim(),
@@ -28,6 +73,10 @@ export function MarketProposeForm({ onClose }: { onClose: () => void }) {
         resolution_source: resolutionSource.trim() || undefined,
         close_at: closeAt ? Math.floor(new Date(closeAt).getTime() / 1000) : undefined,
         resolve_at: resolveAt ? Math.floor(new Date(resolveAt).getTime() / 1000) : undefined,
+        options: validOptions.map((o) => ({
+          label: o.label.trim(),
+          short_label: o.shortLabel.trim() || undefined,
+        })),
       });
       setSuccess(true);
     } catch (err) {
@@ -89,6 +138,46 @@ export function MarketProposeForm({ onClose }: { onClose: () => void }) {
               />
             </div>
 
+            <div className={styles.formGroup}>
+              <label>Options *</label>
+              <div className={styles.optionsList}>
+                {options.map((opt, idx) => (
+                  <div key={idx} className={styles.optionRow}>
+                    <input
+                      className={styles.formInput}
+                      value={opt.label}
+                      onChange={(e) => updateOption(idx, "label", e.target.value)}
+                      placeholder={`Option ${idx + 1}`}
+                      maxLength={64}
+                      style={{ flex: 1 }}
+                    />
+                    <input
+                      className={styles.formInput}
+                      value={opt.shortLabel}
+                      onChange={(e) => updateOption(idx, "shortLabel", e.target.value)}
+                      placeholder="Short"
+                      maxLength={16}
+                      style={{ width: 72 }}
+                    />
+                    <button
+                      type="button"
+                      className={styles.optionRemove}
+                      onClick={() => removeOption(idx)}
+                      disabled={options.length <= 2}
+                      aria-label="Remove option"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+              {options.length < 6 && (
+                <button type="button" className={styles.optionAdd} onClick={addOption}>
+                  + Add option
+                </button>
+              )}
+            </div>
+
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div className={styles.formGroup}>
                 <label>Close Time</label>
@@ -121,7 +210,7 @@ export function MarketProposeForm({ onClose }: { onClose: () => void }) {
               <button
                 type="submit"
                 className={styles.btnPrimary}
-                disabled={submitting || title.trim().length < 5}
+                disabled={submitting || title.trim().length < 5 || validOptions.length < 2}
               >
                 {submitting ? "Submitting..." : "Submit Proposal"}
               </button>

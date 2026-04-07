@@ -252,6 +252,16 @@ export function AdminMarketOps({ markets }: AdminMarketOpsProps) {
                   <span className="pill">待审核</span>
                 </div>
                 <p className={styles.marketCopy}>{market.description || "无描述"}</p>
+                {market.options && market.options.length > 0 && (
+                  <div className={styles.marketMeta} style={{ gap: 6 }}>
+                    <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>选项：</span>
+                    {market.options.map((opt) => (
+                      <span key={opt.key} className="pill" style={{ fontSize: 12 }}>
+                        {opt.label}{opt.short_label && opt.short_label !== opt.label ? ` (${opt.short_label})` : ""}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className={styles.marketMeta}>
                   <span>{market.category?.display_name ?? "未分类"}</span>
                   <span>提交于 {formatTimestamp(market.created_at)}</span>

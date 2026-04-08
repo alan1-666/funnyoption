@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { useTradingSession } from "@/components/trading-session-provider";
-import { approveVault, depositToVault, ensureTargetChain, getChainMeta, queueWithdrawal } from "@/lib/chain";
+import { approveVault, depositNativeToVault, depositToVault, ensureTargetChain, getChainMeta, queueWithdrawal } from "@/lib/chain";
 import { shortenAddress } from "@/lib/format";
 import styles from "@/components/vault-console.module.css";
 
@@ -35,6 +35,7 @@ export function VaultConsole() {
   const { wallet, session, busy, connect } = useTradingSession();
   const chain = useMemo(() => getChainMeta(), []);
   const [depositAmount, setDepositAmount] = useState("100");
+  const [nativeDepositAmount, setNativeDepositAmount] = useState("0.1");
   const [withdrawAmount, setWithdrawAmount] = useState("50");
   const [recipient, setRecipient] = useState("");
   const [status, setStatus] = useState("充值通道待命");
@@ -82,6 +83,26 @@ export function VaultConsole() {
     }
   }
 
+  async function handleNativeDeposit() {
+    if (!wallet) {
+      setStatus("请先连接钱包。");
+      return;
+    }
+    const trimmed = nativeDepositAmount.trim();
+    if (!trimmed || !/^\d+(\.\d+)?$/.test(trimmed) || Number(trimmed) <= 0) {
+      setStatus(`请输入有效的 ${chain.nativeCurrencySymbol} 金额。`);
+      return;
+    }
+    setStatus(`正在发起 ${chain.nativeCurrencySymbol} 充值交易...`);
+    try {
+      await ensureTargetChain();
+      const txHash = await depositNativeToVault(wallet.walletAddress, trimmed);
+      setStatus(`${chain.nativeCurrencySymbol} 充值已提交：${txHash}`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : `${chain.nativeCurrencySymbol} 充值失败`);
+    }
+  }
+
   async function handleWithdrawal() {
     if (!wallet) {
       setStatus("请先连接钱包。");
@@ -107,7 +128,7 @@ export function VaultConsole() {
       <div className={styles.header}>
         <div>
           <span className="eyebrow">充值与提现</span>
-          <p className={styles.copy}>流程很简单：连接钱包，授权代币，充值到 Vault，等待监听器把金额记入交易余额。</p>
+          <p className={styles.copy}>连接钱包后，可用 {chain.nativeCurrencySymbol} 一键充值（自动换算为 {chain.tokenSymbol}），或使用 {chain.tokenSymbol} 走标准授权 + 充值流程。</p>
         </div>
         <span className="pill">{wallet ? shortenAddress(wallet.walletAddress) : "钱包未连接"}</span>
       </div>
@@ -170,6 +191,28 @@ export function VaultConsole() {
             ) : null}
             <button className={styles.ghost} onClick={handleApprove}>授权</button>
             <button className={styles.button} onClick={handleDeposit}>充值</button>
+          </div>
+        </div>
+
+        <div className={styles.card}>
+          <div className={styles.cardHeader}>
+            <span className="pill">{chain.nativeCurrencySymbol} 充值</span>
+            <h3 className={styles.title}>用 {chain.nativeCurrencySymbol} 充值</h3>
+            <p className={styles.helper}>
+              直接发送 {chain.nativeCurrencySymbol}，系统通过 Chainlink 预言机实时计算等值 {chain.tokenSymbol} 并入账。无需授权，一笔交易完成。
+            </p>
+          </div>
+          <label className={styles.field}>
+            <span className={styles.label}>金额（{chain.nativeCurrencySymbol}）</span>
+            <input className={styles.input} value={nativeDepositAmount} onChange={(event) => setNativeDepositAmount(event.target.value)} inputMode="decimal" step="0.001" />
+          </label>
+          <div className={styles.actions}>
+            {!wallet ? (
+              <button className={styles.ghost} onClick={handleConnect}>
+                {busy === "connect" ? "连接中..." : "连接钱包"}
+              </button>
+            ) : null}
+            <button className={styles.button} onClick={handleNativeDeposit}>{chain.nativeCurrencySymbol} 充值</button>
           </div>
         </div>
 

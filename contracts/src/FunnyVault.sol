@@ -6,6 +6,18 @@ interface IERC20Minimal {
     function transfer(address to, uint256 value) external returns (bool);
 }
 
+interface IMintableERC20 is IERC20Minimal {
+    function mint(address to, uint256 value) external returns (bool);
+}
+
+interface AggregatorV3Interface {
+    function decimals() external view returns (uint8);
+    function latestRoundData()
+        external
+        view
+        returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound);
+}
+
 contract FunnyVault {
     struct ClaimRecord {
         address wallet;
@@ -21,7 +33,7 @@ contract FunnyVault {
         bool cancelled;
     }
 
-    IERC20Minimal public immutable collateralToken;
+    IMintableERC20 public immutable collateralToken;
     address public immutable operator;
     address public rollupCore;
 
@@ -32,6 +44,11 @@ contract FunnyVault {
 
     uint256 public timelockDelay;
     uint256 public timelockThreshold;
+
+    AggregatorV3Interface public priceFeed;
+    uint256 public fallbackNativeRate;
+    uint256 public maxOracleAge = 1 hours;
+    uint8 public constant COLLATERAL_DECIMALS = 6;
 
     uint256 private _reentrancyStatus;
     uint256 private constant _NOT_ENTERED = 1;
@@ -50,6 +67,9 @@ contract FunnyVault {
     event TimelockConfigUpdated(uint256 threshold, uint256 delay);
     event ClaimQueued(bytes32 indexed claimId, address indexed wallet, uint256 amount, address recipient, uint256 executeAfter);
     event QueuedClaimCancelled(bytes32 indexed claimId);
+    event NativePriceFeedUpdated(address indexed feed);
+    event FallbackNativeRateUpdated(uint256 rate);
+    event NativeSwept(address indexed to, uint256 amount);
 
     error OnlyOperator();
     error OnlyAuthorizedClaimer();
@@ -62,6 +82,9 @@ contract FunnyVault {
     error ClaimNotQueued();
     error ClaimCancelled();
     error ReentrantCall();
+    error NoPriceFeed();
+    error StaleOracle();
+    error NativeTransferFailed();
 
     modifier nonReentrant() {
         if (_reentrancyStatus == _ENTERED) revert ReentrantCall();
@@ -71,7 +94,7 @@ contract FunnyVault {
     }
 
     constructor(address collateralToken_, address operator_) {
-        collateralToken = IERC20Minimal(collateralToken_);
+        collateralToken = IMintableERC20(collateralToken_);
         operator = operator_;
         _reentrancyStatus = _NOT_ENTERED;
     }
@@ -94,6 +117,56 @@ contract FunnyVault {
         timelockThreshold = threshold;
         timelockDelay = delay;
         emit TimelockConfigUpdated(threshold, delay);
+    }
+
+    function setNativePriceFeed(address feed) external {
+        if (msg.sender != operator) revert OnlyOperator();
+        priceFeed = AggregatorV3Interface(feed);
+        emit NativePriceFeedUpdated(feed);
+    }
+
+    function setFallbackNativeRate(uint256 rate) external {
+        if (msg.sender != operator) revert OnlyOperator();
+        fallbackNativeRate = rate;
+        emit FallbackNativeRateUpdated(rate);
+    }
+
+    function setMaxOracleAge(uint256 age) external {
+        if (msg.sender != operator) revert OnlyOperator();
+        maxOracleAge = age;
+    }
+
+    function depositNative() external payable nonReentrant {
+        if (msg.value == 0) revert InvalidAmount();
+
+        uint256 nativePrice = _getNativePrice();
+        uint8 oracleDecimals = address(priceFeed) != address(0) ? priceFeed.decimals() : 8;
+        // nativePrice has oracleDecimals precision, msg.value has 18 decimals, collateral has COLLATERAL_DECIMALS
+        uint256 usdtAmount = (msg.value * nativePrice) / (10 ** (18 + oracleDecimals - COLLATERAL_DECIMALS));
+        if (usdtAmount == 0) revert InvalidAmount();
+
+        require(collateralToken.mint(address(this), usdtAmount), "MINT_FAILED");
+        depositedBalance[msg.sender] += usdtAmount;
+        emit Deposited(msg.sender, usdtAmount);
+    }
+
+    function withdrawNative(address payable to, uint256 amount) external {
+        if (msg.sender != operator) revert OnlyOperator();
+        if (amount == 0) revert InvalidAmount();
+        (bool ok,) = to.call{value: amount}("");
+        if (!ok) revert NativeTransferFailed();
+        emit NativeSwept(to, amount);
+    }
+
+    function _getNativePrice() internal view returns (uint256) {
+        if (address(priceFeed) != address(0)) {
+            (, int256 answer,, uint256 updatedAt,) = priceFeed.latestRoundData();
+            if (answer > 0 && (maxOracleAge == 0 || block.timestamp - updatedAt <= maxOracleAge)) {
+                return uint256(answer);
+            }
+        }
+        if (fallbackNativeRate > 0) return fallbackNativeRate;
+        revert NoPriceFeed();
     }
 
     function deposit(uint256 amount) external nonReentrant {

@@ -186,6 +186,7 @@ export FUNNYOPTION_ROLLUP_BATCH_LIMIT='256'
 export FUNNYOPTION_ROLLUP_FORCED_WITHDRAWAL_GRACE_PERIOD='${FUNNYOPTION_LOCAL_CHAIN_FORCED_WITHDRAWAL_GRACE_PERIOD}'
 export FUNNYOPTION_CHAIN_GAS_LIMIT='250000'
 export FUNNYOPTION_COLLATERAL_TOKEN_ADDRESS='${TOKEN_ADDRESS}'
+export FUNNYOPTION_PRICE_FEED_ADDRESS='${PRICE_FEED_ADDRESS}'
 export FUNNYOPTION_ROLLUP_CORE_ADDRESS='${ROLLUP_CORE_ADDRESS}'
 export FUNNYOPTION_ROLLUP_VERIFIER_ADDRESS='${ROLLUP_VERIFIER_ADDRESS}'
 export FUNNYOPTION_COLLATERAL_SYMBOL='USDT'
@@ -261,12 +262,14 @@ MAKER_ADDRESS="$(cast wallet address --private-key "${MAKER_PRIVATE_KEY}" | tr '
 
 TOKEN_ADDRESS=""
 VAULT_ADDRESS=""
+PRICE_FEED_ADDRESS=""
 ROLLUP_CORE_ADDRESS=""
 ROLLUP_VERIFIER_ADDRESS=""
 EXISTING_START_BLOCK=""
 if [[ -f "${LOCAL_CHAIN_ENV}" ]]; then
   TOKEN_ADDRESS="$(read_env_value "${LOCAL_CHAIN_ENV}" "FUNNYOPTION_COLLATERAL_TOKEN_ADDRESS")"
   VAULT_ADDRESS="$(read_env_value "${LOCAL_CHAIN_ENV}" "FUNNYOPTION_VAULT_ADDRESS")"
+  PRICE_FEED_ADDRESS="$(read_env_value "${LOCAL_CHAIN_ENV}" "FUNNYOPTION_PRICE_FEED_ADDRESS")"
   ROLLUP_CORE_ADDRESS="$(read_env_value "${LOCAL_CHAIN_ENV}" "FUNNYOPTION_ROLLUP_CORE_ADDRESS")"
   ROLLUP_VERIFIER_ADDRESS="$(read_env_value "${LOCAL_CHAIN_ENV}" "FUNNYOPTION_ROLLUP_VERIFIER_ADDRESS")"
   EXISTING_START_BLOCK="$(read_env_value "${LOCAL_CHAIN_ENV}" "FUNNYOPTION_CHAIN_START_BLOCK")"
@@ -285,6 +288,15 @@ if ! contract_exists "${TOKEN_ADDRESS}" || ! contract_exists "${VAULT_ADDRESS}";
   mint_token "${OPERATOR_ADDRESS}" "500000000000"
   mint_token "${BUYER_ADDRESS}" "500000000000"
   mint_token "${MAKER_ADDRESS}" "500000000000"
+
+  # Deploy MockPriceFeed (8 decimals, initial price 600 USD = 60000000000)
+  PRICE_FEED_ADDRESS="$(deploy_contract "src/MockPriceFeed.sol:MockPriceFeed" --constructor-args 8 60000000000)"
+
+  # Configure vault for native deposits: grant minter role, set price feed and fallback rate
+  cast send --rpc-url "${RPC_URL}" --private-key "${OPERATOR_PRIVATE_KEY}" "${TOKEN_ADDRESS}" "addMinter(address)" "${VAULT_ADDRESS}" >/dev/null
+  cast send --rpc-url "${RPC_URL}" --private-key "${OPERATOR_PRIVATE_KEY}" "${VAULT_ADDRESS}" "setNativePriceFeed(address)" "${PRICE_FEED_ADDRESS}" >/dev/null
+  cast send --rpc-url "${RPC_URL}" --private-key "${OPERATOR_PRIVATE_KEY}" "${VAULT_ADDRESS}" "setFallbackNativeRate(uint256)" "60000000000" >/dev/null
+  cast send --rpc-url "${RPC_URL}" --private-key "${OPERATOR_PRIVATE_KEY}" "${VAULT_ADDRESS}" "setMaxOracleAge(uint256)" "0" >/dev/null
 fi
 
 if ! contract_exists "${ROLLUP_CORE_ADDRESS}" || ! contract_exists "${ROLLUP_VERIFIER_ADDRESS}" || ! rollup_core_supports_forced_withdrawal "${ROLLUP_CORE_ADDRESS}"; then
@@ -320,6 +332,7 @@ local anvil chain is ready.
 - chain_id: ${FUNNYOPTION_LOCAL_CHAIN_CHAIN_ID}
 - token: ${TOKEN_ADDRESS}
 - vault: ${VAULT_ADDRESS}
+- price_feed: ${PRICE_FEED_ADDRESS}
 - rollup_core: ${ROLLUP_CORE_ADDRESS}
 - rollup_verifier: ${ROLLUP_VERIFIER_ADDRESS}
 - operator wallet: ${OPERATOR_ADDRESS}

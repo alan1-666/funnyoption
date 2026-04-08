@@ -11,11 +11,14 @@ contract MockUSDT {
 
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
+    mapping(address => bool) public minters;
 
     event Transfer(address indexed from, address indexed to, uint256 value);
     event Approval(address indexed owner, address indexed spender, uint256 value);
+    event MinterUpdated(address indexed minter, bool allowed);
 
     error OnlyOwner();
+    error OnlyMinter();
     error InvalidReceiver();
     error InsufficientBalance();
     error InsufficientAllowance();
@@ -24,8 +27,20 @@ contract MockUSDT {
         owner = msg.sender;
     }
 
-    function mint(address to, uint256 value) external returns (bool) {
+    function addMinter(address minter) external {
         if (msg.sender != owner) revert OnlyOwner();
+        minters[minter] = true;
+        emit MinterUpdated(minter, true);
+    }
+
+    function removeMinter(address minter) external {
+        if (msg.sender != owner) revert OnlyOwner();
+        minters[minter] = false;
+        emit MinterUpdated(minter, false);
+    }
+
+    function mint(address to, uint256 value) external returns (bool) {
+        if (msg.sender != owner && !minters[msg.sender]) revert OnlyMinter();
         if (to == address(0)) revert InvalidReceiver();
 
         totalSupply += value;

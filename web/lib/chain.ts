@@ -1,4 +1,4 @@
-import { encodeFunctionData, erc20Abi, keccak256, parseUnits, stringToHex } from "viem";
+import { encodeFunctionData, erc20Abi, keccak256, numberToHex, parseEther, parseUnits, stringToHex } from "viem";
 
 const TARGET_CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "97");
 const TARGET_CHAIN_NAME = process.env.NEXT_PUBLIC_CHAIN_NAME ?? "BSC Testnet";
@@ -18,6 +18,13 @@ const vaultAbi = [
     name: "deposit",
     outputs: [],
     stateMutability: "nonpayable",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "depositNative",
+    outputs: [],
+    stateMutability: "payable",
     type: "function"
   },
   {
@@ -63,7 +70,10 @@ export function getChainMeta() {
     tokenAddress: TARGET_COLLATERAL_TOKEN_ADDRESS,
     tokenSymbol: TARGET_COLLATERAL_SYMBOL,
     tokenDecimals: TARGET_COLLATERAL_DECIMALS,
-    explorerUrl: TARGET_EXPLORER_URL
+    explorerUrl: TARGET_EXPLORER_URL,
+    nativeCurrencyName: TARGET_NATIVE_CURRENCY_NAME,
+    nativeCurrencySymbol: TARGET_NATIVE_CURRENCY_SYMBOL,
+    nativeCurrencyDecimals: TARGET_NATIVE_CURRENCY_DECIMALS
   };
 }
 
@@ -147,6 +157,27 @@ export async function depositToVault(walletAddress: string, amount: string) {
         from: walletAddress,
         to: TARGET_VAULT_ADDRESS,
         data
+      }
+    ]
+  })) as string;
+}
+
+export async function depositNativeToVault(walletAddress: string, nativeAmount: string) {
+  ensureConfigured();
+  const ethereum = ensureEthereum();
+  const data = encodeFunctionData({
+    abi: vaultAbi,
+    functionName: "depositNative"
+  });
+
+  return (await ethereum.request({
+    method: "eth_sendTransaction",
+    params: [
+      {
+        from: walletAddress,
+        to: TARGET_VAULT_ADDRESS,
+        data,
+        value: numberToHex(parseEther(nativeAmount))
       }
     ]
   })) as string;

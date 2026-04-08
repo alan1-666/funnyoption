@@ -255,6 +255,49 @@
   color: #ffffff;
 }
 
+.orderTypeSwitch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.orderTypeButton,
+.orderTypeActive {
+  min-height: 36px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.orderTypeButton:hover {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.orderTypeActive {
+  background: rgba(92, 115, 255, 0.18);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.inputFieldFull {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+
 .inlineSummary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

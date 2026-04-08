@@ -14,7 +14,8 @@ import {
   getPayoutsRead,
   getPositionsRead,
   getProfileRead,
-  getUserProposalsRead
+  getUserProposalsRead,
+  setApiSessionId
 } from "@/lib/api";
 import { formatAssetAmount, formatTimestamp, formatToken } from "@/lib/format";
 import { presentMarketTitle } from "@/lib/market-display";
@@ -176,7 +177,7 @@ export function PortfolioShell({
   });
 
   useEffect(() => {
-    if (!sessionUserId) {
+    if (!sessionUserId || !session?.sessionId) {
       setPortfolioSyncing(false);
       setBalancesResult(toCollectionResult([]));
       setPositionsResult(toCollectionResult([]));
@@ -199,6 +200,10 @@ export function PortfolioShell({
     setProfileResult(toProfileResult(null));
     setPendingClaim({});
     setClaimStatus({});
+
+    // Ensure the module-level session ID is set before fetching,
+    // because parent useEffect (setApiSessionId) runs after child effects.
+    setApiSessionId(session.sessionId);
 
     void Promise.all([
       getBalancesRead(sessionUserId, { ensureAsset: COLLATERAL_SYMBOL }),
@@ -225,7 +230,7 @@ export function PortfolioShell({
     return () => {
       cancelled = true;
     };
-  }, [sessionUserId]);
+  }, [sessionUserId, session?.sessionId]);
 
   useEffect(() => {
     if (!copiedWallet) {

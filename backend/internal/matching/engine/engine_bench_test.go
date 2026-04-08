@@ -114,3 +114,89 @@ func BenchmarkAddOrder_Fresh(b *testing.B) {
 		books[i].AddOrder(orders[i])
 	}
 }
+
+// IOC order (replaces MARKET): BUY IOC@99 sweeps the book just like MARKET did.
+func BenchmarkMatch_IOC_SweepBook(b *testing.B) {
+	eng := New(benchLogger)
+	for p := int64(1); p <= 50; p++ {
+		for j := 0; j < 10; j++ {
+			eng.PlaceOrder(mkOrder(fmt.Sprintf("a-%d-%d", p, j), int64(j+1), 1, "YES", model.OrderSideSell, p, 1_000_000_000))
+		}
+	}
+	orders := make([]*model.Order, b.N)
+	for i := range orders {
+		orders[i] = &model.Order{
+			OrderID: fmt.Sprintf("ioc-%d", i), UserID: 999, MarketID: 1, Outcome: "YES",
+			Side: model.OrderSideBuy, Type: model.OrderTypeLimit, TimeInForce: model.TimeInForceIOC,
+			Price: 99, Quantity: 1,
+		}
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		eng.PlaceOrder(orders[i])
+	}
+}
+
+// Multi-book: orders spread across 100 independent books.
+func BenchmarkPlaceOrder_MultiBook100(b *testing.B) {
+	eng := New(benchLogger)
+	for m := int64(1); m <= 100; m++ {
+		eng.PlaceOrder(mkOrder(fmt.Sprintf("seed-%d", m), 1, m, "YES", model.OrderSideSell, 50, 1_000_000_000))
+	}
+	orders := make([]*model.Order, b.N)
+	for i := range orders {
+		m := int64(i%100) + 1
+		orders[i] = mkOrder(fmt.Sprintf("t-%d", i), 999, m, "YES", model.OrderSideBuy, 50, 1)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		eng.PlaceOrder(orders[i])
+	}
+}
+
+// Cancel resting orders.
+func BenchmarkCancelOrders(b *testing.B) {
+	eng := New(benchLogger)
+	orders := make([]*model.Order, b.N)
+	for i := range orders {
+		o := mkOrder(fmt.Sprintf("r-%d", i), 1, 1, "YES", model.OrderSideBuy, 50, 10)
+		eng.PlaceOrder(o)
+		orders[i] = o
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		eng.CancelOrders([]*model.Order{orders[i]}, model.CancelReasonMarketClosed)
+	}
+}
+
+// Interleaved add+match: alternating maker SELL then taker BUY, single book.
+func BenchmarkMatch_InterleavedAddMatch(b *testing.B) {
+	eng := New(benchLogger)
+	makers := make([]*model.Order, b.N)
+	takers := make([]*model.Order, b.N)
+	for i := 0; i < b.N; i++ {
+		makers[i] = mkOrder(fmt.Sprintf("mk-%d", i), int64(i%500)+1, 1, "YES", model.OrderSideSell, 50, 10)
+		takers[i] = mkOrder(fmt.Sprintf("tk-%d", i), int64(i%500)+501, 1, "YES", model.OrderSideBuy, 50, 10)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		eng.PlaceOrder(makers[i])
+		eng.PlaceOrder(takers[i])
+	}
+}
+
+// STP (self-trade prevention): taker and maker share same userID — engine skips.
+func BenchmarkMatch_STPSkip(b *testing.B) {
+	eng := New(benchLogger)
+	for j := 0; j < 100; j++ {
+		eng.PlaceOrder(mkOrder(fmt.Sprintf("self-ask-%d", j), 999, 1, "YES", model.OrderSideSell, 50, 1_000_000_000))
+	}
+	orders := make([]*model.Order, b.N)
+	for i := range orders {
+		orders[i] = mkOrder(fmt.Sprintf("self-bid-%d", i), 999, 1, "YES", model.OrderSideBuy, 50, 1)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		eng.PlaceOrder(orders[i])
+	}
+}

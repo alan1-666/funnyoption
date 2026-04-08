@@ -25,3 +25,4 @@ deploy/staging/.env.staging
 backend/matching
 web/playwright-report/
 web/test-results/
+*.md

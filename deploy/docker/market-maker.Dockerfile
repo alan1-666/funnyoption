@@ -18,11 +18,15 @@ ARG TARGETARCH=amd64
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags="-s -w" -o /out/market-maker ./cmd/market-maker
+    go build -ldflags="-s -w" -o /out/market-maker ./cmd/market-maker && \
+    go build -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck
 
 FROM gcr.io/distroless/base-debian12:nonroot
 
 WORKDIR /app
 COPY --from=builder /out/market-maker /app/market-maker
+COPY --from=builder /out/healthcheck /app/healthcheck
+
+EXPOSE 8097
 
 ENTRYPOINT ["/app/market-maker"]

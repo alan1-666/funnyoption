@@ -1,4 +1,5 @@
 import { LiveMarketPanel } from "@/components/live-market-panel";
+import { LiveOutcomePrice } from "@/components/live-outcome-price";
 import { OrderTicket } from "@/components/order-ticket";
 import { ShellTopBar } from "@/components/shell-top-bar";
 import { formatAssetAmount, formatTimestamp } from "@/lib/format";
@@ -155,7 +156,9 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ m
                     <article className={styles.outcomeCard}>
                       <span className={styles.outcomeRole}>结果一</span>
                       <strong>{zhOutcome("YES")}</strong>
-                      <div className={styles.outcomePrice}>{yesPrice}%</div>
+                      <div className={styles.outcomePrice}>
+                        <LiveOutcomePrice marketId={market.market_id} outcome="YES" fallback={yesPrice} />
+                      </div>
                     </article>
 
                     <div className={styles.outcomeDivider}>
@@ -179,7 +182,9 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ m
                     <article className={styles.outcomeCard}>
                       <span className={styles.outcomeRole}>结果二</span>
                       <strong>{zhOutcome("NO")}</strong>
-                      <div className={styles.outcomePrice}>{noPrice}%</div>
+                      <div className={styles.outcomePrice}>
+                        <LiveOutcomePrice marketId={market.market_id} outcome="NO" fallback={noPrice} />
+                      </div>
                     </article>
                   </div>
                 </section>

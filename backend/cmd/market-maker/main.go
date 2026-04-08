@@ -8,6 +8,7 @@ import (
 
 	"funnyoption/internal/marketmaker"
 	"funnyoption/internal/shared/config"
+	"funnyoption/internal/shared/health"
 	sharedkafka "funnyoption/internal/shared/kafka"
 	"funnyoption/internal/shared/logger"
 )
@@ -54,6 +55,8 @@ func main() {
 	)
 	orderConsumer.Start(ctx)
 	defer orderConsumer.Close()
+
+	health.ListenAndServe(ctx, appLogger, svcCfg.HTTPAddr, svcCfg.Name, svcCfg.Env)
 
 	appLogger.Info("market-maker service started",
 		"api_url", mmCfg.APIURL,

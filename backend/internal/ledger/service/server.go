@@ -7,6 +7,7 @@ import (
 	"funnyoption/internal/shared/config"
 	shareddb "funnyoption/internal/shared/db"
 	"funnyoption/internal/shared/grpcx"
+	"funnyoption/internal/shared/health"
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
 
@@ -61,6 +62,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	)
 	withdrawalConsumer.Start(ctx)
 	defer withdrawalConsumer.Close()
+
+	health.ListenAndServe(ctx, logger, cfg.HTTPAddr, cfg.Name, cfg.Env)
 
 	logger.Info(
 		"ledger service bootstrapped",

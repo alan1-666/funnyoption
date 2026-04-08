@@ -10,6 +10,7 @@ import (
 
 	"funnyoption/internal/shared/config"
 	shareddb "funnyoption/internal/shared/db"
+	"funnyoption/internal/shared/health"
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
 
@@ -58,10 +59,13 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	marketConsumer.Start(ctx)
 	defer marketConsumer.Close()
 
+	health.ListenAndServe(ctx, logger, cfg.HTTPAddr, cfg.Name, cfg.Env)
+
 	logger.Info("notification service started",
 		"trade_topic", cfg.KafkaTopics.TradeMatched,
 		"settlement_topic", cfg.KafkaTopics.SettlementDone,
 		"market_topic", cfg.KafkaTopics.MarketEvent,
+		"health_addr", cfg.HTTPAddr,
 	)
 
 	<-ctx.Done()

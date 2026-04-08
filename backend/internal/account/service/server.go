@@ -8,6 +8,7 @@ import (
 	"funnyoption/internal/shared/config"
 	shareddb "funnyoption/internal/shared/db"
 	"funnyoption/internal/shared/grpcx"
+	"funnyoption/internal/shared/health"
 	sharedkafka "funnyoption/internal/shared/kafka"
 
 	"google.golang.org/grpc"
@@ -62,6 +63,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	)
 	settlementConsumer.Start(ctx)
 	defer settlementConsumer.Close()
+
+	health.ListenAndServe(ctx, logger, cfg.HTTPAddr, cfg.Name, cfg.Env)
 
 	logger.Info(
 		"account service bootstrapped",

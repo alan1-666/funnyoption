@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { useTradingSession } from "@/components/trading-session-provider";
+import { useTicker } from "@/hooks/use-ticker";
 import { authenticatedFetch } from "@/lib/api";
 import { formatAssetAmount, formatToken } from "@/lib/format";
 import { zhMarketStatus, zhOutcome } from "@/lib/locale";
@@ -20,8 +21,19 @@ function readOutcomePrice(market: Market, outcome: "YES" | "NO") {
   return Math.round(Number(metadata.noOdds ?? (market.runtime.last_price_no ? market.runtime.last_price_no / 100 : 0.5)) * 100);
 }
 
+function livePriceOrFallback(liveSnap: { lastPrice: number; bestBid: number; bestAsk: number } | null, fallback: number) {
+  if (liveSnap) {
+    if (liveSnap.lastPrice > 0) return liveSnap.lastPrice;
+    if (liveSnap.bestBid > 0 && liveSnap.bestAsk > 0) return Math.round((liveSnap.bestBid + liveSnap.bestAsk) / 2);
+    if (liveSnap.bestBid > 0) return liveSnap.bestBid;
+    if (liveSnap.bestAsk > 0) return liveSnap.bestAsk;
+  }
+  return fallback;
+}
+
 export function OrderTicket({ market }: { market: Market }) {
   const { wallet, session, connect, createSession, signOrder, commitOrderNonce, statusMessage } = useTradingSession();
+  const ticker = useTicker(market.market_id);
   const [side, setSide] = useState<"BUY_YES" | "BUY_NO">("BUY_YES");
   const [orderType, setOrderType] = useState<"LIMIT" | "MARKET">("LIMIT");
   const [price, setPrice] = useState(() => readOutcomePrice(market, "YES"));
@@ -29,8 +41,10 @@ export function OrderTicket({ market }: { market: Market }) {
   const [status, setStatus] = useState("");
 
   const outcome = side === "BUY_YES" ? "YES" : "NO";
-  const yesPrice = readOutcomePrice(market, "YES");
-  const noPrice = readOutcomePrice(market, "NO");
+  const ssrYesPrice = readOutcomePrice(market, "YES");
+  const ssrNoPrice = readOutcomePrice(market, "NO");
+  const yesPrice = livePriceOrFallback(ticker.yes, ssrYesPrice);
+  const noPrice = livePriceOrFallback(ticker.no, ssrNoPrice);
   const isMarketOrder = orderType === "MARKET";
   const effectivePrice = isMarketOrder ? 100 : price;
   const freeze = useMemo(() => Math.max(effectivePrice, 0) * Math.max(quantity, 0), [effectivePrice, quantity]);

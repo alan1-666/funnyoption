@@ -160,6 +160,18 @@ func defaultHTTPAddr(serviceName string) string {
 		return ":8080"
 	case "ws":
 		return ":8081"
+	case "account":
+		return ":8091"
+	case "settlement":
+		return ":8093"
+	case "chain":
+		return ":8094"
+	case "ledger":
+		return ":8095"
+	case "notification":
+		return ":8096"
+	case "market-maker":
+		return ":8097"
 	default:
 		return ""
 	}

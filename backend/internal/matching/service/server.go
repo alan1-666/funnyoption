@@ -115,6 +115,11 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 func startSnapshotHTTP(ctx context.Context, logger *slog.Logger, pipe *pipeline.Pipeline, epochMgr *ha.EpochManager, roleMgr *ha.RoleManager) {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "matching"})
+	})
+
 	mux.HandleFunc("/ha/snapshot", func(w http.ResponseWriter, r *http.Request) {
 		snap := pipe.TakeSnapshot()
 		snap.EpochID = epochMgr.Current()

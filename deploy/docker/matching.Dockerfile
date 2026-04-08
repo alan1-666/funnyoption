@@ -18,13 +18,15 @@ ARG TARGETARCH=amd64
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags="-s -w" -o /out/matching ./cmd/matching
+    go build -ldflags="-s -w" -o /out/matching ./cmd/matching && \
+    go build -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck
 
 FROM gcr.io/distroless/base-debian12:nonroot
 
 WORKDIR /app
 COPY --from=builder /out/matching /app/matching
+COPY --from=builder /out/healthcheck /app/healthcheck
 
-EXPOSE 9090
+EXPOSE 9090 9190
 
 ENTRYPOINT ["/app/matching"]

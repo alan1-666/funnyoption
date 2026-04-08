@@ -1276,9 +1276,9 @@ func (s *Store) ReprepareFailedSubmission(ctx context.Context, batchID int64) (S
 	return s.updateSubmissionRuntime(ctx, submissionID, `
 		UPDATE rollup_shadow_submissions
 		SET status = $2,
-		    accept_tx_hash = NULL,
-		    last_error = NULL,
-		    last_error_at = NULL,
+		    accept_tx_hash = '',
+		    last_error = '',
+		    last_error_at = 0,
 		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
 		WHERE submission_id = $1
 		RETURNING `+submissionSelectColumns, resumeStatus)

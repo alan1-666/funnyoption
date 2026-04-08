@@ -13,12 +13,6 @@ import (
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
 
-type stubTradableChecker struct{}
-
-func (s *stubTradableChecker) MarketIsTradable(_ context.Context, _ int64) (bool, error) {
-	return true, nil
-}
-
 type capturePersistStore struct {
 	results []engine.Result
 }

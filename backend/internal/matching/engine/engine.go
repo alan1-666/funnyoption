@@ -330,18 +330,16 @@ func (e *Engine) PlaceOrder(order *model.Order) (Result, error) {
 	book := e.getOrCreateBook(order.BookKey())
 	if book.HasOrder(order.OrderID) {
 		order.Reject(model.CancelReasonValidationFailed)
-		return Result{Order: order}, fmt.Errorf("duplicate order id: %s", order.OrderID)
+		return Result{Order: order}, fmt.Errorf("assert: duplicate order id: %s", order.OrderID)
 	}
 
 	result := Result{Order: order}
 	switch order.Type {
 	case model.OrderTypeLimit:
 		result.Trades, result.Affected = e.processLimitOrder(order, book)
-	case model.OrderTypeMarket:
-		result.Trades, result.Affected = e.processMarketOrder(order, book)
 	default:
 		order.Reject(model.CancelReasonValidationFailed)
-		return Result{Order: order}, fmt.Errorf("unsupported order type: %s", order.Type)
+		return Result{Order: order}, fmt.Errorf("assert: unsupported order type: %s (MARKET should be converted upstream to LIMIT IOC)", order.Type)
 	}
 	result.Book = book.Snapshot(5)
 
@@ -353,7 +351,7 @@ func (e *Engine) CancelOrders(orders []*model.Order, reason model.CancelReason) 
 		return CancelResult{}, nil
 	}
 	if reason == "" {
-		reason = model.CancelReasonMarketClosed
+		return CancelResult{}, fmt.Errorf("assert: cancel reason is required")
 	}
 
 	nowMillis := time.Now().UnixMilli()
@@ -428,14 +426,6 @@ func (e *Engine) processLimitOrder(order *model.Order, book *model.OrderBookDire
 	return trades, affected
 }
 
-func (e *Engine) processMarketOrder(order *model.Order, book *model.OrderBookDirect) ([]model.Trade, []*model.Order) {
-	trades, affected := e.match(order, book)
-	if order.RemainingQuantity() > 0 {
-		order.Cancel(model.CancelReasonMarketNoLiquidity)
-	}
-	return trades, affected
-}
-
 func (e *Engine) match(order *model.Order, book *model.OrderBookDirect) ([]model.Trade, []*model.Order) {
 	if !book.IsCross(order) {
 		return nil, nil
@@ -448,7 +438,7 @@ func (e *Engine) match(order *model.Order, book *model.OrderBookDirect) ([]model
 	if order.IsBuy() {
 		bucket := book.FirstAskBucket()
 		for bucket != nil && order.RemainingQuantity() > 0 {
-			if !order.IsMarket() && order.Price < bucket.Price {
+			if order.Price < bucket.Price {
 				break
 			}
 			maker := bucket.Head
@@ -494,7 +484,7 @@ func (e *Engine) match(order *model.Order, book *model.OrderBookDirect) ([]model
 	} else {
 		bucket := book.FirstBidBucket()
 		for bucket != nil && order.RemainingQuantity() > 0 {
-			if !order.IsMarket() && order.Price > bucket.Price {
+			if order.Price > bucket.Price {
 				break
 			}
 			maker := bucket.Head

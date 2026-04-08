@@ -12,6 +12,7 @@ type OrderCommand struct {
 	UserID            int64  `json:"user_id"`
 	MarketID          int64  `json:"market_id"`
 	Outcome           string `json:"outcome"`
+	BookKey           string `json:"book_key,omitempty"`
 	Side              string `json:"side"`
 	Type              string `json:"type"`
 	TimeInForce       string `json:"time_in_force"`

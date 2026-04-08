@@ -42,7 +42,6 @@ func New(
 	logger *slog.Logger,
 	brokers []string,
 	topic, groupID string,
-	tradableStore TradableChecker,
 	persistStore PersistStore,
 	publisher sharedkafka.Publisher,
 	topics sharedkafka.Topics,
@@ -54,7 +53,7 @@ func New(
 	cfg = cfg.withDefaults()
 
 	supervisor := NewBookSupervisor(logger, epoch)
-	gateway := NewInputGateway(logger, brokers, topic, groupID, supervisor, tradableStore)
+	gateway := NewInputGateway(logger, brokers, topic, groupID, supervisor)
 	dispatcher := NewOutputDispatcher(logger, supervisor.OutputCh(), publisher, topics, persistStore, candles, feeSched)
 
 	return &Pipeline{

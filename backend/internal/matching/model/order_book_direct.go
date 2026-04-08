@@ -135,9 +135,6 @@ func (ob *OrderBookDirect) BestAskPrice() (int64, bool) {
 }
 
 func (ob *OrderBookDirect) IsCross(order *Order) bool {
-	if order.IsMarket() {
-		return true
-	}
 	if order.IsBuy() {
 		if ob.bestAsk == 0 {
 			return false
@@ -151,9 +148,6 @@ func (ob *OrderBookDirect) IsCross(order *Order) bool {
 }
 
 func (ob *OrderBookDirect) IsCrossWithPrice(order *Order, price int64) bool {
-	if order.IsMarket() {
-		return true
-	}
 	if order.IsBuy() {
 		return order.Price >= price
 	}

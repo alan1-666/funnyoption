@@ -139,6 +139,7 @@ func (c *MatchCommand) ToKafkaCommand() sharedkafka.OrderCommand {
 		UserID:            c.UserID,
 		MarketID:          c.MarketID,
 		Outcome:           c.Outcome,
+		BookKey:           c.BookKey,
 		Side:              string(c.Side.ToModel()),
 		Type:              string(c.Type.ToModel()),
 		TimeInForce:       string(c.TimeInForce.ToModel()),
@@ -149,7 +150,13 @@ func (c *MatchCommand) ToKafkaCommand() sharedkafka.OrderCommand {
 }
 
 // CommandFromKafka converts a decoded Kafka message into a MatchCommand.
+// If the upstream OrderService has pre-computed BookKey, it is used directly;
+// otherwise we fall back to computing it (backward compatibility).
 func CommandFromKafka(cmd sharedkafka.OrderCommand) MatchCommand {
+	bookKey := cmd.BookKey
+	if bookKey == "" {
+		bookKey = model.BuildBookKey(cmd.MarketID, cmd.Outcome)
+	}
 	return MatchCommand{
 		Action:            ActionPlace,
 		UserID:            cmd.UserID,
@@ -161,7 +168,7 @@ func CommandFromKafka(cmd sharedkafka.OrderCommand) MatchCommand {
 		OrderID:           cmd.OrderID,
 		ClientOrderID:     cmd.ClientOrderID,
 		Outcome:           cmd.Outcome,
-		BookKey:           model.BuildBookKey(cmd.MarketID, cmd.Outcome),
+		BookKey:           bookKey,
 		CommandID:         cmd.CommandID,
 		TraceID:           cmd.TraceID,
 		FreezeID:          cmd.FreezeID,
@@ -185,7 +192,7 @@ func (f CancelReasonFlag) ToModel() model.CancelReason {
 	case CancelReasonMarketClosed:
 		return model.CancelReasonMarketClosed
 	default:
-		return model.CancelReasonMarketClosed
+		return model.CancelReasonNone
 	}
 }
 

@@ -52,7 +52,6 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 		cfg.KafkaTopics.OrderCommand,
 		"funnyoption-matching",
 		cachedStore,
-		cachedStore,
 		publisher,
 		cfg.KafkaTopics,
 		feeSched,

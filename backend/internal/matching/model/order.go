@@ -20,33 +20,20 @@ type Order struct {
 	UpdatedAtMillis int64
 }
 
+// Validate is a lightweight assert-guard for invariants that should have been
+// enforced upstream (in the OrderService). It is intentionally minimal so the
+// engine hot path stays fast; upstream validation catches user-facing errors.
+// The engine only accepts LIMIT orders; MARKET orders are converted to
+// LIMIT IOC upstream.
 func (o *Order) Validate() error {
 	if o.OrderID == "" {
-		return fmt.Errorf("order_id is required")
-	}
-	if o.MarketID <= 0 {
-		return fmt.Errorf("market_id must be positive")
-	}
-	if stringsTrim(o.Outcome) == "" {
-		return fmt.Errorf("outcome is required")
-	}
-	if !o.Side.IsValid() {
-		return fmt.Errorf("invalid side: %s", o.Side)
-	}
-	if !o.Type.IsValid() {
-		return fmt.Errorf("invalid type: %s", o.Type)
-	}
-	if !o.TimeInForce.IsValid() {
-		return fmt.Errorf("invalid tif: %s", o.TimeInForce)
+		return fmt.Errorf("assert: order_id is required")
 	}
 	if o.Quantity <= 0 {
-		return fmt.Errorf("quantity must be positive")
+		return fmt.Errorf("assert: quantity must be positive")
 	}
-	if o.Type == OrderTypeLimit && (o.Price < 1 || o.Price > 99) {
-		return fmt.Errorf("limit order price must be between 1 and 99")
-	}
-	if o.Type == OrderTypeMarket && o.Price != 0 {
-		return fmt.Errorf("market order price must be zero")
+	if o.Price < 1 || o.Price > 99 {
+		return fmt.Errorf("assert: price out of range [1, 99]")
 	}
 	return nil
 }
@@ -100,12 +87,3 @@ func (o *Order) Reject(reason CancelReason) {
 	o.Status = OrderStatusRejected
 }
 
-func stringsTrim(value string) string {
-	var trimmed []rune
-	for _, r := range value {
-		if r != ' ' && r != '\t' && r != '\n' && r != '\r' {
-			trimmed = append(trimmed, r)
-		}
-	}
-	return string(trimmed)
-}

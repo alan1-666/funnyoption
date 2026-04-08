@@ -21,32 +21,42 @@ type MarketStore interface {
 	GetRollupFreezeState(ctx context.Context) (dto.RollupFreezeStateResponse, error)
 }
 
+// OrderExistenceChecker is an optional interface for upstream duplicate-order
+// detection. When set, the OrderService rejects client-supplied OrderIDs that
+// already exist before publishing to Kafka.
+type OrderExistenceChecker interface {
+	OrderExists(ctx context.Context, orderID string) (bool, error)
+}
+
 // Dependencies bundles everything the OrderService requires.
 type Dependencies struct {
-	Logger    *slog.Logger
-	Account   accountclient.AccountClient
-	Publisher sharedkafka.Publisher
-	Topics    sharedkafka.Topics
-	Store     MarketStore
+	Logger     *slog.Logger
+	Account    accountclient.AccountClient
+	Publisher  sharedkafka.Publisher
+	Topics     sharedkafka.Topics
+	Store      MarketStore
+	DedupCheck OrderExistenceChecker // optional; nil skips dedup
 }
 
 // Service encapsulates the core order-submission workflow independent of any
 // transport layer (HTTP, gRPC, FIX, etc.).
 type Service struct {
-	logger    *slog.Logger
-	account   accountclient.AccountClient
-	publisher sharedkafka.Publisher
-	topics    sharedkafka.Topics
-	store     MarketStore
+	logger     *slog.Logger
+	account    accountclient.AccountClient
+	publisher  sharedkafka.Publisher
+	topics     sharedkafka.Topics
+	store      MarketStore
+	dedupCheck OrderExistenceChecker
 }
 
 func NewService(deps Dependencies) *Service {
 	return &Service{
-		logger:    deps.Logger,
-		account:   deps.Account,
-		publisher: deps.Publisher,
-		topics:    deps.Topics,
-		store:     deps.Store,
+		logger:     deps.Logger,
+		account:    deps.Account,
+		publisher:  deps.Publisher,
+		topics:     deps.Topics,
+		store:      deps.Store,
+		dedupCheck: deps.DedupCheck,
 	}
 }
 
@@ -61,6 +71,9 @@ func (s *Service) SubmitOrder(ctx context.Context, req SubmitRequest) (*SubmitRe
 
 	if req.MarketID <= 0 || req.Quantity <= 0 || req.UserID <= 0 {
 		return nil, fmt.Errorf("%w: market_id, quantity, and user_id must be positive", ErrValidationFailed)
+	}
+	if err := ValidateOrderFields(outcome, side, orderType, tif, req.Price, req.Quantity); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrValidationFailed, err)
 	}
 
 	if err := s.requireRollupNotFrozen(ctx); err != nil {
@@ -81,11 +94,21 @@ func (s *Service) SubmitOrder(ctx context.Context, req SubmitRequest) (*SubmitRe
 	}
 
 	orderID := req.OrderID
+	clientSuppliedID := orderID != ""
 	if orderID == "" {
 		orderID = sharedkafka.NewID("ord")
 	}
 	commandID := sharedkafka.NewID("cmd")
 	bookKey := fmt.Sprintf("%d:%s", req.MarketID, outcome)
+
+	if clientSuppliedID && s.dedupCheck != nil {
+		exists, err := s.dedupCheck.OrderExists(ctx, orderID)
+		if err != nil {
+			s.logger.Warn("dedup check failed, proceeding", "order_id", orderID, "err", err)
+		} else if exists {
+			return nil, fmt.Errorf("%w: duplicate order_id %s", ErrValidationFailed, orderID)
+		}
+	}
 
 	freezeRecord, err := s.account.PreFreeze(ctx, accountclient.FreezeRequest{
 		UserID:  req.UserID,
@@ -101,9 +124,17 @@ func (s *Service) SubmitOrder(ctx context.Context, req SubmitRequest) (*SubmitRe
 		return nil, err
 	}
 
+	commandType := orderType
+	commandTIF := tif
 	commandPrice := req.Price
 	if orderType == "MARKET" {
-		commandPrice = 0
+		commandType = "LIMIT"
+		commandTIF = "IOC"
+		if side == "BUY" {
+			commandPrice = 99
+		} else {
+			commandPrice = 1
+		}
 	}
 
 	command := sharedkafka.OrderCommand{
@@ -118,9 +149,10 @@ func (s *Service) SubmitOrder(ctx context.Context, req SubmitRequest) (*SubmitRe
 		UserID:            req.UserID,
 		MarketID:          req.MarketID,
 		Outcome:           outcome,
+		BookKey:           bookKey,
 		Side:              side,
-		Type:              orderType,
-		TimeInForce:       tif,
+		Type:              commandType,
+		TimeInForce:       commandTIF,
 		Price:             commandPrice,
 		Quantity:          req.Quantity,
 		RequestedAtMillis: req.RequestedAt,

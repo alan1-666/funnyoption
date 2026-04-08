@@ -70,9 +70,6 @@ func (b *OrderBook) BestAskPrice() (int64, bool) {
 }
 
 func (b *OrderBook) IsCross(order *Order) bool {
-	if order.IsMarket() {
-		return true
-	}
 	if order.IsBuy() {
 		bestAsk, ok := b.BestAskPrice()
 		return ok && order.Price >= bestAsk
@@ -82,9 +79,6 @@ func (b *OrderBook) IsCross(order *Order) bool {
 }
 
 func (b *OrderBook) IsCrossWithPrice(order *Order, price int64) bool {
-	if order.IsMarket() {
-		return true
-	}
 	if order.IsBuy() {
 		return order.Price >= price
 	}

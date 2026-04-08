@@ -20,13 +20,14 @@ type CommandRouter interface {
 }
 
 // InputGateway is the IO-thread that sits between Kafka and the BookSupervisor.
-// It does: FetchMessage → JSON decode → MarketIsTradable → MatchCommand → Route.
+// It does: FetchMessage → JSON decode → MatchCommand → Route.
+// Market-tradable checks are performed upstream in OrderService; the gateway is
+// a pure Kafka→RingBuffer forwarder with zero DB dependency.
 // When the book's RB is full, it spins/yields (backpressure).
 type InputGateway struct {
 	logger *slog.Logger
 	reader *kafkago.Reader
 	router CommandRouter
-	store  TradableChecker
 	idle   *ringbuffer.IdleStrategy
 
 	received atomic.Uint64
@@ -34,17 +35,11 @@ type InputGateway struct {
 	paused   atomic.Uint64
 }
 
-// TradableChecker is a narrow interface used by the gateway to gate orders.
-type TradableChecker interface {
-	MarketIsTradable(ctx context.Context, marketID int64) (bool, error)
-}
-
 func NewInputGateway(
 	logger *slog.Logger,
 	brokers []string,
 	topic, groupID string,
 	router CommandRouter,
-	store TradableChecker,
 ) *InputGateway {
 	reader := kafkago.NewReader(kafkago.ReaderConfig{
 		Brokers:  brokers,
@@ -57,7 +52,6 @@ func NewInputGateway(
 		logger: logger,
 		reader: reader,
 		router: router,
-		store:  store,
 		idle:   ringbuffer.NewIdleStrategy(200, 20, 100*time.Microsecond),
 	}
 }
@@ -90,21 +84,6 @@ func (g *InputGateway) run(ctx context.Context) {
 			g.logger.Error("gateway: json decode failed", "err", err, "offset", msg.Offset)
 			g.commitMsg(ctx, msg)
 			continue
-		}
-
-		if g.store != nil {
-			tradable, err := g.store.MarketIsTradable(ctx, cmd.MarketID)
-			if err != nil {
-				g.logger.Error("gateway: tradable check failed", "err", err, "market_id", cmd.MarketID)
-				g.commitMsg(ctx, msg)
-				continue
-			}
-			if !tradable {
-				g.dropped.Add(1)
-				g.logger.Warn("gateway: non-tradable market, dropping", "market_id", cmd.MarketID, "order_id", cmd.OrderID)
-				g.commitMsg(ctx, msg)
-				continue
-			}
 		}
 
 		mc := CommandFromKafka(cmd)

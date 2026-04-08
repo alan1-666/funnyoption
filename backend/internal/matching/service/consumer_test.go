@@ -29,28 +29,29 @@ func (s *stubCommandStore) MarketIsTradable(_ context.Context, _ int64) (bool, e
 }
 
 type capturePublisher struct {
-	topic   string
-	key     string
-	payload any
+	items []sharedkafka.BatchItem
 }
 
 func (p *capturePublisher) PublishJSON(_ context.Context, topic, key string, payload any) error {
-	p.topic = topic
-	p.key = key
-	p.payload = payload
+	p.items = append(p.items, sharedkafka.BatchItem{Topic: topic, Key: key, Payload: payload})
 	return nil
 }
 
 func (p *capturePublisher) PublishJSONBatch(ctx context.Context, items []sharedkafka.BatchItem) error {
-	for _, item := range items {
-		if err := p.PublishJSON(ctx, item.Topic, item.Key, item.Payload); err != nil {
-			return err
-		}
-	}
+	p.items = append(p.items, items...)
 	return nil
 }
 
 func (p *capturePublisher) Close() error { return nil }
+
+func (p *capturePublisher) findOrderEvent() *sharedkafka.OrderEvent {
+	for _, item := range p.items {
+		if ev, ok := item.Payload.(sharedkafka.OrderEvent); ok {
+			return &ev
+		}
+	}
+	return nil
+}
 
 func TestHandleOrderCommandRejectsNonTradableMarket(t *testing.T) {
 	store := &stubCommandStore{}
@@ -97,9 +98,9 @@ func TestHandleOrderCommandRejectsNonTradableMarket(t *testing.T) {
 		t.Fatalf("unexpected cancel reason: %s", store.result.Order.CancelReason)
 	}
 
-	event, ok := publisher.payload.(sharedkafka.OrderEvent)
-	if !ok {
-		t.Fatalf("expected order event payload, got %T", publisher.payload)
+	event := publisher.findOrderEvent()
+	if event == nil {
+		t.Fatalf("expected order event in published batch, got %d items", len(publisher.items))
 	}
 	if event.Status != "REJECTED" || event.CancelReason != "MARKET_NOT_TRADABLE" {
 		t.Fatalf("unexpected reject order event: %+v", event)

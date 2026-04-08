@@ -71,7 +71,7 @@ func Load(serviceName string) ServiceConfig {
 		StartBlock:              int64(getenvInt("FUNNYOPTION_CHAIN_START_BLOCK", 0)),
 		ClaimPollInterval:       getenvDuration("FUNNYOPTION_CHAIN_CLAIM_POLL_INTERVAL", 10*time.Second),
 		RollupCoreAddress:       getenv("FUNNYOPTION_ROLLUP_CORE_ADDRESS", ""),
-		RollupBatchLimit:        getenvInt("FUNNYOPTION_ROLLUP_BATCH_LIMIT", 256),
+		RollupBatchLimit:        getenvInt("FUNNYOPTION_ROLLUP_BATCH_LIMIT", 128),
 		RollupPollInterval:      getenvDuration("FUNNYOPTION_ROLLUP_POLL_INTERVAL", 10*time.Second),
 		ChainGasLimit:           uint64(getenvInt("FUNNYOPTION_CHAIN_GAS_LIMIT", 250000)),
 		LogLevel:                getenv("FUNNYOPTION_LOG_LEVEL", "info"),

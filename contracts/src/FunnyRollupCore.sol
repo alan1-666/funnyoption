@@ -350,6 +350,18 @@ contract FunnyRollupCore {
         emit BatchDataPublished(batchId, batchData.length);
     }
 
+    /// @dev Operator attests DA was published off-chain (for batches exceeding on-chain tx limits).
+    function publishBatchDataByOperator(uint64 batchId, bytes32 dataHash) external {
+        if (msg.sender != operator) revert OnlyOperator();
+        if (frozen) revert RollupIsFrozen();
+        if (batchMetadata[batchId].batchDataHash == bytes32(0)) revert BatchMetadataNotRecorded();
+        if (batchDataPublished[batchId]) revert DataAlreadyPublished();
+        if (dataHash != batchMetadata[batchId].batchDataHash) revert DataHashMismatch();
+
+        batchDataPublished[batchId] = true;
+        emit BatchDataPublished(batchId, 0);
+    }
+
     function claimAcceptedWithdrawal(
         uint64 batchId,
         uint64 leafIndex,

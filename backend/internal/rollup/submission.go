@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 const funnyRollupCoreSubmissionABIJSON = `[
@@ -27,6 +28,14 @@ const funnyRollupCoreSubmissionABIJSON = `[
     "inputs":[
       {"name":"batchId","type":"uint64"},
       {"name":"batchData","type":"bytes"}
+    ]
+  },
+  {
+    "type":"function",
+    "name":"publishBatchDataByOperator",
+    "inputs":[
+      {"name":"batchId","type":"uint64"},
+      {"name":"dataHash","type":"bytes32"}
     ]
   },
   {
@@ -224,13 +233,20 @@ func buildRecordBatchMetadataCall(metadata L1BatchMetadata) (RollupContractCall,
 	}, nil
 }
 
+const maxOnChainPublishBytes = 120_000
+
 func buildPublishBatchDataCall(batch StoredBatch) (RollupContractCall, error) {
-	method := funnyRollupCoreSubmissionABI.Methods["publishBatchData"]
 	batchID, err := solidityUint64FromInt64(batch.BatchID, "batch.batch_id")
 	if err != nil {
 		return RollupContractCall{}, err
 	}
 	batchData := []byte(batch.InputData)
+
+	if len(batchData) > maxOnChainPublishBytes {
+		return buildPublishByOperatorCall(batchID, batchData)
+	}
+
+	method := funnyRollupCoreSubmissionABI.Methods["publishBatchData"]
 	data, err := method.Inputs.Pack(batchID, batchData)
 	if err != nil {
 		return RollupContractCall{}, fmt.Errorf("pack publishBatchData calldata: %w", err)
@@ -239,6 +255,22 @@ func buildPublishBatchDataCall(batch StoredBatch) (RollupContractCall, error) {
 		ContractName: FunnyRollupCoreContractName,
 		ContractPath: FunnyRollupCoreContractPath,
 		FunctionName: "publishBatchData",
+		Selector:     "0x" + hex.EncodeToString(method.ID),
+		Calldata:     "0x" + hex.EncodeToString(append(method.ID, data...)),
+	}, nil
+}
+
+func buildPublishByOperatorCall(batchID uint64, batchData []byte) (RollupContractCall, error) {
+	method := funnyRollupCoreSubmissionABI.Methods["publishBatchDataByOperator"]
+	dataHash := common.BytesToHash(crypto.Keccak256(batchData))
+	data, err := method.Inputs.Pack(batchID, dataHash)
+	if err != nil {
+		return RollupContractCall{}, fmt.Errorf("pack publishBatchDataByOperator calldata: %w", err)
+	}
+	return RollupContractCall{
+		ContractName: FunnyRollupCoreContractName,
+		ContractPath: FunnyRollupCoreContractPath,
+		FunctionName: "publishBatchDataByOperator",
 		Selector:     "0x" + hex.EncodeToString(method.ID),
 		Calldata:     "0x" + hex.EncodeToString(append(method.ID, data...)),
 	}, nil

@@ -142,7 +142,7 @@ func NewRollupSubmissionProcessor(
 	}
 	batchLimit := cfg.RollupBatchLimit
 	if batchLimit <= 0 {
-		batchLimit = 256
+		batchLimit = 128
 	}
 	pollInterval := cfg.RollupPollInterval
 	if pollInterval <= 0 {

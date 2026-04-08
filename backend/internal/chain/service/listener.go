@@ -245,7 +245,9 @@ func (l *DepositListener) handleDepositLog(ctx context.Context, logEntry types.L
 	if !amount.IsInt64() {
 		return fmt.Errorf("deposit amount exceeds int64")
 	}
-	accountingAmount, err := assets.ChainToAccountingAmount(amount.Int64(), l.cfg.CollateralDecimals, l.cfg.CollateralDisplayDigits)
+	// Native deposits (and any oracle-derived credits) use arbitrary 6-decimal collateral amounts;
+	// strict ChainToAccountingAmount rejects values not divisible by 10^(chain−display), so we floor.
+	accountingAmount, err := assets.ChainToAccountingAmountFloor(amount.Int64(), l.cfg.CollateralDecimals, l.cfg.CollateralDisplayDigits)
 	if err != nil {
 		return err
 	}

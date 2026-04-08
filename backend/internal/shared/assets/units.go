@@ -34,6 +34,40 @@ func ChainToAssetAccountingAmount(asset string, chainAmount int64) (int64, error
 	return ChainToAccountingAmount(chainAmount, ChainDecimals(asset), AccountingDigits(asset))
 }
 
+// ChainToAccountingAmountFloor converts chain-unit amounts to accounting units by truncating remainder
+// (e.g. 6-decimal chain → 2-digit accounting divides by 10^4 and floors). Use when the on-chain
+// value is not guaranteed to align to accounting digit boundaries, such as native deposits where
+// the collateral credit is derived from oracle math.
+func ChainToAccountingAmountFloor(rawAmount int64, chainDecimals int, accountingDigits int) (int64, error) {
+	if rawAmount < 0 {
+		return 0, fmt.Errorf("amount must not be negative")
+	}
+	if chainDecimals < 0 || accountingDigits < 0 {
+		return 0, fmt.Errorf("decimals must not be negative")
+	}
+	if chainDecimals == accountingDigits {
+		return rawAmount, nil
+	}
+
+	diff := chainDecimals - accountingDigits
+	if diff > 0 {
+		factor, err := pow10Int64(diff)
+		if err != nil {
+			return 0, err
+		}
+		return rawAmount / factor, nil
+	}
+
+	factor, err := pow10Int64(-diff)
+	if err != nil {
+		return 0, err
+	}
+	if rawAmount > math.MaxInt64/factor {
+		return 0, fmt.Errorf("amount overflows int64")
+	}
+	return rawAmount * factor, nil
+}
+
 func ChainToAccountingAmount(rawAmount int64, chainDecimals int, accountingDigits int) (int64, error) {
 	if rawAmount < 0 {
 		return 0, fmt.Errorf("amount must not be negative")

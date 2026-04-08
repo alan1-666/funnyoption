@@ -30,7 +30,12 @@ func CalculateFreeze(side, orderType string, marketID int64, outcome string, pri
 			}
 			return assets.DefaultCollateralAsset, price * quantity, nil
 		case "MARKET":
-			return "", 0, errors.New("market order pre-freeze is not implemented yet")
+			// Market buy freezes the maximum possible cost (price=100 × quantity).
+			maxPrice := int64(100)
+			if quantity > 0 && maxPrice > math.MaxInt64/quantity {
+				return "", 0, errors.New("freeze amount overflow")
+			}
+			return assets.DefaultCollateralAsset, maxPrice * quantity, nil
 		default:
 			return "", 0, fmt.Errorf("unsupported order type: %s", orderType)
 		}

@@ -1179,6 +1179,19 @@ func (h *OrderHandler) CreateOrder(ctx *gin.Context) {
 	side := strings.ToUpper(strings.TrimSpace(req.Side))
 	orderType := strings.ToUpper(strings.TrimSpace(req.Type))
 	tif := strings.ToUpper(strings.TrimSpace(req.TimeInForce))
+
+	switch orderType {
+	case "LIMIT":
+		// ok
+	case "MARKET":
+		// Market orders are implemented as IOC at price 100 (max possible).
+		tif = "IOC"
+		req.Price = 100
+	default:
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "order type must be LIMIT or MARKET"})
+		return
+	}
+
 	userID := req.UserID
 
 	if strings.TrimSpace(req.SessionID) != "" {

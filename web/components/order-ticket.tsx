@@ -23,6 +23,7 @@ function readOutcomePrice(market: Market, outcome: "YES" | "NO") {
 export function OrderTicket({ market }: { market: Market }) {
   const { wallet, session, connect, createSession, signOrder, commitOrderNonce, statusMessage } = useTradingSession();
   const [side, setSide] = useState<"BUY_YES" | "BUY_NO">("BUY_YES");
+  const [orderType, setOrderType] = useState<"LIMIT" | "MARKET">("LIMIT");
   const [price, setPrice] = useState(() => readOutcomePrice(market, "YES"));
   const [quantity, setQuantity] = useState(10);
   const [status, setStatus] = useState("");
@@ -30,7 +31,9 @@ export function OrderTicket({ market }: { market: Market }) {
   const outcome = side === "BUY_YES" ? "YES" : "NO";
   const yesPrice = readOutcomePrice(market, "YES");
   const noPrice = readOutcomePrice(market, "NO");
-  const freeze = useMemo(() => Math.max(price, 0) * Math.max(quantity, 0), [price, quantity]);
+  const isMarketOrder = orderType === "MARKET";
+  const effectivePrice = isMarketOrder ? 100 : price;
+  const freeze = useMemo(() => Math.max(effectivePrice, 0) * Math.max(quantity, 0), [effectivePrice, quantity]);
   const normalizedMarketStatus = String(market.status).toUpperCase();
   const marketTradable = normalizedMarketStatus === "OPEN";
   const marketClosedMessage =
@@ -79,9 +82,9 @@ export function OrderTicket({ market }: { market: Market }) {
           marketId: market.market_id,
           outcome: outcome.toLowerCase(),
           side: "buy",
-          orderType: "limit",
-          timeInForce: "gtc",
-          price,
+          orderType: isMarketOrder ? "market" : "limit",
+          timeInForce: isMarketOrder ? "ioc" : "gtc",
+          price: effectivePrice,
           quantity,
           clientOrderId
         },
@@ -100,9 +103,9 @@ export function OrderTicket({ market }: { market: Market }) {
           market_id: market.market_id,
           outcome: outcome.toLowerCase(),
           side: "buy",
-          type: "limit",
-          time_in_force: "gtc",
-          price,
+          type: isMarketOrder ? "market" : "limit",
+          time_in_force: isMarketOrder ? "ioc" : "gtc",
+          price: effectivePrice,
           quantity,
           client_order_id: clientOrderId,
           session_id: orderPayload.sessionId,
@@ -207,17 +210,34 @@ export function OrderTicket({ market }: { market: Market }) {
           <strong>{formatToken(quantity, 0)}<em>份</em></strong>
         </div>
 
+        <div className={styles.orderTypeSwitch}>
+          <button
+            className={orderType === "MARKET" ? styles.orderTypeActive : styles.orderTypeButton}
+            onClick={() => setOrderType("MARKET")}
+          >
+            市价单
+          </button>
+          <button
+            className={orderType === "LIMIT" ? styles.orderTypeActive : styles.orderTypeButton}
+            onClick={() => setOrderType("LIMIT")}
+          >
+            限价单
+          </button>
+        </div>
+
         <div className={styles.inputRow}>
-          <label className={styles.inputField}>
-            <span className={styles.inputLabel}>价格</span>
-            <input
-              className={styles.input}
-              type="number"
-              value={price}
-              onChange={(event) => setPrice(Number(event.target.value))}
-            />
-          </label>
-          <label className={styles.inputField}>
+          {!isMarketOrder && (
+            <label className={styles.inputField}>
+              <span className={styles.inputLabel}>价格</span>
+              <input
+                className={styles.input}
+                type="number"
+                value={price}
+                onChange={(event) => setPrice(Number(event.target.value))}
+              />
+            </label>
+          )}
+          <label className={isMarketOrder ? styles.inputFieldFull : styles.inputField}>
             <span className={styles.inputLabel}>份额</span>
             <input
               className={styles.input}
@@ -245,7 +265,7 @@ export function OrderTicket({ market }: { market: Market }) {
 
         <div className={styles.inlineSummary}>
           <div>
-            <span>预计冻结</span>
+            <span>{isMarketOrder ? "最大冻结" : "预计冻结"}</span>
             <strong>{formatAssetAmount(freeze, "USDT")} USDT</strong>
           </div>
           <div>

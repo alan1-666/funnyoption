@@ -158,9 +158,9 @@ func startSnapshotHTTP(ctx context.Context, logger *slog.Logger, pipe *pipeline.
 		})
 	})
 
-	server := &http.Server{Addr: ":9090", Handler: mux}
+	server := &http.Server{Addr: ":9190", Handler: mux}
 	go func() {
-		logger.Info("HA snapshot HTTP started", "addr", ":9090")
+		logger.Info("HA snapshot HTTP started", "addr", ":9190")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("snapshot HTTP server error", "err", err)
 		}

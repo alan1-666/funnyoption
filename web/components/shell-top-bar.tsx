@@ -9,7 +9,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { NotificationPanel } from "@/components/notification-panel";
 import { MarketProposeForm } from "@/components/market-propose-form";
 import { formatAssetAmount, shortenAddress } from "@/lib/format";
-import { authenticatedFetch, getBalancesRead, getUnreadCount } from "@/lib/api";
+import { authenticatedFetch, getBalancesRead, getUnreadCount, setApiSessionId } from "@/lib/api";
 import type { Balance, UserProfile } from "@/lib/types";
 import styles from "@/components/shell-top-bar.module.css";
 
@@ -90,7 +90,7 @@ export function ShellTopBar({
   }, []);
 
   useEffect(() => {
-    if (!session?.userId || balanceDisplay) {
+    if (!session?.userId || !session?.sessionId || balanceDisplay) {
       setFetchedBalance(null);
       setBalanceState("idle");
       return;
@@ -98,6 +98,10 @@ export function ShellTopBar({
 
     let cancelled = false;
     setBalanceState("loading");
+
+    // Ensure the module-level session ID is set before fetching,
+    // because parent useEffect (setApiSessionId) runs after child effects.
+    setApiSessionId(session.sessionId);
 
     fetchAvailableBalance(session.userId)
       .then((nextBalance) => {
@@ -114,10 +118,10 @@ export function ShellTopBar({
     return () => {
       cancelled = true;
     };
-  }, [balanceDisplay, session?.userId]);
+  }, [balanceDisplay, session?.userId, session?.sessionId]);
 
   useEffect(() => {
-    if (!session?.userId || profileProp) {
+    if (!session?.userId || !session?.sessionId || profileProp) {
       if (!profileProp) {
         setProfile(null);
       }
@@ -125,6 +129,8 @@ export function ShellTopBar({
     }
 
     let cancelled = false;
+    setApiSessionId(session.sessionId);
+
     fetchUserProfile(session.userId)
       .then((nextProfile) => {
         if (cancelled) return;
@@ -138,19 +144,20 @@ export function ShellTopBar({
     return () => {
       cancelled = true;
     };
-  }, [profileProp, session?.userId]);
+  }, [profileProp, session?.userId, session?.sessionId]);
 
   useEffect(() => {
-    if (!session?.userId) {
+    if (!session?.userId || !session?.sessionId) {
       setUnreadCount(0);
       return;
     }
     let cancelled = false;
+    setApiSessionId(session.sessionId);
     getUnreadCount(session.userId).then((count) => {
       if (!cancelled) setUnreadCount(count);
     });
     return () => { cancelled = true; };
-  }, [session?.userId]);
+  }, [session?.userId, session?.sessionId]);
 
   const handleCloseNotif = useCallback(() => setNotifOpen(false), []);
 

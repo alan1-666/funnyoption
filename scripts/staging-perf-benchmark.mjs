@@ -29,8 +29,8 @@ const SECRET_FILE = fileURLToPath(new URL("../.secrets", import.meta.url));
 const API_BASE   = process.env.API_BASE   || "https://funnyoption.xyz";
 const ADMIN_BASE = process.env.ADMIN_BASE || "https://admin.funnyoption.xyz";
 const RPC_URL    = "https://data-seed-prebsc-1-s1.bnbchain.org:8545";
-const TOKEN_ADDR = "0x0ADa04558decC14671D565562Aeb8D1096F71dDc";
-const VAULT_ADDR = "0x7Da015dfCD16Fb892328995BDd883da5AA3E670a";
+const TOKEN_ADDR = "0x756D0b1AF00C0e2447cb5c891A838B508Df5ff43";
+const VAULT_ADDR = "0xf47e6e19DC896ff8C9137C19782eb22411d0d1Bb";
 const CHAIN_ID   = bscTestnet.id;
 
 const textEncoder = new TextEncoder();

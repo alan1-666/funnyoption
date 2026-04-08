@@ -53,7 +53,7 @@ export function ShellTopBar({
   balanceDisplay?: string;
   profile?: UserProfile | null;
 }) {
-  const { wallet, session, busy, statusMessage, prepareTrading } = useTradingSession();
+  const { wallet, session, busy, statusMessage, prepareTrading, revokeCurrentSession } = useTradingSession();
   const searchRef = useRef<HTMLInputElement | null>(null);
   const [internalQuery, setInternalQuery] = useState("");
   const [fetchedBalance, setFetchedBalance] = useState<Balance | null>(null);
@@ -62,7 +62,9 @@ export function ShellTopBar({
   const [notifOpen, setNotifOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [proposeOpen, setProposeOpen] = useState(false);
+  const [showDisconnect, setShowDisconnect] = useState(false);
   const bellWrapRef = useRef<HTMLDivElement>(null);
+  const disconnectRef = useRef<HTMLDivElement>(null);
 
   const controlled = typeof query === "string";
   const value = controlled ? query : internalQuery;
@@ -161,6 +163,27 @@ export function ShellTopBar({
 
   const handleCloseNotif = useCallback(() => setNotifOpen(false), []);
 
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (disconnectRef.current && !disconnectRef.current.contains(e.target as Node)) {
+        setShowDisconnect(false);
+      }
+    }
+    if (showDisconnect) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showDisconnect]);
+
+  async function handleDisconnect() {
+    setShowDisconnect(false);
+    try {
+      await revokeCurrentSession();
+    } catch {
+      // Provider handles status.
+    }
+  }
+
   async function handleProfileAction() {
     if (session) {
       return;
@@ -201,13 +224,35 @@ export function ShellTopBar({
       : "钱包未连接";
 
   const profileNode = session ? (
-    <Link href={"/portfolio" as Route} className={styles.profileDock}>
-      <div className={styles.profileMeta}>
-        <strong>{profilePrimary}</strong>
-        <span>{profileSecondary}</span>
-      </div>
-      <UserAvatar profile={profile} walletAddress={activeWalletAddress} size="md" />
-    </Link>
+    <div className={styles.profileDock} ref={disconnectRef} style={{ position: "relative" }}>
+      <Link href={"/portfolio" as Route} className={styles.profileLink}>
+        <div className={styles.profileMeta}>
+          <strong>{profilePrimary}</strong>
+          <span>{profileSecondary}</span>
+        </div>
+        <UserAvatar profile={profile} walletAddress={activeWalletAddress} size="md" />
+      </Link>
+      <button
+        className={styles.disconnectToggle}
+        onClick={() => setShowDisconnect((prev) => !prev)}
+        aria-label="Wallet menu"
+        title="钱包菜单"
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M3 5L6 8L9 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {showDisconnect && (
+        <div className={styles.disconnectDropdown}>
+          <Link href={"/portfolio" as Route} className={styles.disconnectItem} onClick={() => setShowDisconnect(false)}>
+            个人中心
+          </Link>
+          <button className={styles.disconnectItem} onClick={handleDisconnect}>
+            断开钱包
+          </button>
+        </div>
+      )}
+    </div>
   ) : (
     <button className={styles.profileDock} onClick={handleProfileAction} disabled={busy !== null}>
       <div className={styles.profileMeta}>

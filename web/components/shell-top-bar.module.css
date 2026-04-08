@@ -480,3 +480,69 @@
     justify-content: space-between;
   }
 }
+
+.profileLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.disconnectToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+  flex-shrink: 0;
+  margin-left: -4px;
+}
+
+.disconnectToggle:hover {
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.disconnectDropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 140px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(24, 24, 26, 0.98);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  z-index: 120;
+  padding: 4px 0;
+}
+
+.disconnectItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 16px;
+  border: none;
+  background: none;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.84rem;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.1s;
+}
+
+.disconnectItem:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.disconnectItem:last-child {
+  color: #ff6b6b;
+}

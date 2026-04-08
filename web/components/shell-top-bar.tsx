@@ -247,6 +247,9 @@ export function ShellTopBar({
           <Link href={"/portfolio" as Route} className={styles.disconnectItem} onClick={() => setShowDisconnect(false)}>
             个人中心
           </Link>
+          <Link href={"/deposit" as Route} className={styles.disconnectItem} onClick={() => setShowDisconnect(false)}>
+            充值与提现
+          </Link>
           <button className={styles.disconnectItem} onClick={handleDisconnect}>
             断开钱包
           </button>
@@ -284,6 +287,11 @@ export function ShellTopBar({
         </label>
 
         <div className={styles.actions}>
+          <Link href={"/deposit" as Route} className={`${styles.iconButton} ${styles.iconButtonEnabled}`} aria-label="充值">
+            <svg viewBox="0 0 20 20" className={styles.iconSvg} aria-hidden="true">
+              <path d="M10 3v10M6 9l4 4 4-4M4 16h12" />
+            </svg>
+          </Link>
           <button
             className={`${styles.iconButton} ${session ? styles.iconButtonEnabled : ""}`}
             disabled={!session}

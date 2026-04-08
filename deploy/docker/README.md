@@ -9,6 +9,7 @@ docker build -f deploy/docker/account.Dockerfile -t funnyoption-account .
 docker build -f deploy/docker/ledger.Dockerfile -t funnyoption-ledger .
 docker build -f deploy/docker/settlement.Dockerfile -t funnyoption-settlement .
 docker build -f deploy/docker/chain.Dockerfile -t funnyoption-chain .
+docker build -f deploy/docker/oracle.Dockerfile -t funnyoption-oracle .
 docker build -f deploy/docker/ws.Dockerfile -t funnyoption-ws .
 docker build -f deploy/docker/web.Dockerfile -t funnyoption-web .
 docker build -f deploy/docker/admin.Dockerfile -t funnyoption-admin .

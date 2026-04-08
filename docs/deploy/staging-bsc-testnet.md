@@ -19,6 +19,7 @@ The current repo expects these runtime pieces:
   - `ledger`
   - `settlement`
   - `chain`
+  - `oracle` (crypto oracle worker; HTTP `/healthz` on host port `9191` when using default compose)
 - frontend services
   - `web`
   - `admin`
@@ -88,10 +89,11 @@ GitHub push-to-deploy is wired through:
 | `cmd/ledger/**`, `internal/ledger/**` | `ledger` | Go tests |
 | `cmd/settlement/**`, `internal/settlement/**` | `settlement` | Go tests |
 | `cmd/chain/**`, `internal/chain/**` | `chain` | Go tests |
+| `cmd/oracle/**`, `internal/oracle/**` | `oracle` | Go tests |
 | `web/**` except `web/package.json` and `web/package-lock.json` | `web` | `web` build |
 | `web/package.json`, `web/package-lock.json` | `web`, `admin` | `web` and `admin` builds |
 | `admin/**` | `admin` | `admin` build |
-| `migrations/**` | `account`, `matching`, `ledger`, `settlement`, `chain`, `api`, `ws` | run `migrate` profile |
+| `migrations/**` | `account`, `matching`, `ledger`, `settlement`, `chain`, `oracle`, `api`, `ws` | run `migrate` profile |
 
 ### Fallback policy
 

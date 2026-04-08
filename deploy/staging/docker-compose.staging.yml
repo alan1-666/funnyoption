@@ -148,6 +148,23 @@ services:
       FUNNYOPTION_CHAIN_GRPC_ADDR: :9094
       FUNNYOPTION_ACCOUNT_GRPC_ADDR: account:9091
 
+  oracle:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/oracle.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    env_file:
+      - ./.env.staging
+    environment:
+      FUNNYOPTION_ORACLE_HTTP_ADDR: :9191
+    ports:
+      - "127.0.0.1:9191:9191"
+
   api:
     build:
       context: ../..

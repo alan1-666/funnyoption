@@ -30,7 +30,11 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	store := NewSQLStore(dbConn)
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	provider := NewBinanceProvider(binanceBaseURL(), httpClient)
+	stats := &OracleStats{}
 	worker := NewWorker(logger, store, provider, publisher, cfg.KafkaTopics, oraclePollInterval(cfg))
+	worker.SetStats(stats)
+
+	startObservabilityHTTP(ctx, logger, observabilityHTTPAddr(), cfg, cfg.KafkaTopics, stats)
 
 	if signerKey := loadOracleSignerKey(logger); signerKey != nil {
 		worker.SetSignerKey(signerKey)

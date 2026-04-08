@@ -25,6 +25,7 @@ type Worker struct {
 	batchSize      int
 	signerKey      *ecdsa.PrivateKey
 	trustedSigners []common.Address
+	stats          *OracleStats
 }
 
 func NewWorker(logger *slog.Logger, store MarketStore, provider priceProvider, publisher sharedkafka.Publisher, topics sharedkafka.Topics, pollInterval time.Duration) *Worker {
@@ -53,6 +54,10 @@ func (w *Worker) SetTrustedSigners(signers []common.Address) {
 	w.trustedSigners = signers
 }
 
+func (w *Worker) SetStats(s *OracleStats) {
+	w.stats = s
+}
+
 func (w *Worker) Start(ctx context.Context) {
 	ticker := time.NewTicker(w.pollInterval)
 	defer ticker.Stop()
@@ -73,25 +78,50 @@ func (w *Worker) Start(ctx context.Context) {
 }
 
 func (w *Worker) pollOnce(ctx context.Context) error {
+	if w.stats != nil {
+		w.stats.recordPollStart()
+	}
 	if w.store == nil {
-		return fmt.Errorf("oracle market store is required")
+		err := fmt.Errorf("oracle market store is required")
+		if w.stats != nil {
+			w.stats.recordPollEnd(0, 0, err)
+		}
+		return err
 	}
 	frozen, err := w.store.RollupFrozen(ctx)
 	if err != nil {
+		if w.stats != nil {
+			w.stats.recordPollEnd(0, 0, err)
+		}
 		return err
 	}
 	if frozen {
+		if w.stats != nil {
+			w.stats.recordFrozenSkip()
+			w.stats.recordPollEnd(0, 0, nil)
+		}
 		return nil
 	}
 	now := time.Now().Unix()
 	markets, err := w.store.ListEligibleMarkets(ctx, now, w.batchSize)
 	if err != nil {
+		if w.stats != nil {
+			w.stats.recordPollEnd(0, 0, err)
+		}
 		return err
 	}
+	processed := 0
 	for _, market := range markets {
 		if err := w.processMarket(ctx, now, market); err != nil {
+			if w.stats != nil {
+				w.stats.recordPollEnd(len(markets), processed, err)
+			}
 			return err
 		}
+		processed++
+	}
+	if w.stats != nil {
+		w.stats.recordPollEnd(len(markets), processed, nil)
 	}
 	return nil
 }
@@ -303,11 +333,17 @@ func (w *Worker) publishResolvedEvent(ctx context.Context, marketID int64, outco
 func (w *Worker) dispatchObservedResolution(ctx context.Context, update ResolutionUpdate) error {
 	attemptedAt := nowUnix()
 	if err := w.publishResolvedEvent(ctx, update.MarketID, update.ResolvedOutcome); err != nil {
+		if w.stats != nil {
+			w.stats.recordPublishFail()
+		}
 		update.Evidence = recordDispatchAttempt(update.Evidence, false, attemptedAt, err.Error())
 		if markErr := w.store.UpsertResolution(ctx, update); markErr != nil {
 			return fmt.Errorf("publish resolved market.event: %w (also failed to persist pending dispatch: %v)", err, markErr)
 		}
 		return err
+	}
+	if w.stats != nil {
+		w.stats.recordPublishOK()
 	}
 	update.Evidence = recordDispatchAttempt(update.Evidence, true, attemptedAt, "")
 	return w.store.UpsertResolution(ctx, update)

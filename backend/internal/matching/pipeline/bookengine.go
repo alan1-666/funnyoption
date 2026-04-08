@@ -16,6 +16,11 @@ const (
 	matchDrainBatch = 64
 )
 
+// EpochSource provides the current epoch for fencing output messages.
+type EpochSource interface {
+	Current() uint64
+}
+
 // BookEngine is a fully isolated matching unit for a single BookKey.
 // It owns its own InputRB, Engine (single book), and MatchLoop goroutine.
 // Results are forwarded to the shared OutputCh (fan-in channel).
@@ -26,13 +31,14 @@ type BookEngine struct {
 	outputCh chan<- MatchResult
 	logger   *slog.Logger
 	idle     *ringbuffer.IdleStrategy
+	epoch    EpochSource
 
 	matched  atomic.Uint64
 	batches  atomic.Uint64
 	outStall atomic.Uint64
 }
 
-func NewBookEngine(bookKey string, logger *slog.Logger, sequence *uint64, outputCh chan<- MatchResult) *BookEngine {
+func NewBookEngine(bookKey string, logger *slog.Logger, sequence *uint64, outputCh chan<- MatchResult, epoch EpochSource) *BookEngine {
 	eng := engine.NewWithSequence(logger, sequence)
 	return &BookEngine{
 		bookKey:  bookKey,
@@ -41,6 +47,7 @@ func NewBookEngine(bookKey string, logger *slog.Logger, sequence *uint64, output
 		outputCh: outputCh,
 		logger:   logger,
 		idle:     ringbuffer.DefaultIdleStrategy(),
+		epoch:    epoch,
 	}
 }
 
@@ -79,10 +86,20 @@ func (be *BookEngine) Run(ctx context.Context) {
 func (be *BookEngine) handlePlace(ctx context.Context, cmd *MatchCommand, nowMillis int64) {
 	order := cmd.ToOrder(nowMillis)
 	result, err := be.eng.PlaceOrder(order)
+
+	epochID := uint64(0)
+	if be.epoch != nil {
+		epochID = be.epoch.Current()
+	}
+	for i := range result.Trades {
+		result.Trades[i].EpochID = epochID
+	}
+
 	mr := MatchResult{
 		Command:  *cmd,
 		Result:   result,
 		Rejected: err != nil,
+		EpochID:  epochID,
 	}
 	be.sendResult(ctx, mr)
 	be.matched.Add(1)
@@ -135,4 +152,18 @@ func (be *BookEngine) TryPublish(cmd MatchCommand) bool {
 
 func (be *BookEngine) Stats() (matched, batches, outStall uint64) {
 	return be.matched.Load(), be.batches.Load(), be.outStall.Load()
+}
+
+// LocalSeq returns the per-book local sequence from the engine.
+func (be *BookEngine) LocalSeq() uint64 {
+	return be.eng.LocalSeq()
+}
+
+// ExportRestingOrders returns all resting orders for this book (snapshot).
+func (be *BookEngine) ExportRestingOrders() []*model.Order {
+	var orders []*model.Order
+	for _, book := range be.eng.ExportBooks() {
+		orders = append(orders, book.RestingOrders()...)
+	}
+	return orders
 }

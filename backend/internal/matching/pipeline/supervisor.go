@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"funnyoption/internal/matching/ha"
 	"funnyoption/internal/matching/model"
 	"funnyoption/internal/matching/ringbuffer"
 )
@@ -22,13 +23,15 @@ type BookSupervisor struct {
 	outputCh chan MatchResult
 	ctx      context.Context
 	idle     *ringbuffer.IdleStrategy
+	epoch    EpochSource
 }
 
-func NewBookSupervisor(logger *slog.Logger) *BookSupervisor {
+func NewBookSupervisor(logger *slog.Logger, epoch EpochSource) *BookSupervisor {
 	return &BookSupervisor{
 		logger:   logger,
 		books:    make(map[string]*BookEngine, 64),
 		outputCh: make(chan MatchResult, outputChSize),
+		epoch:    epoch,
 	}
 }
 
@@ -103,7 +106,7 @@ func (s *BookSupervisor) getOrCreate(bookKey string) *BookEngine {
 	if be, ok := s.books[bookKey]; ok {
 		return be
 	}
-	be := NewBookEngine(bookKey, s.logger, &s.sequence, s.outputCh)
+	be := NewBookEngine(bookKey, s.logger, &s.sequence, s.outputCh, s.epoch)
 	s.books[bookKey] = be
 
 	if s.ctx != nil {
@@ -129,4 +132,31 @@ func (s *BookSupervisor) Stats() (totalMatched, totalBatches uint64) {
 		totalBatches += b
 	}
 	return
+}
+
+// TakeSnapshot captures the full state of all book engines for HA recovery.
+// It acquires the supervisor lock and reads each BookEngine's state.
+// This is safe because BookEngine goroutines only write to their own ring
+// buffers and the engine is single-threaded per book.
+func (s *BookSupervisor) TakeSnapshot() ha.FullSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	snap := ha.FullSnapshot{
+		GlobalSequence: atomic.LoadUint64(&s.sequence),
+		Books:          make([]ha.BookSnapshotData, 0, len(s.books)),
+	}
+	for key, be := range s.books {
+		snap.Books = append(snap.Books, ha.BookSnapshotData{
+			BookKey:  key,
+			LocalSeq: be.LocalSeq(),
+			Orders:   be.ExportRestingOrders(),
+		})
+	}
+	return snap
+}
+
+// GlobalSequence returns the current global trade sequence.
+func (s *BookSupervisor) GlobalSequence() uint64 {
+	return atomic.LoadUint64(&s.sequence)
 }

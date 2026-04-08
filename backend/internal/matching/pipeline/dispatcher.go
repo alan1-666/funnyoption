@@ -18,8 +18,18 @@ type CandleTracker interface {
 	ApplyTrade(trade model.Trade) sharedkafka.QuoteCandleEvent
 }
 
+// DispatchMode controls whether the dispatcher emits real output or silently drains.
+type DispatchMode int32
+
+const (
+	DispatchModeActive  DispatchMode = 0
+	DispatchModeShadow  DispatchMode = 1
+)
+
 // OutputDispatcher drains MatchResults from the shared fan-in channel
 // and performs all IO: DB persist + Kafka publish.
+// In Shadow mode it drains and counts but does not persist or publish,
+// enabling a standby node to keep its engine warm.
 type OutputDispatcher struct {
 	logger    *slog.Logger
 	outputCh  <-chan MatchResult
@@ -29,7 +39,9 @@ type OutputDispatcher struct {
 	candles   CandleTracker
 	feeSched  fee.Schedule
 
+	mode       atomic.Int32
 	dispatched atomic.Uint64
+	shadowed   atomic.Uint64
 	errors     atomic.Uint64
 }
 
@@ -58,6 +70,17 @@ func NewOutputDispatcher(
 	}
 }
 
+// SetMode switches the dispatcher between ACTIVE and SHADOW mode.
+func (d *OutputDispatcher) SetMode(mode DispatchMode) {
+	d.mode.Store(int32(mode))
+	d.logger.Info("dispatcher mode changed", "mode", mode)
+}
+
+// Mode returns the current dispatch mode.
+func (d *OutputDispatcher) Mode() DispatchMode {
+	return DispatchMode(d.mode.Load())
+}
+
 func (d *OutputDispatcher) Run(ctx context.Context) {
 	d.logger.Info("output dispatcher started")
 	defer d.logger.Info("output dispatcher stopped")
@@ -69,6 +92,10 @@ func (d *OutputDispatcher) Run(ctx context.Context) {
 		case mr, ok := <-d.outputCh:
 			if !ok {
 				return
+			}
+			if d.Mode() == DispatchModeShadow {
+				d.shadowed.Add(1)
+				continue
 			}
 			if err := d.dispatch(ctx, &mr); err != nil {
 				d.errors.Add(1)
@@ -180,7 +207,9 @@ func (d *OutputDispatcher) buildTradeEvent(traceID, collateralAsset string, trad
 
 	event := sharedkafka.TradeMatchedEvent{
 		EventID:          sharedkafka.NewID("evt_trade"),
+		TradeID:          trade.TradeID,
 		Sequence:         trade.Sequence,
+		EpochID:          trade.EpochID,
 		TraceID:          traceID,
 		CollateralAsset:  collateralAsset,
 		MarketID:         trade.MarketID,
@@ -288,4 +317,8 @@ func (d *OutputDispatcher) buildCandleEvent(traceID string, trade model.Trade) s
 
 func (d *OutputDispatcher) Stats() (dispatched, errors uint64) {
 	return d.dispatched.Load(), d.errors.Load()
+}
+
+func (d *OutputDispatcher) ShadowedCount() uint64 {
+	return d.shadowed.Load()
 }

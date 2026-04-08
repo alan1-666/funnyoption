@@ -242,6 +242,15 @@ func (ob *OrderBookDirect) OrderCount() int {
 	return len(ob.orderIndex)
 }
 
+// RestingOrders exports all resting orders for snapshot/recovery.
+func (ob *OrderBookDirect) RestingOrders() []*Order {
+	orders := make([]*Order, 0, len(ob.orderIndex))
+	for _, do := range ob.orderIndex {
+		orders = append(orders, do.ToOrder())
+	}
+	return orders
+}
+
 func (ob *OrderBookDirect) scanBestAsk() int64 {
 	for p := int64(1); p < maxPrice; p++ {
 		if !ob.askBuckets[p].IsEmpty() {

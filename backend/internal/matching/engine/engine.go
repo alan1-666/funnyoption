@@ -53,6 +53,7 @@ type Engine struct {
 	logger   *slog.Logger
 	books    map[string]*model.OrderBookDirect
 	sequence *uint64
+	localSeq uint64
 }
 
 type bookWorker struct {
@@ -81,6 +82,14 @@ func New(logger *slog.Logger) *Engine {
 
 func (e *Engine) SetSequence(seq uint64) {
 	atomic.StoreUint64(e.sequence, seq)
+}
+
+func (e *Engine) LocalSeq() uint64 {
+	return e.localSeq
+}
+
+func (e *Engine) SetLocalSeq(seq uint64) {
+	e.localSeq = seq
 }
 
 func (e *Engine) BookCount() int {
@@ -456,8 +465,11 @@ func (e *Engine) match(order *model.Order, book *model.OrderBookDirect) ([]model
 				}
 				order.ApplyFill(tradeQty)
 				maker.ApplyFill(tradeQty)
+				e.localSeq++
+				seq := atomic.AddUint64(e.sequence, 1)
 				trades = append(trades, model.Trade{
-					Sequence:        atomic.AddUint64(e.sequence, 1),
+					Sequence:        seq,
+					TradeID:         model.DeterministicTradeID(order.BookKey(), e.localSeq),
 					MarketID:        order.MarketID,
 					Outcome:         order.Outcome,
 					BookKey:         order.BookKey(),
@@ -499,8 +511,11 @@ func (e *Engine) match(order *model.Order, book *model.OrderBookDirect) ([]model
 				}
 				order.ApplyFill(tradeQty)
 				maker.ApplyFill(tradeQty)
+				e.localSeq++
+				seq := atomic.AddUint64(e.sequence, 1)
 				trades = append(trades, model.Trade{
-					Sequence:        atomic.AddUint64(e.sequence, 1),
+					Sequence:        seq,
+					TradeID:         model.DeterministicTradeID(order.BookKey(), e.localSeq),
 					MarketID:        order.MarketID,
 					Outcome:         order.Outcome,
 					BookKey:         order.BookKey(),
@@ -529,6 +544,12 @@ func (e *Engine) match(order *model.Order, book *model.OrderBookDirect) ([]model
 	}
 
 	return trades, affected
+}
+
+// ExportBooks returns the internal book map for snapshot export.
+// Only safe to call from the owning goroutine (single-writer guarantee).
+func (e *Engine) ExportBooks() map[string]*model.OrderBookDirect {
+	return e.books
 }
 
 func (e *Engine) getOrCreateBook(key string) *model.OrderBookDirect {

@@ -4,12 +4,12 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"funnyoption/internal/matching/engine"
 	"funnyoption/internal/matching/model"
+	"funnyoption/internal/shared/fee"
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
 
@@ -34,12 +34,16 @@ func (n *nullCandle) ApplyTrade(trade model.Trade) sharedkafka.QuoteCandleEvent 
 	return sharedkafka.QuoteCandleEvent{}
 }
 
+type constEpoch uint64
+
+func (c constEpoch) Current() uint64 { return uint64(c) }
+
 func TestBookEngineProcessesPlaceCommand(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	outputCh := make(chan MatchResult, 64)
 	var seq uint64
-	be := NewBookEngine("1:YES", logger, &seq, outputCh)
+	be := NewBookEngine("1:YES", logger, &seq, outputCh, constEpoch(1))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -119,7 +123,7 @@ func TestBookEngineProcessesPlaceCommand(t *testing.T) {
 func TestSupervisorRoutesToCorrectBook(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	sv := NewBookSupervisor(logger)
+	sv := NewBookSupervisor(logger, constEpoch(1))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -202,10 +206,7 @@ func TestSupervisorRoutesToCorrectBook(t *testing.T) {
 func TestSupervisorSubmitCancel(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	sv := NewBookSupervisor(logger)
-
-	var seq uint64
-	atomic.StoreUint64(&seq, 0)
+	sv := NewBookSupervisor(logger, constEpoch(1))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -251,6 +252,139 @@ func TestSupervisorSubmitCancel(t *testing.T) {
 				gotCancel = true
 			}
 		}
+	}
+}
+
+func TestDeterministicTradeIDInBookEngine(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	outputCh := make(chan MatchResult, 64)
+	var seq uint64
+	be := NewBookEngine("1:YES", logger, &seq, outputCh, constEpoch(5))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go be.Run(ctx)
+
+	// Maker: sell at 55
+	be.TryPublish(MatchCommand{
+		Action: ActionPlace, UserID: 1001, MarketID: 1, Outcome: "YES",
+		BookKey: "1:YES", Side: SideSell, Type: TypeLimit, TimeInForce: TIFGTC,
+		Price: 55, Quantity: 10, OrderID: "m1",
+	})
+	time.Sleep(30 * time.Millisecond)
+
+	// Taker: buy at 55
+	be.TryPublish(MatchCommand{
+		Action: ActionPlace, UserID: 1002, MarketID: 1, Outcome: "YES",
+		BookKey: "1:YES", Side: SideBuy, Type: TypeLimit, TimeInForce: TIFGTC,
+		Price: 55, Quantity: 3, OrderID: "t1",
+	})
+
+	deadline := time.After(2 * time.Second)
+	var tradeResult *MatchResult
+	for tradeResult == nil {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for trade")
+		case r := <-outputCh:
+			if len(r.Result.Trades) > 0 {
+				tradeResult = &r
+			}
+		}
+	}
+
+	trade := tradeResult.Result.Trades[0]
+	if trade.TradeID == "" {
+		t.Fatal("expected deterministic trade ID")
+	}
+	if trade.TradeID != "1:YES:00000001" {
+		t.Fatalf("unexpected trade ID: %s (expected 1:YES:00000001)", trade.TradeID)
+	}
+	if trade.EpochID != 5 {
+		t.Fatalf("expected epoch 5, got %d", trade.EpochID)
+	}
+	if tradeResult.EpochID != 5 {
+		t.Fatalf("expected result epoch 5, got %d", tradeResult.EpochID)
+	}
+}
+
+func TestShadowModeDispatcher(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	outputCh := make(chan MatchResult, 64)
+	store := &capturePersistStore{}
+	d := NewOutputDispatcher(
+		logger, outputCh, nil, sharedkafka.Topics{}, store, &nullCandle{},
+		fee.Schedule{},
+	)
+	d.SetMode(DispatchModeShadow)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.Run(ctx)
+
+	outputCh <- MatchResult{
+		Command: MatchCommand{OrderID: "ord-1", MarketID: 1, Outcome: "YES", BookKey: "1:YES"},
+		Result: engine.Result{
+			Order: &model.Order{OrderID: "ord-1", MarketID: 1, Outcome: "YES", Status: model.OrderStatusNew},
+		},
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	if d.ShadowedCount() != 1 {
+		t.Fatalf("expected 1 shadowed, got %d", d.ShadowedCount())
+	}
+	dispatched, _ := d.Stats()
+	if dispatched != 0 {
+		t.Fatalf("expected 0 dispatched in shadow mode, got %d", dispatched)
+	}
+	if len(store.results) != 0 {
+		t.Fatalf("expected no persistence in shadow mode, got %d", len(store.results))
+	}
+}
+
+func TestSupervisorSnapshot(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	sv := NewBookSupervisor(logger, constEpoch(3))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sv.Restore(100, []*model.Order{
+		{
+			OrderID: "resting-1", UserID: 100, MarketID: 1, Outcome: "YES",
+			Side: model.OrderSideBuy, Type: model.OrderTypeLimit,
+			TimeInForce: model.TimeInForceGTC, Price: 50, Quantity: 10,
+			Status: model.OrderStatusNew,
+		},
+		{
+			OrderID: "resting-2", UserID: 200, MarketID: 2, Outcome: "NO",
+			Side: model.OrderSideSell, Type: model.OrderTypeLimit,
+			TimeInForce: model.TimeInForceGTC, Price: 40, Quantity: 5,
+			Status: model.OrderStatusNew,
+		},
+	})
+
+	sv.Start(ctx)
+
+	snap := sv.TakeSnapshot()
+
+	if snap.GlobalSequence != 100 {
+		t.Fatalf("expected global seq 100, got %d", snap.GlobalSequence)
+	}
+	if len(snap.Books) != 2 {
+		t.Fatalf("expected 2 books in snapshot, got %d", len(snap.Books))
+	}
+
+	totalOrders := 0
+	for _, book := range snap.Books {
+		totalOrders += len(book.Orders)
+	}
+	if totalOrders != 2 {
+		t.Fatalf("expected 2 total orders, got %d", totalOrders)
 	}
 }
 

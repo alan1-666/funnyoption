@@ -194,4 +194,5 @@ type MatchResult struct {
 	Command  MatchCommand
 	Result   engine.Result
 	Rejected bool
+	EpochID  uint64
 }

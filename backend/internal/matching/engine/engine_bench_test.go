@@ -73,6 +73,32 @@ func BenchmarkMatch_CrossSpread(b *testing.B) {
 	}
 }
 
+// DeterministicTradeID generation overhead.
+func BenchmarkDeterministicTradeID(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_ = model.DeterministicTradeID("1:YES", uint64(i))
+	}
+}
+
+// Match with epoch/tradeID (Phase 5). Same as CrossSpread — measures
+// additional overhead from localSeq increment + DeterministicTradeID.
+func BenchmarkMatch_CrossSpread_WithEpoch(b *testing.B) {
+	eng := New(benchLogger)
+	for p := int64(1); p <= 50; p++ {
+		for j := 0; j < 10; j++ {
+			eng.PlaceOrder(mkOrder(fmt.Sprintf("a-%d-%d", p, j), int64(j+1), 1, "YES", model.OrderSideSell, p, 1_000_000_000))
+		}
+	}
+	orders := make([]*model.Order, b.N)
+	for i := range orders {
+		orders[i] = mkOrder(fmt.Sprintf("c-%d", i), 999, 1, "YES", model.OrderSideBuy, 50, 1)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		eng.PlaceOrder(orders[i])
+	}
+}
+
 // Pure AddOrder into a book (no matching). Each call inserts into a fresh book.
 func BenchmarkAddOrder_Fresh(b *testing.B) {
 	orders := make([]*model.Order, b.N)

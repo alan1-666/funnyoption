@@ -47,7 +47,9 @@ type OrderEvent struct {
 
 type TradeMatchedEvent struct {
 	EventID          string `json:"event_id"`
+	TradeID          string `json:"trade_id"`
 	Sequence         uint64 `json:"sequence"`
+	EpochID          uint64 `json:"epoch_id,omitempty"`
 	TraceID          string `json:"trace_id,omitempty"`
 	CollateralAsset  string `json:"collateral_asset"`
 	MarketID         int64  `json:"market_id"`

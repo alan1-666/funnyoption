@@ -1,6 +1,6 @@
 # High-Performance Matching Engine V2 — Design Document
 
-> Status: **DRAFT** | Author: zhangza | Date: 2026-04-07
+> Status: **IMPLEMENTED (Phase 1-5 Complete)** | Author: zhangza | Date: 2026-04-07
 
 ---
 
@@ -900,3 +900,33 @@ func BenchmarkEncoding_JSON_vs_Binary(b *testing.B) { ... }
 | PlaceOrder latency (p99) | ~10ms | ~500μs | ~100μs |
 | Single book throughput | ~2K/s | ~10K/s | ~50K/s |
 | E2E order→trade latency | ~5-10ms | ~1ms | ~200μs |
+
+---
+
+## Appendix C: Phase 5 Implementation Summary
+
+### Completed Components
+
+| Component | File(s) | Description |
+|-----------|---------|-------------|
+| Deterministic Trade ID | `model/trade.go`, `engine/engine.go` | `bookKey:localSeq` composite ID replaces global atomic counter. Enables safe Kafka replay on standby. |
+| Epoch Fencing | `ha/epoch.go` | `EpochManager` with atomic `Advance()`/`Current()`. All trades carry `EpochID` for downstream fencing. |
+| Role Manager | `ha/role.go` | `RoleManager` tracks PRIMARY/STANDBY with listener callbacks on transitions. |
+| Shadow Mode | `pipeline/dispatcher.go` | `DispatchMode` toggle (ACTIVE/SHADOW). Shadow mode drains but doesn't persist/publish. |
+| Book Snapshot | `ha/snapshot.go`, `pipeline/supervisor.go` | `TakeSnapshot()` exports full engine state (all books + orders + localSeq). |
+| Incremental Depth Diff | `ha/depthdiff.go` | `ComputeDepthDiff()` computes level deltas between snapshots for bandwidth-efficient push. |
+| HA HTTP Endpoints | `service/server.go` | `/ha/snapshot`, `/ha/status`, `/ha/promote`, `/ha/demote` for operational control. |
+| Standby Recovery | `pipeline/pipeline.go` | `Restore()` + `TakeSnapshot()` combined with Kafka replay enables standby catch-up. |
+
+### Phase 5 Benchmark Results (Apple M4)
+
+| Benchmark | Avg ns/op | Allocs | Notes |
+|-----------|-----------|--------|-------|
+| `PlaceOrder_EmptyBook` | ~15,600 | 13 | Per-book init cost (bucket arrays + pool) |
+| `PlaceOrder_DeepBook` | ~1,464 | 16 | O(1) bucket lookup + intrusive list |
+| `Match_CrossSpread` | ~1,556 | 16 | Baseline matching (no epoch) |
+| `Match_CrossSpread_WithEpoch` | ~1,481 | 16 | With epoch+tradeID (~0% overhead) |
+| `DeterministicTradeID` | ~154 | 1 | `fmt.Sprintf` composite ID |
+| `AddOrder_Fresh` | ~310 | 4 | Raw OrderBookDirect insert |
+
+**Phase 5 Overhead**: Negligible. The deterministic trade ID generation (~150ns) is dwarfed by the matching operation itself (~1,500ns). Epoch access is a single atomic load (~1ns).

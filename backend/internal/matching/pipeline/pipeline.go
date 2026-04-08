@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"funnyoption/internal/matching/ha"
 	"funnyoption/internal/matching/model"
 	"funnyoption/internal/shared/fee"
 	sharedkafka "funnyoption/internal/shared/kafka"
@@ -48,10 +49,11 @@ func New(
 	feeSched fee.Schedule,
 	candles CandleTracker,
 	cfg Config,
+	epoch EpochSource,
 ) *Pipeline {
 	cfg = cfg.withDefaults()
 
-	supervisor := NewBookSupervisor(logger)
+	supervisor := NewBookSupervisor(logger, epoch)
 	gateway := NewInputGateway(logger, brokers, topic, groupID, supervisor, tradableStore)
 	dispatcher := NewOutputDispatcher(logger, supervisor.OutputCh(), publisher, topics, persistStore, candles, feeSched)
 
@@ -104,6 +106,21 @@ func (p *Pipeline) LogStats(logger *slog.Logger) {
 		"disp_dispatched", dispatched,
 		"disp_errors", errs,
 	)
+}
+
+// SetDispatchMode switches the output dispatcher between ACTIVE and SHADOW.
+func (p *Pipeline) SetDispatchMode(mode DispatchMode) {
+	p.dispatcher.SetMode(mode)
+}
+
+// TakeSnapshot captures the full engine state for HA recovery.
+func (p *Pipeline) TakeSnapshot() ha.FullSnapshot {
+	return p.supervisor.TakeSnapshot()
+}
+
+// GlobalSequence returns the current trade sequence.
+func (p *Pipeline) GlobalSequence() uint64 {
+	return p.supervisor.GlobalSequence()
 }
 
 // StartStatsReporter logs stats every interval.

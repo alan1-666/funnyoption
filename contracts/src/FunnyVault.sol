@@ -33,6 +33,10 @@ contract FunnyVault {
     uint256 public timelockDelay;
     uint256 public timelockThreshold;
 
+    uint256 private _reentrancyStatus;
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
+
     mapping(address => uint256) public depositedBalance;
     mapping(bytes32 => bool) public processedClaims;
     mapping(bytes32 => ClaimRecord) public processedClaimRecords;
@@ -57,10 +61,19 @@ contract FunnyVault {
     error ClaimNotReady();
     error ClaimNotQueued();
     error ClaimCancelled();
+    error ReentrantCall();
+
+    modifier nonReentrant() {
+        if (_reentrancyStatus == _ENTERED) revert ReentrantCall();
+        _reentrancyStatus = _ENTERED;
+        _;
+        _reentrancyStatus = _NOT_ENTERED;
+    }
 
     constructor(address collateralToken_, address operator_) {
         collateralToken = IERC20Minimal(collateralToken_);
         operator = operator_;
+        _reentrancyStatus = _NOT_ENTERED;
     }
 
     function setRollupCore(address rollupCore_) external {
@@ -83,7 +96,7 @@ contract FunnyVault {
         emit TimelockConfigUpdated(threshold, delay);
     }
 
-    function deposit(uint256 amount) external {
+    function deposit(uint256 amount) external nonReentrant {
         if (amount == 0) revert InvalidAmount();
         require(collateralToken.transferFrom(msg.sender, address(this), amount), "TRANSFER_FROM_FAILED");
         depositedBalance[msg.sender] += amount;
@@ -97,7 +110,7 @@ contract FunnyVault {
         emit WithdrawalQueued(withdrawalId, msg.sender, amount, recipient);
     }
 
-    function processClaim(bytes32 claimId, address wallet, uint256 amount, address recipient) external {
+    function processClaim(bytes32 claimId, address wallet, uint256 amount, address recipient) external nonReentrant {
         if (msg.sender != operator && msg.sender != rollupCore) revert OnlyAuthorizedClaimer();
         if (processedClaims[claimId]) revert ClaimAlreadyProcessed();
         if (amount == 0) revert InvalidAmount();

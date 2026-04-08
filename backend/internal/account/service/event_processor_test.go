@@ -399,6 +399,74 @@ func TestEventProcessorSkipsOrderLifecycleWhileFrozen(t *testing.T) {
 	}
 }
 
+func TestEventProcessorTradeIdempotencyWithTradeID(t *testing.T) {
+	book := NewBalanceBook()
+	book.SeedBalance(1001, "USDT", 10_000)
+
+	processor := NewEventProcessor(book, NewOrderRegistry())
+
+	orderPayload, _ := json.Marshal(sharedkafka.OrderEvent{
+		OrderID:           "ord_idem_1",
+		UserID:            1001,
+		Side:              "BUY",
+		Price:             60,
+		FreezeID:          "frz_idem_1",
+		FreezeAsset:       "USDT",
+		FreezeAmount:      3_000,
+		Status:            "NEW",
+		RemainingQuantity: 50,
+	})
+	if err := processor.HandleOrderEvent(context.Background(), sharedkafka.Message{Value: orderPayload}); err != nil {
+		t.Fatalf("HandleOrderEvent returned error: %v", err)
+	}
+
+	tradePayload, _ := json.Marshal(sharedkafka.TradeMatchedEvent{
+		EventID:         "evt_random_1",
+		TradeID:         "1:YES:00000001",
+		CollateralAsset: "USDT",
+		Price:           50,
+		Quantity:        10,
+		TakerOrderID:    "ord_idem_1",
+		MakerOrderID:    "ord_idem_2",
+		TakerUserID:     1001,
+		MakerUserID:     1002,
+		TakerSide:       "BUY",
+		MakerSide:       "SELL",
+		MarketID:        1001,
+		Outcome:         "YES",
+	})
+	if err := processor.HandleTradeMatched(context.Background(), sharedkafka.Message{Value: tradePayload}); err != nil {
+		t.Fatalf("first HandleTradeMatched returned error: %v", err)
+	}
+
+	balanceAfterFirst := book.GetBalance(1002, "USDT")
+
+	replayPayload, _ := json.Marshal(sharedkafka.TradeMatchedEvent{
+		EventID:         "evt_random_2_different",
+		TradeID:         "1:YES:00000001",
+		CollateralAsset: "USDT",
+		Price:           50,
+		Quantity:        10,
+		TakerOrderID:    "ord_idem_1",
+		MakerOrderID:    "ord_idem_2",
+		TakerUserID:     1001,
+		MakerUserID:     1002,
+		TakerSide:       "BUY",
+		MakerSide:       "SELL",
+		MarketID:        1001,
+		Outcome:         "YES",
+	})
+	if err := processor.HandleTradeMatched(context.Background(), sharedkafka.Message{Value: replayPayload}); err != nil {
+		t.Fatalf("replay HandleTradeMatched returned error: %v", err)
+	}
+
+	balanceAfterReplay := book.GetBalance(1002, "USDT")
+	if balanceAfterReplay.Available != balanceAfterFirst.Available {
+		t.Fatalf("idempotency violated: balance changed from %d to %d on replay with same TradeID",
+			balanceAfterFirst.Available, balanceAfterReplay.Available)
+	}
+}
+
 func TestEventProcessorSkipsSettlementWhileFrozen(t *testing.T) {
 	book := NewBalanceBook()
 	book.SeedBalance(1001, "POSITION:1775124927529:YES", 10)

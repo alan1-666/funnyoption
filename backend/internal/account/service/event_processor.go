@@ -113,6 +113,13 @@ func (p *EventProcessor) HandleTradeMatched(ctx context.Context, msg sharedkafka
 		return err
 	}
 
+	// Use deterministic TradeID as idempotency key for replay safety.
+	// Falls back to EventID for backward compatibility with pre-V2 trades.
+	idempotencyKey := event.TradeID
+	if idempotencyKey == "" {
+		idempotencyKey = event.EventID
+	}
+
 	notional, err := tradeNotional(event.Price, event.Quantity)
 	if err != nil {
 		return err
@@ -151,7 +158,7 @@ func (p *EventProcessor) HandleTradeMatched(ctx context.Context, msg sharedkafka
 				Asset:   collateralAsset(event.CollateralAsset),
 				Amount:  netCredit,
 				RefType: "TRADE_COLLATERAL",
-				RefID:   event.EventID,
+				RefID:   idempotencyKey,
 			}); err != nil {
 				return err
 			}
@@ -163,7 +170,7 @@ func (p *EventProcessor) HandleTradeMatched(ctx context.Context, msg sharedkafka
 			Asset:   assets.PositionAsset(event.MarketID, event.Outcome),
 			Amount:  event.Quantity,
 			RefType: "TRADE_POSITION",
-			RefID:   event.EventID,
+			RefID:   idempotencyKey,
 		}); err != nil {
 			return err
 		}
@@ -176,7 +183,7 @@ func (p *EventProcessor) HandleTradeMatched(ctx context.Context, msg sharedkafka
 			Asset:   collateralAsset(event.CollateralAsset),
 			Amount:  platformRevenue,
 			RefType: "TRADE_FEE",
-			RefID:   event.EventID,
+			RefID:   idempotencyKey,
 		}); err != nil {
 			return err
 		}

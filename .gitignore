@@ -23,3 +23,5 @@ admin/tsconfig.tsbuildinfo
 deploy/staging/.env.staging
 *.secrets
 backend/matching
+web/playwright-report/
+web/test-results/

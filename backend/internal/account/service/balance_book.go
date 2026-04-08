@@ -59,16 +59,18 @@ type BalanceStore interface {
 // from the append-only ledger journal, which remains the source of truth for
 // replay and reconciliation.
 type BalanceBook struct {
-	mu       sync.RWMutex
-	balances map[string]*model.Balance
-	freezes  map[string]*model.FreezeRecord
-	store    BalanceStore
+	mu            sync.RWMutex
+	balances      map[string]*model.Balance
+	freezes       map[string]*model.FreezeRecord
+	processedRefs map[string]struct{}
+	store         BalanceStore
 }
 
 func NewBalanceBook() *BalanceBook {
 	return &BalanceBook{
-		balances: make(map[string]*model.Balance),
-		freezes:  make(map[string]*model.FreezeRecord),
+		balances:      make(map[string]*model.Balance),
+		freezes:       make(map[string]*model.FreezeRecord),
+		processedRefs: make(map[string]struct{}),
 	}
 }
 
@@ -336,9 +338,20 @@ func (b *BalanceBook) CreditAvailableWithRef(req CreditRequest) (model.Balance, 
 		return balance, applied, nil
 	}
 
+	refKey := strings.ToUpper(strings.TrimSpace(req.RefType)) + ":" + strings.TrimSpace(req.RefID)
+	b.mu.RLock()
+	_, seen := b.processedRefs[refKey]
+	b.mu.RUnlock()
+	if seen {
+		return b.GetBalance(req.UserID, req.Asset), false, nil
+	}
+
 	if err := b.CreditAvailable(req.UserID, req.Asset, req.Amount); err != nil {
 		return model.Balance{}, false, err
 	}
+	b.mu.Lock()
+	b.processedRefs[refKey] = struct{}{}
+	b.mu.Unlock()
 	return b.GetBalance(req.UserID, req.Asset), true, nil
 }
 
@@ -399,9 +412,20 @@ func (b *BalanceBook) DebitAvailableWithRef(req DebitRequest) (model.Balance, bo
 		return balance, applied, nil
 	}
 
+	refKey := strings.ToUpper(strings.TrimSpace(req.RefType)) + ":" + strings.TrimSpace(req.RefID)
+	b.mu.RLock()
+	_, seen := b.processedRefs[refKey]
+	b.mu.RUnlock()
+	if seen {
+		return b.GetBalance(req.UserID, req.Asset), false, nil
+	}
+
 	if err := b.DebitAvailable(req.UserID, req.Asset, req.Amount); err != nil {
 		return model.Balance{}, false, err
 	}
+	b.mu.Lock()
+	b.processedRefs[refKey] = struct{}{}
+	b.mu.Unlock()
 	return b.GetBalance(req.UserID, req.Asset), true, nil
 }
 

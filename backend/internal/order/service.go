@@ -101,6 +101,11 @@ func (s *Service) SubmitOrder(ctx context.Context, req SubmitRequest) (*SubmitRe
 		return nil, err
 	}
 
+	commandPrice := req.Price
+	if orderType == "MARKET" {
+		commandPrice = 0
+	}
+
 	command := sharedkafka.OrderCommand{
 		CommandID:         commandID,
 		TraceID:           strings.TrimSpace(req.TraceID),
@@ -116,7 +121,7 @@ func (s *Service) SubmitOrder(ctx context.Context, req SubmitRequest) (*SubmitRe
 		Side:              side,
 		Type:              orderType,
 		TimeInForce:       tif,
-		Price:             req.Price,
+		Price:             commandPrice,
 		Quantity:          req.Quantity,
 		RequestedAtMillis: req.RequestedAt,
 	}

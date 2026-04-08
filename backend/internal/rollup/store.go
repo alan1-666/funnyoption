@@ -1222,6 +1222,68 @@ func (s *Store) RecordSubmissionError(ctx context.Context, submissionID, errMsg 
 		RETURNING `+submissionSelectColumns, normalizeSubmissionError(errMsg))
 }
 
+func (s *Store) ReprepareFailedSubmission(ctx context.Context, batchID int64) (StoredSubmission, error) {
+	if s == nil {
+		return StoredSubmission{}, fmt.Errorf("rollup store is not configured")
+	}
+	submissions, err := s.ListSubmissions(ctx)
+	if err != nil {
+		return StoredSubmission{}, err
+	}
+	var existing *StoredSubmission
+	for i := range submissions {
+		if submissions[i].BatchID == batchID {
+			existing = &submissions[i]
+			break
+		}
+	}
+	if existing == nil {
+		return StoredSubmission{}, fmt.Errorf("no submission found for batch %d", batchID)
+	}
+	if existing.Status != SubmissionStatusFailed {
+		return StoredSubmission{}, fmt.Errorf("submission for batch %d is %s, not FAILED", batchID, existing.Status)
+	}
+
+	batches, err := s.ListBatches(ctx)
+	if err != nil {
+		return StoredSubmission{}, err
+	}
+	var targetIndex int = -1
+	for i, batch := range batches {
+		if batch.BatchID == batchID {
+			targetIndex = i
+			break
+		}
+	}
+	if targetIndex == -1 {
+		return StoredSubmission{}, fmt.Errorf("batch %d not found in rollup_shadow_batches", batchID)
+	}
+	bundle, err := BuildShadowBatchSubmissionBundle(append([]StoredBatch(nil), batches[:targetIndex]...), batches[targetIndex])
+	if err != nil {
+		return StoredSubmission{}, fmt.Errorf("rebuild submission bundle for batch %d: %w", batchID, err)
+	}
+	if _, err := s.upsertSubmission(ctx, batchID, bundle); err != nil {
+		return StoredSubmission{}, err
+	}
+
+	resumeStatus := SubmissionStatusReady
+	if strings.TrimSpace(existing.RecordTxHash) != "" && strings.TrimSpace(existing.PublishTxHash) != "" {
+		resumeStatus = SubmissionStatusDataPublished
+	} else if strings.TrimSpace(existing.RecordTxHash) != "" {
+		resumeStatus = SubmissionStatusRecordSubmitted
+	}
+	submissionID := fmt.Sprintf("rsub_%d", batchID)
+	return s.updateSubmissionRuntime(ctx, submissionID, `
+		UPDATE rollup_shadow_submissions
+		SET status = $2,
+		    accept_tx_hash = NULL,
+		    last_error = NULL,
+		    last_error_at = NULL,
+		    updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+		WHERE submission_id = $1
+		RETURNING `+submissionSelectColumns, resumeStatus)
+}
+
 func (s *Store) updateSubmissionRuntime(ctx context.Context, submissionID, query string, args ...any) (StoredSubmission, error) {
 	if s == nil {
 		return StoredSubmission{}, fmt.Errorf("rollup store is not configured")

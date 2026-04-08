@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"strings"
@@ -193,6 +194,18 @@ func (f *fakeRollupSubmissionStore) RecordSubmissionError(ctx context.Context, s
 	return f.update(submissionID, func(item *rollup.StoredSubmission) {
 		item.LastError = errMsg
 	})
+}
+
+func (f *fakeRollupSubmissionStore) ReprepareFailedSubmission(_ context.Context, batchID int64) (rollup.StoredSubmission, error) {
+	for i := range f.submissions {
+		if f.submissions[i].BatchID == batchID && f.submissions[i].Status == rollup.SubmissionStatusFailed {
+			f.submissions[i].Status = rollup.SubmissionStatusDataPublished
+			f.submissions[i].AcceptTxHash = ""
+			f.submissions[i].LastError = ""
+			return f.submissions[i], nil
+		}
+	}
+	return rollup.StoredSubmission{}, fmt.Errorf("no failed submission for batch %d", batchID)
 }
 
 func (f *fakeRollupSubmissionStore) upsert(submission rollup.StoredSubmission) {
@@ -761,6 +774,37 @@ func TestRollupSubmissionProcessorRunUntilIdle(t *testing.T) {
 	}
 	if len(store.materializedByIDCall) == 0 || store.materializedByIDCall[len(store.materializedByIDCall)-1] != submission.SubmissionID {
 		t.Fatalf("expected accepted submission to be materialized, calls=%v", store.materializedByIDCall)
+	}
+}
+
+func TestRollupSubmissionProcessorPollOnceRetriesFailedSubmission(t *testing.T) {
+	key := mustGenerateKey(t)
+	submission := mustTestStoredSubmission(t, "rsub_18", 18, rollup.SubmissionStatusFailed)
+	submission.RecordTxHash = "0xabc123"
+	submission.PublishTxHash = "0xdef456"
+	submission.AcceptTxHash = "0xold789"
+	submission.LastError = "acceptVerifiedBatch tx reverted"
+	store := &fakeRollupSubmissionStore{
+		submissions: []rollup.StoredSubmission{submission},
+	}
+	sender := &fakeRollupTxSender{}
+	processor := newTestRollupSubmissionProcessor(t, key, store, sender)
+
+	progress, err := processor.PollOnce(context.Background())
+	if err != nil {
+		t.Fatalf("PollOnce returned error: %v", err)
+	}
+	if progress.Action != RollupSubmissionActionReprepared {
+		t.Fatalf("action = %s, want %s", progress.Action, RollupSubmissionActionReprepared)
+	}
+	if store.submissions[0].Status != rollup.SubmissionStatusDataPublished {
+		t.Fatalf("status after reprepare = %s, want %s", store.submissions[0].Status, rollup.SubmissionStatusDataPublished)
+	}
+	if store.submissions[0].AcceptTxHash != "" {
+		t.Fatalf("accept_tx_hash should be cleared, got %s", store.submissions[0].AcceptTxHash)
+	}
+	if store.submissions[0].LastError != "" {
+		t.Fatalf("last_error should be cleared, got %s", store.submissions[0].LastError)
 	}
 }
 

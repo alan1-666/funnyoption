@@ -52,6 +52,7 @@ const (
 	RollupSubmissionActionAcceptSubmitted     = "ACCEPT_SUBMITTED"
 	RollupSubmissionActionAcceptPending       = "ACCEPT_PENDING"
 	RollupSubmissionActionAccepted            = "ACCEPTED"
+	RollupSubmissionActionReprepared          = "REPREPARED"
 	RollupSubmissionActionFailed              = "FAILED"
 )
 
@@ -72,6 +73,7 @@ type rollupSubmissionStore interface {
 	MarkSubmissionAccepted(ctx context.Context, submissionID string) (rollup.StoredSubmission, error)
 	MarkSubmissionFailed(ctx context.Context, submissionID, errMsg string) (rollup.StoredSubmission, error)
 	RecordSubmissionError(ctx context.Context, submissionID, errMsg string) (rollup.StoredSubmission, error)
+	ReprepareFailedSubmission(ctx context.Context, batchID int64) (rollup.StoredSubmission, error)
 }
 
 type rollupTxSender interface {
@@ -244,7 +246,7 @@ func (p *RollupSubmissionProcessor) RunUntilIdle(ctx context.Context) (RollupSub
 			RollupSubmissionActionFailedBlocked,
 			RollupSubmissionActionFailed:
 			return run, nil
-		case RollupSubmissionActionAccepted, RollupSubmissionActionEscapeRootAnchored:
+		case RollupSubmissionActionAccepted, RollupSubmissionActionEscapeRootAnchored, RollupSubmissionActionReprepared:
 			continue
 		case RollupSubmissionActionRecordSubmitted,
 			RollupSubmissionActionRecordPending,
@@ -315,11 +317,26 @@ func (p *RollupSubmissionProcessor) PollOnce(ctx context.Context) (RollupSubmiss
 			Note:       "earliest submission is blocked on auth join status",
 		}, nil
 	case rollup.SubmissionStatusFailed:
+		p.logger.Info("retrying failed submission by regenerating proof",
+			"batch_id", submission.BatchID,
+			"submission_id", submission.SubmissionID,
+			"last_error", submission.LastError,
+		)
+		retried, err := p.store.ReprepareFailedSubmission(ctx, submission.BatchID)
+		if err != nil {
+			p.logger.Error("failed to reprepare submission", "batch_id", submission.BatchID, "err", err)
+			return RollupSubmissionProgress{
+				Action:     RollupSubmissionActionFailedBlocked,
+				Prepared:   prepared,
+				Submission: submission,
+				Note:       fmt.Sprintf("reprepare failed: %v", err),
+			}, nil
+		}
 		return RollupSubmissionProgress{
-			Action:     RollupSubmissionActionFailedBlocked,
-			Prepared:   prepared,
-			Submission: submission,
-			Note:       "earliest submission is in FAILED state and blocks later batches",
+			Action:     RollupSubmissionActionReprepared,
+			Prepared:   true,
+			Submission: retried,
+			Note:       fmt.Sprintf("regenerated proof for batch %d; resume status=%s", retried.BatchID, retried.Status),
 		}, nil
 	case rollup.SubmissionStatusReady:
 		return p.submitRecordLeg(ctx, submission, prepared)

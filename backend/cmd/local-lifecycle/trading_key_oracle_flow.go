@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -206,11 +207,12 @@ func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cf
 		},
 	}
 
-	buyerSession, buyerChallenge, err := client.registerTradingKey(ctx, buyer, cfg.ChainID, cfg.VaultAddress)
+	vaultAddr := os.Getenv("FUNNYOPTION_VAULT_ADDRESS")
+	buyerSession, buyerChallenge, err := client.registerTradingKey(ctx, buyer, cfg.ChainID, vaultAddr)
 	if err != nil {
 		return fmt.Errorf("register buyer trading key: %w", err)
 	}
-	makerSession, makerChallenge, err := client.registerTradingKey(ctx, maker, cfg.ChainID, cfg.VaultAddress)
+	makerSession, makerChallenge, err := client.registerTradingKey(ctx, maker, cfg.ChainID, vaultAddr)
 	if err != nil {
 		return fmt.Errorf("register maker trading key: %w", err)
 	}
@@ -218,7 +220,7 @@ func runTradingKeyOracleLifecycle(opts lifecycleOptions, logger *slog.Logger, cf
 		Step:          "1. trading-key challenge + wallet authorization register",
 		Status:        "PASS",
 		SignatureMode: "real EIP-712 payload shape, signed by local deterministic test EOAs as wallet substitutes",
-		Notes:         fmt.Sprintf("buyer=%s maker=%s vault=%s chain_id=%d", buyerSession.SessionID, makerSession.SessionID, cfg.VaultAddress, cfg.ChainID),
+		Notes:         fmt.Sprintf("buyer=%s maker=%s vault=%s chain_id=%d", buyerSession.SessionID, makerSession.SessionID, vaultAddr, cfg.ChainID),
 	})
 	summary.IDs.BuyerChallengeID = buyerChallenge.ChallengeID
 	summary.IDs.BuyerTradingKeyID = buyerSession.SessionID

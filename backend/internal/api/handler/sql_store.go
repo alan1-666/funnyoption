@@ -41,8 +41,6 @@ type QueryStore interface {
 	GetMarketResolution(ctx context.Context, marketID int64) (MarketResolutionState, bool, error)
 	ListMarkets(ctx context.Context, req dto.ListMarketsRequest) ([]dto.MarketResponse, error)
 	ListSessions(ctx context.Context, req dto.ListSessionsRequest) ([]dto.SessionResponse, error)
-	ListDeposits(ctx context.Context, req dto.ListDepositsRequest) ([]dto.DepositResponse, error)
-	ListWithdrawals(ctx context.Context, req dto.ListWithdrawalsRequest) ([]dto.WithdrawalResponse, error)
 	ListRollupForcedWithdrawals(ctx context.Context, req dto.ListRollupForcedWithdrawalsRequest) ([]dto.RollupForcedWithdrawalResponse, error)
 	ListRollupEscapeCollateralClaims(ctx context.Context, req dto.ListRollupEscapeCollateralClaimsRequest) ([]dto.RollupEscapeCollateralClaimResponse, error)
 	ListRollupWithdrawalClaims(ctx context.Context, req dto.ListRollupWithdrawalClaimsRequest) ([]dto.RollupWithdrawalClaimResponse, error)
@@ -802,142 +800,6 @@ func (s *SQLStore) ListSessions(ctx context.Context, req dto.ListSessionsRequest
 	var items []dto.SessionResponse
 	for rows.Next() {
 		item, err := scanSession(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return normalizeCollectionItems(items), nil
-}
-
-func (s *SQLStore) ListDeposits(ctx context.Context, req dto.ListDepositsRequest) ([]dto.DepositResponse, error) {
-	var (
-		args    []any
-		filters []string
-	)
-	query := `
-		SELECT deposit_id, user_id, wallet_address, vault_address, asset, amount,
-		       chain_name, network_name, tx_hash, log_index, block_number, status,
-		       credited_at, created_at, updated_at
-		FROM chain_deposits
-	`
-
-	if req.UserID > 0 {
-		args = append(args, req.UserID)
-		filters = append(filters, fmt.Sprintf("user_id = $%d", len(args)))
-	}
-	if wallet := normalizeWalletAddress(req.WalletAddress); wallet != "" {
-		args = append(args, wallet)
-		filters = append(filters, fmt.Sprintf("wallet_address = $%d", len(args)))
-	}
-	if status := normalizeOptional(req.Status); status != "" {
-		args = append(args, status)
-		filters = append(filters, fmt.Sprintf("status = $%d", len(args)))
-	}
-	if len(filters) > 0 {
-		query += " WHERE " + strings.Join(filters, " AND ")
-	}
-
-	args = append(args, normalizeLimit(req.Limit))
-	query += fmt.Sprintf(" ORDER BY created_at DESC, deposit_id DESC LIMIT $%d", len(args))
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var items []dto.DepositResponse
-	for rows.Next() {
-		item, err := scanDeposit(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return normalizeCollectionItems(items), nil
-}
-
-func (s *SQLStore) ListWithdrawals(ctx context.Context, req dto.ListWithdrawalsRequest) ([]dto.WithdrawalResponse, error) {
-	var (
-		args    []any
-		filters []string
-	)
-	query := `
-		SELECT w.withdrawal_id,
-		       w.user_id,
-		       w.wallet_address,
-		       w.recipient_address,
-		       w.vault_address,
-		       w.asset,
-		       w.amount,
-		       w.chain_name,
-		       w.network_name,
-		       w.tx_hash,
-		       w.log_index,
-		       w.block_number,
-		       CASE
-		           WHEN aw.claim_status = 'CLAIMED' THEN 'CLAIMED'
-		           WHEN aw.claim_status = 'CLAIM_SUBMITTED' THEN 'CLAIM_SUBMITTED'
-		           WHEN aw.claim_status = 'CLAIMABLE' THEN 'CLAIMABLE'
-		           WHEN aw.claim_status = 'FAILED' THEN 'CLAIM_FAILED'
-		           ELSE w.status
-		       END AS effective_status,
-		       COALESCE(aw.claim_status, ''),
-		       COALESCE(aw.claim_tx_hash, ''),
-		       COALESCE(aw.claim_submitted_at, 0),
-		       COALESCE(aw.claimed_at, 0),
-		       COALESCE(aw.last_error, ''),
-		       w.debited_at,
-		       w.created_at,
-		       w.updated_at
-		FROM chain_withdrawals w
-		LEFT JOIN rollup_accepted_withdrawals aw
-		  ON aw.withdrawal_id = w.withdrawal_id
-	`
-
-	if req.UserID > 0 {
-		args = append(args, req.UserID)
-		filters = append(filters, fmt.Sprintf("user_id = $%d", len(args)))
-	}
-	if wallet := normalizeWalletAddress(req.WalletAddress); wallet != "" {
-		args = append(args, wallet)
-		filters = append(filters, fmt.Sprintf("wallet_address = $%d", len(args)))
-	}
-	if status := normalizeOptional(req.Status); status != "" {
-		args = append(args, status)
-		filters = append(filters, fmt.Sprintf(`(
-			CASE
-			    WHEN aw.claim_status = 'CLAIMED' THEN 'CLAIMED'
-			    WHEN aw.claim_status = 'CLAIM_SUBMITTED' THEN 'CLAIM_SUBMITTED'
-			    WHEN aw.claim_status = 'CLAIMABLE' THEN 'CLAIMABLE'
-			    WHEN aw.claim_status = 'FAILED' THEN 'CLAIM_FAILED'
-			    ELSE w.status
-			END
-		) = $%d`, len(args)))
-	}
-	if len(filters) > 0 {
-		query += " WHERE " + strings.Join(filters, " AND ")
-	}
-
-	args = append(args, normalizeLimit(req.Limit))
-	query += fmt.Sprintf(" ORDER BY w.created_at DESC, w.withdrawal_id DESC LIMIT $%d", len(args))
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var items []dto.WithdrawalResponse
-	for rows.Next() {
-		item, err := scanWithdrawal(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -1955,37 +1817,8 @@ func (s *SQLStore) BuildLiabilityReport(ctx context.Context) ([]dto.LiabilityRep
 		indexByAsset[lines[i].Asset] = i
 	}
 
-	withdrawRows, err := s.db.QueryContext(ctx, `
-		SELECT asset, SUM(amount) AS pending_withdraw
-		FROM chain_withdrawals
-		WHERE status IN ('QUEUED', 'DEBITED')
-		GROUP BY asset
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer withdrawRows.Close()
-
-	for withdrawRows.Next() {
-		var (
-			asset   string
-			pending int64
-		)
-		if err := withdrawRows.Scan(&asset, &pending); err != nil {
-			return nil, err
-		}
-		idx, ok := indexByAsset[asset]
-		if !ok {
-			lines = append(lines, dto.LiabilityReportLine{Asset: asset})
-			idx = len(lines) - 1
-			indexByAsset[asset] = idx
-		}
-		lines[idx].PendingWithdraw = pending
-		lines[idx].InternalTotal = lines[idx].UserAvailable + lines[idx].UserFrozen + lines[idx].PendingWithdraw + lines[idx].PendingSettlement + lines[idx].PlatformFee
-	}
-
-	if err := withdrawRows.Err(); err != nil {
-		return nil, err
+	for i := range lines {
+		lines[i].InternalTotal = lines[i].UserAvailable + lines[i].UserFrozen + lines[i].PendingSettlement + lines[i].PlatformFee
 	}
 	return normalizeCollectionItems(lines), nil
 }
@@ -2224,60 +2057,6 @@ func scanUserProfile(row scanner) (dto.UserProfileResponse, error) {
 			return dto.UserProfileResponse{}, ErrNotFound
 		}
 		return dto.UserProfileResponse{}, err
-	}
-	return item, nil
-}
-
-func scanDeposit(row scanner) (dto.DepositResponse, error) {
-	var item dto.DepositResponse
-	if err := row.Scan(
-		&item.DepositID,
-		&item.UserID,
-		&item.WalletAddress,
-		&item.VaultAddress,
-		&item.Asset,
-		&item.Amount,
-		&item.ChainName,
-		&item.NetworkName,
-		&item.TxHash,
-		&item.LogIndex,
-		&item.BlockNumber,
-		&item.Status,
-		&item.CreditedAt,
-		&item.CreatedAt,
-		&item.UpdatedAt,
-	); err != nil {
-		return dto.DepositResponse{}, err
-	}
-	return item, nil
-}
-
-func scanWithdrawal(row scanner) (dto.WithdrawalResponse, error) {
-	var item dto.WithdrawalResponse
-	if err := row.Scan(
-		&item.WithdrawalID,
-		&item.UserID,
-		&item.WalletAddress,
-		&item.RecipientAddress,
-		&item.VaultAddress,
-		&item.Asset,
-		&item.Amount,
-		&item.ChainName,
-		&item.NetworkName,
-		&item.TxHash,
-		&item.LogIndex,
-		&item.BlockNumber,
-		&item.Status,
-		&item.ClaimStatus,
-		&item.ClaimTxHash,
-		&item.ClaimSubmittedAt,
-		&item.ClaimedAt,
-		&item.LastError,
-		&item.DebitedAt,
-		&item.CreatedAt,
-		&item.UpdatedAt,
-	); err != nil {
-		return dto.WithdrawalResponse{}, err
 	}
 	return item, nil
 }

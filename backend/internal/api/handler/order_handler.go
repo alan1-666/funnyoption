@@ -37,7 +37,6 @@ type Dependencies struct {
 	OperatorWallets       []string
 	DefaultOperatorUserID int64
 	ExpectedChainID       int64
-	ExpectedVaultAddress  string
 }
 
 type OrderHandler struct {
@@ -50,7 +49,6 @@ type OrderHandler struct {
 	operatorWallets     map[string]struct{}
 	operatorUserID      int64
 	expectedChainID     int64
-	expectedVaultAddr   string
 	bootstrapReplayGate *bootstrapReplayGate
 }
 
@@ -80,7 +78,6 @@ func NewOrderHandler(deps Dependencies) *OrderHandler {
 		operatorWallets:     normalizeOperatorWalletSet(deps.OperatorWallets),
 		operatorUserID:      deps.DefaultOperatorUserID,
 		expectedChainID:     expectedChainID,
-		expectedVaultAddr:   sharedauth.NormalizeHex(deps.ExpectedVaultAddress),
 		bootstrapReplayGate: newBootstrapReplayGate(),
 	}
 }
@@ -107,12 +104,9 @@ func (h *OrderHandler) LookupActiveSession(ctx context.Context, sessionID string
 	return session.UserID, nil
 }
 
-func (h *OrderHandler) validateTradingKeyDomain(chainID int64, vaultAddress string) error {
+func (h *OrderHandler) validateTradingKeyDomain(chainID int64, _ string) error {
 	if chainID != h.expectedChainID {
 		return fmt.Errorf("chain_id does not match target chain")
-	}
-	if sharedauth.NormalizeHex(vaultAddress) != h.expectedVaultAddr {
-		return fmt.Errorf("vault_address does not match target vault")
 	}
 	return nil
 }
@@ -675,7 +669,7 @@ func (h *OrderHandler) CreateTradingKeyChallenge(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
 		return
 	}
-	if h.expectedChainID <= 0 || h.expectedVaultAddr == "" {
+	if h.expectedChainID <= 0 {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "trading key auth is not configured"})
 		return
 	}
@@ -722,7 +716,7 @@ func (h *OrderHandler) RegisterTradingKey(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
 		return
 	}
-	if h.expectedChainID <= 0 || h.expectedVaultAddr == "" {
+	if h.expectedChainID <= 0 {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "trading key auth is not configured"})
 		return
 	}
@@ -963,46 +957,6 @@ func (h *OrderHandler) RevokeSession(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, item)
-}
-
-func (h *OrderHandler) ListDeposits(ctx *gin.Context) {
-	var req dto.ListDepositsRequest
-	if err := ctx.ShouldBindQuery(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	if h.store == nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
-		return
-	}
-
-	items, err := h.store.ListDeposits(ctx, req)
-	if err != nil {
-		h.logger.Error("list deposits failed", "err", err)
-		ctx.JSON(http.StatusBadGateway, gin.H{"error": "list deposits failed"})
-		return
-	}
-	writeCollectionResponse(ctx, http.StatusOK, items)
-}
-
-func (h *OrderHandler) ListWithdrawals(ctx *gin.Context) {
-	var req dto.ListWithdrawalsRequest
-	if err := ctx.ShouldBindQuery(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	if h.store == nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "query store is not configured"})
-		return
-	}
-
-	items, err := h.store.ListWithdrawals(ctx, req)
-	if err != nil {
-		h.logger.Error("list withdrawals failed", "err", err)
-		ctx.JSON(http.StatusBadGateway, gin.H{"error": "list withdrawals failed"})
-		return
-	}
-	writeCollectionResponse(ctx, http.StatusOK, items)
 }
 
 func (h *OrderHandler) ListRollupForcedWithdrawals(ctx *gin.Context) {

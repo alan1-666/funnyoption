@@ -8,6 +8,7 @@ import (
 
 	accountclient "funnyoption/internal/account/client"
 	"funnyoption/internal/api/handler"
+	"funnyoption/internal/custody"
 	"funnyoption/internal/rollup"
 	"funnyoption/internal/shared/config"
 	shareddb "funnyoption/internal/shared/db"
@@ -36,7 +37,25 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	}
 	defer accountRPC.Close()
 
-	engine := NewEngine(Meta{
+	var saasClient *custody.SaaSClient
+	if cfg.CustodySaaSBaseURL != "" {
+		saasClient = custody.NewSaaSClient(cfg.CustodySaaSBaseURL, cfg.CustodyDepositToken, cfg.CustodySaaSTenantID)
+	}
+	custodyStore := custody.NewStore(dbConn)
+	custodyHandler := custody.NewHandler(custody.HandlerDeps{
+		Logger:       logger,
+		Store:        custodyStore,
+		SaaS:         saasClient,
+		Account:      accountRPC,
+		DepositToken: cfg.CustodyDepositToken,
+		Chain:            cfg.CustodyChainName,
+		Network:          cfg.CustodyNetworkName,
+		Coin:             cfg.CollateralSymbol,
+		ChainDecimals:    cfg.CollateralDecimals,
+		AccountingDigits: cfg.CollateralDisplayDigits,
+	})
+
+	engine := NewEngineWithCustody(Meta{
 		Service: cfg.Name,
 		Env:     cfg.Env,
 	}, handler.Dependencies{
@@ -49,8 +68,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 		OperatorWallets:       cfg.OperatorWallets,
 		DefaultOperatorUserID: cfg.DefaultOperatorUserID,
 		ExpectedChainID:       cfg.ChainID,
-		ExpectedVaultAddress:  cfg.VaultAddress,
-	}, cfg.CORSExtraOrigins)
+	}, custodyHandler, cfg.CORSExtraOrigins)
 
 	server := &http.Server{
 		Addr:    cfg.HTTPAddr,

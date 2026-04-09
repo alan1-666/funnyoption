@@ -29,8 +29,6 @@ func registerUserScopedReadRoutes(api *gin.RouterGroup, orderHandler *handler.Or
 	userScoped.GET("/payouts", orderHandler.ListPayouts)
 	userScoped.GET("/profile", orderHandler.GetProfile)
 	userScoped.GET("/freezes", orderHandler.ListFreezes)
-	userScoped.GET("/deposits", orderHandler.ListDeposits)
-	userScoped.GET("/withdrawals", orderHandler.ListWithdrawals)
 	userScoped.GET("/ledger/entries", orderHandler.ListLedgerEntries)
 	userScoped.GET("/ledger/entries/:entry_id/postings", orderHandler.ListLedgerPostings)
 	userScoped.GET("/reports/liabilities", orderHandler.GetLiabilityReport)

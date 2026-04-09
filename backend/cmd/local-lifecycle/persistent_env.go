@@ -71,7 +71,7 @@ func buildDepositEnvironment(ctx context.Context, cfg config.ServiceConfig, buye
 func shouldUsePersistentLocalChain(cfg config.ServiceConfig) bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv("FUNNYOPTION_LOCAL_CHAIN_MODE")), "anvil") &&
 		strings.TrimSpace(cfg.ChainRPCURL) != "" &&
-		strings.TrimSpace(cfg.VaultAddress) != "" &&
+		strings.TrimSpace(os.Getenv("FUNNYOPTION_VAULT_ADDRESS")) != "" &&
 		strings.TrimSpace(os.Getenv("FUNNYOPTION_COLLATERAL_TOKEN_ADDRESS")) != ""
 }
 
@@ -109,7 +109,7 @@ func newPersistentLocalChainEnvironment(ctx context.Context, cfg config.ServiceC
 		chainID:               chainID.Int64(),
 		chainName:             cfg.ChainName,
 		networkName:           cfg.NetworkName,
-		vaultAddress:          common.HexToAddress(cfg.VaultAddress),
+		vaultAddress:          common.HexToAddress(os.Getenv("FUNNYOPTION_VAULT_ADDRESS")),
 		tokenAddress:          common.HexToAddress(tokenAddress),
 		listenerStartBlock:    startBlock,
 		listenerConfirmations: confirmations,

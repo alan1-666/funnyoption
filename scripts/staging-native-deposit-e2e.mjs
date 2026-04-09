@@ -141,16 +141,22 @@ async function createSession(account, walletClient) {
   };
 }
 
-async function waitBalance(userId, sessionId) {
+async function waitBalance(userId, sessionId, opts = {}) {
   const headers = { Authorization: `Bearer ${sessionId}` };
-  for (let i = 0; i < 45; i++) {
+  const maxAttempts = opts.maxAttempts ?? 70;
+  const intervalMs = opts.intervalMs ?? 2500;
+  for (let i = 0; i < maxAttempts; i++) {
     const r = await fetchJson(`${API_BASE}/api/v1/balances?user_id=${userId}&asset=USDT&limit=5`, { headers });
     if (r.ok) {
       const items = r.data?.items || r.data?.balances || [];
       const usdt = items.find((b) => String(b.asset).toUpperCase() === "USDT");
       if (usdt && Number(usdt.available) > 0) return Number(usdt.available);
     }
-    await sleep(2000);
+    if (i > 0 && i % 8 === 0 && opts.verbose) {
+      const depR = await fetchJson(`${API_BASE}/api/v1/deposits?user_id=${userId}&limit=5`, { headers });
+      console.log(`  [poll ${i}] balances ok=${r.ok} deposits ok=${depR.ok} depCount=${(depR.data?.items || depR.data?.deposits || []).length}`);
+    }
+    await sleep(intervalMs);
   }
   return 0;
 }
@@ -187,9 +193,17 @@ async function main() {
   await waitTx(pc, hash, "depositNative");
   console.log("tx ok", hash);
 
-  const bal = await waitBalance(session.userId, session.sessionId);
+  console.log("waiting for confirmations + listener (BSC default 6 conf)…");
+  await sleep(15000);
+
+  const bal = await waitBalance(session.userId, session.sessionId, { verbose: true });
   if (bal <= 0) {
-    console.error("FAIL: USDT accounting balance still 0 after depositNative (check chain listener / deploy).");
+    const headers = { Authorization: `Bearer ${session.sessionId}` };
+    const depR = await fetchJson(`${API_BASE}/api/v1/deposits?user_id=${session.userId}&limit=10`, { headers });
+    const deposits = depR.data?.items || depR.data?.deposits || [];
+    console.error("FAIL: USDT accounting balance still 0 after depositNative.");
+    console.error("Debug: deposits returned", depR.ok ? JSON.stringify(deposits) : depR.data);
+    console.error("If on-chain tx succeeded but no row here, redeploy chain with: docker compose build chain && docker compose up -d chain (restart only is not enough).");
     process.exit(1);
   }
   console.log(`PASS: available USDT (accounting units) = ${bal}`);

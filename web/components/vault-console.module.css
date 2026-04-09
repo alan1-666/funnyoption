@@ -1,6 +1,6 @@
 .console {
   display: grid;
-  gap: 20px;
+  gap: 16px;
   max-width: 520px;
   padding: 22px 22px 28px;
 }
@@ -19,26 +19,48 @@
   color: var(--muted);
 }
 
-.block {
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  padding: 4px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.tab {
+  min-height: 40px;
+  border: none;
+  border-radius: calc(var(--radius-md) - 3px);
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tabActive {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.tabPanel {
   display: grid;
   gap: 14px;
-  padding: 16px 0 0;
-  border-top: 1px solid var(--line);
+  padding-top: 4px;
 }
 
-.block:first-of-type {
-  border-top: none;
-  padding-top: 0;
-}
-
-.blockTitle {
+.tabHint {
   margin: 0;
   font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  line-height: 1.55;
   color: var(--muted);
-  font-family: var(--font-mono), monospace;
 }
 
 .field {
@@ -51,15 +73,8 @@
   color: var(--muted);
 }
 
-.fieldRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-
-.input,
 .inputWide {
+  width: 100%;
   min-height: 42px;
   padding: 10px 12px;
   border-radius: var(--radius-md);
@@ -68,49 +83,31 @@
   color: var(--text);
 }
 
-.fieldRow .input {
-  flex: 1 1 140px;
-  min-width: 0;
-}
-
-.inputWide {
+.select {
   width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text);
+  cursor: pointer;
 }
 
-.primary,
-.secondary {
+.primary {
   min-height: 42px;
   padding: 0 16px;
   border-radius: var(--radius-md);
   font-weight: 700;
   border: 1px solid var(--line-strong);
-  white-space: nowrap;
-}
-
-.primary {
   background: linear-gradient(135deg, var(--cyan), #d8fbff);
   color: #08090b;
+  justify-self: start;
 }
 
 .primary:disabled {
   opacity: 0.55;
   cursor: not-allowed;
-}
-
-.secondary {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text);
-}
-
-.secondary:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.divider {
-  height: 1px;
-  background: var(--line);
-  margin: 2px 0;
 }
 
 .hint {

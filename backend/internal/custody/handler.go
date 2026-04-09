@@ -239,6 +239,9 @@ func (h *Handler) GetDepositAddress(ctx *gin.Context) {
 	}
 
 	if address != "" {
+		// Backfill extra coin watches for users who got an address before multi-coin support
+		go h.backfillExtraCoinWatches(context.Background(), userID, address)
+
 		ctx.JSON(http.StatusOK, gin.H{
 			"address":         address,
 			"chain":           h.chain,
@@ -452,6 +455,39 @@ func (h *Handler) supportedCoinNames() []string {
 		names[i] = c.Coin
 	}
 	return names
+}
+
+// backfillExtraCoinWatches checks existing users and registers missing coin watches.
+func (h *Handler) backfillExtraCoinWatches(ctx context.Context, userID int64, address string) {
+	if h.saas == nil {
+		return
+	}
+	accountID := fmt.Sprintf("%d", userID)
+	_, keyID, _ := h.store.GetUserAddressWithKeyID(ctx, userID, h.chain, h.network, h.coin)
+	for _, dc := range h.depositCoins {
+		if strings.EqualFold(dc.Coin, h.coin) {
+			continue
+		}
+		existing, _ := h.store.GetUserAddress(ctx, userID, h.chain, h.network, dc.Coin)
+		if existing != "" {
+			continue
+		}
+		_, err := h.saas.CreateAddress(ctx, accountID, h.chain, dc.Coin, h.network)
+		if err != nil {
+			h.logger.Warn("backfill coin watch failed",
+				"user_id", userID, "coin", dc.Coin, "err", err)
+			continue
+		}
+		_ = h.store.SaveAddressMapping(ctx, AddressMapping{
+			UserID:  userID,
+			Chain:   h.chain,
+			Network: h.network,
+			Coin:    dc.Coin,
+			Address: address,
+			KeyID:   keyID,
+		})
+		h.logger.Info("backfilled coin watch", "user_id", userID, "coin", dc.Coin, "address", address)
+	}
 }
 
 // registerExtraCoinWatches creates SaaS address watches for deposit coins

@@ -4,7 +4,6 @@ import type {
   ApiReadError,
   Balance,
   ChainTask,
-  Deposit,
   Market,
   MarketRuntime,
   Notification,
@@ -14,7 +13,6 @@ import type {
   SessionGrant,
   Trade,
   UserProfile,
-  Withdrawal
 } from "@/lib/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8080";
@@ -386,29 +384,6 @@ export async function getPositions(userId?: number) {
   return (await getPositionsRead(userId)).items;
 }
 
-export async function getDepositsRead(userId?: number): Promise<ApiCollectionResult<Deposit>> {
-  if (!hasScopedUserId(userId)) {
-    return normalizeCollectionState<Deposit>([]);
-  }
-
-  return fetchCollection<Deposit>(`/api/v1/deposits?user_id=${userId}&limit=20`);
-}
-
-export async function getDeposits(userId?: number) {
-  return (await getDepositsRead(userId)).items;
-}
-
-export async function getWithdrawalsRead(userId?: number): Promise<ApiCollectionResult<Withdrawal>> {
-  if (!hasScopedUserId(userId)) {
-    return normalizeCollectionState<Withdrawal>([]);
-  }
-
-  return fetchCollection<Withdrawal>(`/api/v1/withdrawals?user_id=${userId}&limit=20`);
-}
-
-export async function getWithdrawals(userId?: number) {
-  return (await getWithdrawalsRead(userId)).items;
-}
 
 export async function getPayoutsRead(userId?: number): Promise<ApiCollectionResult<Payout>> {
   if (!hasScopedUserId(userId)) {
@@ -479,6 +454,43 @@ export async function markAllNotificationsRead(): Promise<void> {
   await authenticatedFetch(`${API_BASE_URL}/api/v1/notifications/read-all`, {
     method: "PATCH",
   });
+}
+
+export interface CustodyDepositAddress {
+  address: string;
+  chain: string;
+  network: string;
+  coin: string;
+}
+
+export async function getDepositAddress(): Promise<CustodyDepositAddress> {
+  const response = await authenticatedFetch(`${API_BASE_URL}/api/v1/custody/deposit-address`);
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? `HTTP ${response.status}`);
+  }
+  return (await response.json()) as CustodyDepositAddress;
+}
+
+export interface CustodyWithdrawResult {
+  withdraw_id: string;
+  status: string;
+  tx_hash: string;
+}
+
+export async function requestWithdraw(toAddress: string, amount: number, asset?: string): Promise<CustodyWithdrawResult> {
+  const body: Record<string, unknown> = { to_address: toAddress, amount };
+  if (asset) body.asset = asset;
+  const response = await authenticatedFetch(`${API_BASE_URL}/api/v1/custody/withdraw`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? `HTTP ${response.status}`);
+  }
+  return (await response.json()) as CustodyWithdrawResult;
 }
 
 export async function proposeMarket(input: {

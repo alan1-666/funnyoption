@@ -6,19 +6,18 @@ import { useTradingSession } from "@/components/trading-session-provider";
 import { authenticatedFetch } from "@/lib/api";
 import { formatAssetAmount, formatTimestamp, formatToken, shortenAddress } from "@/lib/format";
 import { zhGenericStatus, zhOutcome } from "@/lib/locale";
-import type { Deposit, Payout } from "@/lib/types";
+import type { Payout } from "@/lib/types";
 import styles from "@/components/claim-console.module.css";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8080";
 
 interface ClaimConsoleProps {
   payouts: Payout[];
-  deposits: Deposit[];
 }
 
-export function ClaimConsole({ payouts, deposits }: ClaimConsoleProps) {
+export function ClaimConsole({ payouts }: ClaimConsoleProps) {
   const { wallet, session } = useTradingSession();
-  const primaryWallet = useMemo(() => deposits[0]?.wallet_address ?? wallet?.walletAddress ?? "", [deposits, wallet]);
+  const primaryWallet = useMemo(() => wallet?.walletAddress ?? "", [wallet]);
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [statusMap, setStatusMap] = useState<Record<string, string>>({});
 

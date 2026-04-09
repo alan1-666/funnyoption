@@ -461,6 +461,7 @@ export interface CustodyDepositAddress {
   chain: string;
   network: string;
   coin: string;
+  supported_coins?: string[];
 }
 
 export async function getDepositAddress(): Promise<CustodyDepositAddress> {

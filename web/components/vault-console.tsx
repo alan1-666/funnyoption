@@ -106,7 +106,7 @@ export function VaultConsole() {
         <div>
           <span className="eyebrow">充值与提现</span>
           <p className={styles.sub}>
-            连接钱包登录后，系统会分配专属充值地址；向该地址转入 {COLLATERAL_SYMBOL} 即可入账交易。
+            连接钱包登录后，系统会分配专属充值地址；向该地址转入支持的币种即可自动折算为 {COLLATERAL_SYMBOL} 余额。
           </p>
         </div>
       </header>
@@ -158,7 +158,7 @@ export function VaultConsole() {
           ) : depositAddr ? (
             <>
               <p className={styles.tabHint}>
-                向以下地址转入 {depositAddr.coin}（{depositAddr.chain} / {depositAddr.network}），到账后自动入账余额。
+                向以下地址转入支持的币种（{depositAddr.chain} / {depositAddr.network}），到账后自动折算为 {COLLATERAL_SYMBOL} 余额。
               </p>
 
               <div className={styles.addressCard}>
@@ -172,11 +172,11 @@ export function VaultConsole() {
               <ul className={styles.infoList}>
                 <li>链：{depositAddr.chain}</li>
                 <li>网络：{depositAddr.network}</li>
-                <li>币种：{depositAddr.coin}</li>
+                <li>支持币种：{(depositAddr.supported_coins ?? [depositAddr.coin]).join("、")}</li>
               </ul>
 
               <p className={styles.hint}>
-                请勿向此地址转入非 {depositAddr.coin} 资产，否则可能无法找回。充值到账时间取决于链上确认速度。
+                非 {COLLATERAL_SYMBOL} 币种（如 BNB）将按充值到账时的实时市场价格自动折算为 {COLLATERAL_SYMBOL} 入账。充值到账时间取决于链上确认速度。
               </p>
             </>
           ) : null}

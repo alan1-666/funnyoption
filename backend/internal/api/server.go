@@ -42,11 +42,13 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 		saasClient = custody.NewSaaSClient(cfg.CustodySaaSBaseURL, cfg.CustodySaaSAPIToken, cfg.CustodySaaSTenantID)
 	}
 	custodyStore := custody.NewStore(dbConn)
+	priceProvider := custody.NewPriceProvider(0)
 	custodyHandler := custody.NewHandler(custody.HandlerDeps{
 		Logger:       logger,
 		Store:        custodyStore,
 		SaaS:         saasClient,
 		Account:      accountRPC,
+		Price:        priceProvider,
 		DepositToken: cfg.CustodyDepositToken,
 		Chain:            cfg.CustodyChainName,
 		Network:          cfg.CustodyNetworkName,

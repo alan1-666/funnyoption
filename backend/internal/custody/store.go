@@ -92,7 +92,8 @@ type DepositRecord struct {
 	BizID        string
 	UserID       int64
 	Address      string
-	Asset        string
+	Asset        string // original deposit coin (e.g. "BNB")
+	CreditAsset  string // credited asset (always "USDT")
 	ChainAmount  string
 	CreditAmount int64
 	ChainID      int64
@@ -101,12 +102,16 @@ type DepositRecord struct {
 }
 
 func (s *Store) InsertDeposit(ctx context.Context, d DepositRecord) error {
+	creditAsset := strings.ToUpper(strings.TrimSpace(d.CreditAsset))
+	if creditAsset == "" {
+		creditAsset = strings.ToUpper(strings.TrimSpace(d.Asset))
+	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO custody_deposits (biz_id, user_id, address, asset, chain_amount, credit_amount, chain_id, tx_hash, tx_index)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO custody_deposits (biz_id, user_id, address, asset, credit_asset, chain_amount, credit_amount, chain_id, tx_hash, tx_index)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (biz_id) DO NOTHING
 	`, d.BizID, d.UserID, norm(d.Address), strings.ToUpper(strings.TrimSpace(d.Asset)),
-		d.ChainAmount, d.CreditAmount, d.ChainID, d.TxHash, d.TxIndex)
+		creditAsset, d.ChainAmount, d.CreditAmount, d.ChainID, d.TxHash, d.TxIndex)
 	return err
 }
 

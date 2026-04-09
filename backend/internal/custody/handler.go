@@ -1,8 +1,10 @@
 package custody
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/big"
 	"net/http"
 	"strconv"
@@ -15,17 +17,26 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// DepositCoinConfig describes a coin that can be deposited.
+type DepositCoinConfig struct {
+	Coin          string // e.g. "USDT", "BNB"
+	ChainDecimals int    // on-chain decimals (18 for BSC USDT & BNB)
+	IsNative      bool   // true for chain-native (BNB on BSC)
+}
+
 type Handler struct {
 	logger           *slog.Logger
 	store            *Store
 	saas             *SaaSClient
 	account          accountclient.AccountClient
+	price            *PriceProvider
 	depositToken     string
 	chain            string
 	network          string
-	coin             string
+	coin             string // primary collateral coin (USDT)
 	chainDecimals    int
 	accountingDigits int
+	depositCoins     []DepositCoinConfig
 }
 
 type HandlerDeps struct {
@@ -33,12 +44,14 @@ type HandlerDeps struct {
 	Store             *Store
 	SaaS              *SaaSClient
 	Account           accountclient.AccountClient
+	Price             *PriceProvider
 	DepositToken      string
 	Chain             string
 	Network           string
 	Coin              string
 	ChainDecimals     int
 	AccountingDigits  int
+	DepositCoins      []DepositCoinConfig
 }
 
 func NewHandler(d HandlerDeps) *Handler {
@@ -62,18 +75,46 @@ func NewHandler(d HandlerDeps) *Handler {
 	if accountingDigits <= 0 {
 		accountingDigits = assets.DefaultCollateralDisplayDigits
 	}
+	depositCoins := d.DepositCoins
+	if len(depositCoins) == 0 {
+		depositCoins = DefaultBSCDepositCoins(chainDecimals)
+	}
+	price := d.Price
+	if price == nil {
+		price = NewPriceProvider(0)
+	}
 	return &Handler{
 		logger:           d.Logger,
 		store:            d.Store,
 		saas:             d.SaaS,
 		account:          d.Account,
+		price:            price,
 		depositToken:     d.DepositToken,
 		chain:            chain,
 		network:          network,
 		coin:             coin,
 		chainDecimals:    chainDecimals,
 		accountingDigits: accountingDigits,
+		depositCoins:     depositCoins,
 	}
+}
+
+// DefaultBSCDepositCoins returns the default deposit coin list for BSC.
+func DefaultBSCDepositCoins(usdtChainDecimals int) []DepositCoinConfig {
+	return []DepositCoinConfig{
+		{Coin: "USDT", ChainDecimals: usdtChainDecimals, IsNative: false},
+		{Coin: "BNB", ChainDecimals: 18, IsNative: true},
+	}
+}
+
+func (h *Handler) findDepositCoin(asset string) *DepositCoinConfig {
+	normalized := strings.ToUpper(strings.TrimSpace(asset))
+	for i := range h.depositCoins {
+		if h.depositCoins[i].Coin == normalized {
+			return &h.depositCoins[i]
+		}
+	}
+	return nil
 }
 
 type DepositNotifyRequest struct {
@@ -135,9 +176,9 @@ func (h *Handler) DepositNotify(ctx *gin.Context) {
 		return
 	}
 
-	creditAmount, err := h.parseChainAmount(req.Asset, req.Amount)
+	creditAmount, creditAsset, err := h.convertDepositToCollateral(ctx, req.Asset, req.Amount)
 	if err != nil {
-		h.logger.Error("parse chain amount failed", "amount", req.Amount, "asset", req.Asset, "err", err)
+		h.logger.Error("convert deposit amount failed", "amount", req.Amount, "asset", req.Asset, "err", err)
 		ctx.JSON(http.StatusBadRequest, NotifyResponse{Code: 400, Message: "invalid amount"})
 		return
 	}
@@ -147,7 +188,7 @@ func (h *Handler) DepositNotify(ctx *gin.Context) {
 	}
 
 	depositID := sharedkafka.NewID("cdep")
-	normalizedAsset := assets.NormalizeAsset(req.Asset)
+	normalizedAsset := creditAsset
 
 	_, err = h.account.CreditBalance(ctx, userID, normalizedAsset, creditAmount, "CUSTODY_DEPOSIT", depositID)
 	if err != nil {
@@ -160,7 +201,8 @@ func (h *Handler) DepositNotify(ctx *gin.Context) {
 		BizID:        req.BizID,
 		UserID:       userID,
 		Address:      req.Address,
-		Asset:        normalizedAsset,
+		Asset:        req.Asset,
+		CreditAsset:  normalizedAsset,
 		ChainAmount:  req.Amount,
 		CreditAmount: creditAmount,
 		ChainID:      req.ChainID,
@@ -172,8 +214,9 @@ func (h *Handler) DepositNotify(ctx *gin.Context) {
 
 	h.logger.Info("custody deposit credited",
 		"biz_id", req.BizID, "user_id", userID,
-		"asset", normalizedAsset, "credit", creditAmount,
-		"chain_amount", req.Amount, "tx_hash", req.TxHash)
+		"deposit_asset", req.Asset, "credit_asset", normalizedAsset,
+		"credit", creditAmount, "chain_amount", req.Amount,
+		"tx_hash", req.TxHash)
 
 	ctx.JSON(http.StatusOK, NotifyResponse{Code: 0, Message: "ok"})
 }
@@ -197,10 +240,11 @@ func (h *Handler) GetDepositAddress(ctx *gin.Context) {
 
 	if address != "" {
 		ctx.JSON(http.StatusOK, gin.H{
-			"address": address,
-			"chain":   h.chain,
-			"network": h.network,
-			"coin":    h.coin,
+			"address":         address,
+			"chain":           h.chain,
+			"network":         h.network,
+			"coin":            h.coin,
+			"supported_coins": h.supportedCoinNames(),
 		})
 		return
 	}
@@ -235,11 +279,16 @@ func (h *Handler) GetDepositAddress(ctx *gin.Context) {
 		h.logger.Error("save address mapping failed", "user_id", userID, "address", resp.Address, "err", err)
 	}
 
+	// Register additional coin watches (e.g. BNB) for the same address
+	h.registerExtraCoinWatches(ctx, accountID, resp.Address, resp.KeyID, userID)
+
+	supportedCoins := h.supportedCoinNames()
 	ctx.JSON(http.StatusOK, gin.H{
-		"address": resp.Address,
-		"chain":   h.chain,
-		"network": h.network,
-		"coin":    h.coin,
+		"address":         resp.Address,
+		"chain":           h.chain,
+		"network":         h.network,
+		"coin":            h.coin,
+		"supported_coins": supportedCoins,
 	})
 }
 
@@ -332,33 +381,106 @@ func (h *Handler) RequestWithdraw(ctx *gin.Context) {
 	})
 }
 
-// parseChainAmount converts the SaaS amount string (in chain decimals, e.g. 18 for BSC USDT)
-// to FunnyOption's internal accounting amount (e.g. 2 decimal places for USDT).
-// BSC USDT is 18 decimals, but our collateral is 6 decimals by default. SaaS sends raw wei string.
-func (h *Handler) parseChainAmount(assetName, rawAmount string) (int64, error) {
+// convertDepositToCollateral converts a deposited amount to the internal collateral (USDT) accounting amount.
+// For USDT deposits, it divides by 10^(chainDecimals - accountingDigits).
+// For non-USDT deposits (e.g. BNB), it converts to a floating-point token amount,
+// multiplies by the real-time USDT price, then converts to accounting units.
+func (h *Handler) convertDepositToCollateral(ctx context.Context, assetName, rawAmount string) (int64, string, error) {
 	rawAmount = strings.TrimSpace(rawAmount)
 	if rawAmount == "" {
-		return 0, fmt.Errorf("empty amount")
+		return 0, "", fmt.Errorf("empty amount")
 	}
 
 	bigAmt, ok := new(big.Int).SetString(rawAmount, 10)
 	if !ok {
-		return 0, fmt.Errorf("invalid amount: %s", rawAmount)
+		return 0, "", fmt.Errorf("invalid amount: %s", rawAmount)
 	}
 	if bigAmt.Sign() <= 0 {
-		return 0, nil
+		return 0, "", nil
 	}
 
-	chainDecimals := h.chainDecimals
-	accountingDigits := h.accountingDigits
-	diff := chainDecimals - accountingDigits
-	if diff > 0 {
-		divisor := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(diff)), nil)
-		bigAmt.Div(bigAmt, divisor)
+	normalized := strings.ToUpper(strings.TrimSpace(assetName))
+	collateralAsset := assets.DefaultCollateralAsset
+
+	coinCfg := h.findDepositCoin(normalized)
+
+	if normalized == collateralAsset {
+		chainDecimals := h.chainDecimals
+		if coinCfg != nil {
+			chainDecimals = coinCfg.ChainDecimals
+		}
+		diff := chainDecimals - h.accountingDigits
+		if diff > 0 {
+			divisor := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(diff)), nil)
+			bigAmt.Div(bigAmt, divisor)
+		}
+		if !bigAmt.IsInt64() {
+			return 0, "", fmt.Errorf("amount overflows int64")
+		}
+		return bigAmt.Int64(), collateralAsset, nil
 	}
 
-	if !bigAmt.IsInt64() {
-		return 0, fmt.Errorf("amount overflows int64")
+	// Non-collateral coin: convert via price oracle
+	if coinCfg == nil {
+		return 0, "", fmt.Errorf("unsupported deposit coin: %s", normalized)
 	}
-	return bigAmt.Int64(), nil
+
+	price, err := h.price.GetUSDTPrice(ctx, normalized)
+	if err != nil {
+		return 0, "", fmt.Errorf("get %s price: %w", normalized, err)
+	}
+
+	// Convert raw chain amount to float token amount
+	divisor := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(coinCfg.ChainDecimals)), nil)
+	bigFloat := new(big.Float).SetInt(bigAmt)
+	bigDivisor := new(big.Float).SetInt(divisor)
+	tokenAmount, _ := new(big.Float).Quo(bigFloat, bigDivisor).Float64()
+
+	// Multiply by USDT price to get USDT value
+	usdtValue := tokenAmount * price
+
+	// Convert to accounting units (e.g. 2 decimals → multiply by 100)
+	accountingFactor := math.Pow(10, float64(h.accountingDigits))
+	creditAmount := int64(usdtValue * accountingFactor)
+
+	return creditAmount, collateralAsset, nil
+}
+
+func (h *Handler) supportedCoinNames() []string {
+	names := make([]string, len(h.depositCoins))
+	for i, c := range h.depositCoins {
+		names[i] = c.Coin
+	}
+	return names
+}
+
+// registerExtraCoinWatches creates SaaS address watches for deposit coins
+// beyond the primary collateral (e.g. BNB) so the scanner picks up native deposits.
+func (h *Handler) registerExtraCoinWatches(ctx *gin.Context, accountID, address, keyID string, userID int64) {
+	if h.saas == nil {
+		return
+	}
+	for _, dc := range h.depositCoins {
+		if strings.EqualFold(dc.Coin, h.coin) {
+			continue
+		}
+		_, err := h.saas.CreateAddress(ctx, accountID, h.chain, dc.Coin, h.network)
+		if err != nil {
+			h.logger.Warn("register extra coin watch failed",
+				"user_id", userID, "coin", dc.Coin, "address", address, "err", err)
+			continue
+		}
+		if err := h.store.SaveAddressMapping(ctx, AddressMapping{
+			UserID:  userID,
+			Chain:   h.chain,
+			Network: h.network,
+			Coin:    dc.Coin,
+			Address: address,
+			KeyID:   keyID,
+		}); err != nil {
+			h.logger.Warn("save extra coin mapping failed",
+				"user_id", userID, "coin", dc.Coin, "err", err)
+		}
+		h.logger.Info("registered extra coin watch", "user_id", userID, "coin", dc.Coin, "address", address)
+	}
 }

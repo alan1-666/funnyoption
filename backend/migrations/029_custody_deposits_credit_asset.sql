@@ -1,0 +1,1 @@
+ALTER TABLE custody_deposits ADD COLUMN IF NOT EXISTS credit_asset TEXT NOT NULL DEFAULT 'USDT';

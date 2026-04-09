@@ -317,6 +317,7 @@ func (h *Handler) RequestWithdraw(ctx *gin.Context) {
 		return
 	}
 
+	_ = h.account.ReleaseFreeze(ctx, freeze.FreezeID)
 	_, _ = h.account.DebitBalance(ctx, userID, asset, req.Amount, "CUSTODY_WITHDRAW", withdrawID)
 
 	h.logger.Info("custody withdrawal submitted",

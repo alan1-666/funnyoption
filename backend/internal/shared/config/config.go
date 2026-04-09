@@ -35,6 +35,7 @@ type ServiceConfig struct {
 	ChainGasLimit           uint64
 	CustodySaaSBaseURL      string
 	CustodySaaSTenantID     string
+	CustodySaaSAPIToken     string
 	CustodyDepositToken     string
 	CustodyChainName        string
 	CustodyNetworkName      string
@@ -89,6 +90,7 @@ func Load(serviceName string) ServiceConfig {
 	cfg.CORSExtraOrigins = splitCSV(getenv("FUNNYOPTION_CORS_EXTRA_ORIGINS", ""))
 	cfg.CustodySaaSBaseURL = getenv("FUNNYOPTION_CUSTODY_SAAS_BASE_URL", "")
 	cfg.CustodySaaSTenantID = getenv("FUNNYOPTION_CUSTODY_SAAS_TENANT_ID", "funnyoption")
+	cfg.CustodySaaSAPIToken = getenv("FUNNYOPTION_CUSTODY_SAAS_API_TOKEN", "")
 	cfg.CustodyDepositToken = getenv("FUNNYOPTION_CUSTODY_DEPOSIT_TOKEN", "")
 	cfg.CustodyChainName = getenv("FUNNYOPTION_CUSTODY_CHAIN_NAME", "binance")
 	cfg.CustodyNetworkName = getenv("FUNNYOPTION_CUSTODY_NETWORK_NAME", cfg.NetworkName)

@@ -39,7 +39,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 
 	var saasClient *custody.SaaSClient
 	if cfg.CustodySaaSBaseURL != "" {
-		saasClient = custody.NewSaaSClient(cfg.CustodySaaSBaseURL, cfg.CustodyDepositToken, cfg.CustodySaaSTenantID)
+		saasClient = custody.NewSaaSClient(cfg.CustodySaaSBaseURL, cfg.CustodySaaSAPIToken, cfg.CustodySaaSTenantID)
 	}
 	custodyStore := custody.NewStore(dbConn)
 	custodyHandler := custody.NewHandler(custody.HandlerDeps{

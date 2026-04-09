@@ -181,7 +181,7 @@ func (h *Handler) DepositNotify(ctx *gin.Context) {
 // GetDepositAddress returns the user's custody deposit address, creating one via SaaS if needed.
 // GET /api/v1/custody/deposit-address
 func (h *Handler) GetDepositAddress(ctx *gin.Context) {
-	userIDRaw, exists := ctx.Get("user_id")
+	userIDRaw, exists := ctx.Get("api.authenticated_user_id")
 	if !exists {
 		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
@@ -251,7 +251,7 @@ type WithdrawRequest struct {
 // RequestWithdraw freezes user balance and submits a withdrawal to SaaS.
 // POST /api/v1/custody/withdraw
 func (h *Handler) RequestWithdraw(ctx *gin.Context) {
-	userIDRaw, exists := ctx.Get("user_id")
+	userIDRaw, exists := ctx.Get("api.authenticated_user_id")
 	if !exists {
 		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return

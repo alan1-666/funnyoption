@@ -13,6 +13,7 @@ type Topics struct {
 	MarketEvent         string
 	SettlementDone      string
 	NotificationCreated string
+	CustodyDeposit      string
 }
 
 func NewTopics(prefix string) Topics {
@@ -35,5 +36,6 @@ func NewTopics(prefix string) Topics {
 		MarketEvent:    normalized + "market.event",
 		SettlementDone: normalized + "settlement.completed",
 		NotificationCreated: normalized + "notification.created",
+		CustodyDeposit:      normalized + "custody.deposit",
 	}
 }

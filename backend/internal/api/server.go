@@ -49,6 +49,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 		SaaS:         saasClient,
 		Account:      accountRPC,
 		Price:        priceProvider,
+		Publisher:    publisher,
+		Topics:       cfg.KafkaTopics,
 		DepositToken: cfg.CustodyDepositToken,
 		Chain:            cfg.CustodyChainName,
 		Network:          cfg.CustodyNetworkName,

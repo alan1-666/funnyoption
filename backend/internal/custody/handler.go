@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	accountclient "funnyoption/internal/account/client"
 	"funnyoption/internal/shared/assets"
@@ -30,6 +31,8 @@ type Handler struct {
 	saas             *SaaSClient
 	account          accountclient.AccountClient
 	price            *PriceProvider
+	publisher        sharedkafka.Publisher
+	topics           sharedkafka.Topics
 	depositToken     string
 	chain            string
 	network          string
@@ -45,6 +48,8 @@ type HandlerDeps struct {
 	SaaS              *SaaSClient
 	Account           accountclient.AccountClient
 	Price             *PriceProvider
+	Publisher         sharedkafka.Publisher
+	Topics            sharedkafka.Topics
 	DepositToken      string
 	Chain             string
 	Network           string
@@ -89,6 +94,8 @@ func NewHandler(d HandlerDeps) *Handler {
 		saas:             d.SaaS,
 		account:          d.Account,
 		price:            price,
+		publisher:        d.Publisher,
+		topics:           d.Topics,
 		depositToken:     d.DepositToken,
 		chain:            chain,
 		network:          network,
@@ -210,6 +217,22 @@ func (h *Handler) DepositNotify(ctx *gin.Context) {
 		TxIndex:      req.TxIndex,
 	}); err != nil {
 		h.logger.Error("insert deposit record failed", "biz_id", req.BizID, "err", err)
+	}
+
+	if h.publisher != nil {
+		ev := sharedkafka.CustodyDepositEvent{
+			DepositID:    depositID,
+			UserID:       userID,
+			Asset:        req.Asset,
+			CreditAsset:  normalizedAsset,
+			CreditAmount: creditAmount,
+			ChainAmount:  req.Amount,
+			TxHash:       req.TxHash,
+			CreatedAt:    time.Now().Unix(),
+		}
+		if err := h.publisher.PublishJSON(ctx, h.topics.CustodyDeposit, fmt.Sprintf("%d", userID), ev); err != nil {
+			h.logger.Error("publish custody deposit event failed", "biz_id", req.BizID, "err", err)
+		}
 	}
 
 	h.logger.Info("custody deposit credited",

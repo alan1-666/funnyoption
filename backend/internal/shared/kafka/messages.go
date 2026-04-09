@@ -162,3 +162,14 @@ type NotificationCreatedEvent struct {
 	Title          string `json:"title"`
 	CreatedAt      int64  `json:"created_at"`
 }
+
+type CustodyDepositEvent struct {
+	DepositID    string `json:"deposit_id"`
+	UserID       int64  `json:"user_id"`
+	Asset        string `json:"asset"`
+	CreditAsset  string `json:"credit_asset"`
+	CreditAmount int64  `json:"credit_amount"`
+	ChainAmount  string `json:"chain_amount"`
+	TxHash       string `json:"tx_hash"`
+	CreatedAt    int64  `json:"created_at"`
+}

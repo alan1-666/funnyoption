@@ -10,12 +10,14 @@ import { UserAvatar } from "@/components/user-avatar";
 import {
   authenticatedFetch,
   getBalancesRead,
+  getDepositAddress,
   getOrdersRead,
   getPayoutsRead,
   getPositionsRead,
   getProfileRead,
   getUserProposalsRead,
-  setApiSessionId
+  setApiSessionId,
+  type CustodyDepositAddress
 } from "@/lib/api";
 import { formatAssetAmount, formatTimestamp, formatToken } from "@/lib/format";
 import { presentMarketTitle } from "@/lib/market-display";
@@ -105,6 +107,7 @@ export function PortfolioShell({
   const [portfolioSyncing, setPortfolioSyncing] = useState(false);
   const [copiedWallet, setCopiedWallet] = useState(false);
   const [showWalletQr, setShowWalletQr] = useState(false);
+  const [custodyAddr, setCustodyAddr] = useState<CustodyDepositAddress | null>(null);
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
 
   const sessionUserId = session?.userId && session.userId > 0 ? session.userId : null;
@@ -117,9 +120,11 @@ export function PortfolioShell({
   const openOrders = accountOrders.filter(isOpenOrder);
   const currentWallet = wallet?.walletAddress ?? session?.walletAddress ?? "";
   const currentProfile = profileResult.item;
-  const profileWallet = currentWallet || currentProfile?.wallet_address || "";
+  const depositAddress = custodyAddr?.address || "";
+  const profileWallet = depositAddress || currentWallet || currentProfile?.wallet_address || "";
   const activePayoutWallet = currentWallet || "";
-  const copyFeedbackText = copiedWallet ? "钱包地址已复制到剪贴板" : "";
+  const supportedCoins = custodyAddr?.supported_coins ?? [];
+  const copyFeedbackText = copiedWallet ? (depositAddress ? "充值地址已复制到剪贴板" : "钱包地址已复制到剪贴板") : "";
   const balanceDisplay =
     sessionUserId && balancesResult.state !== "unavailable" && !portfolioSyncing
       ? `${formatAssetAmount(usdt?.available ?? 0, COLLATERAL_SYMBOL)} ${COLLATERAL_SYMBOL}`
@@ -198,11 +203,10 @@ export function PortfolioShell({
     setPayoutsResult(toCollectionResult([]));
     setProposalsResult(toCollectionResult([]));
     setProfileResult(toProfileResult(null));
+    setCustodyAddr(null);
     setPendingClaim({});
     setClaimStatus({});
 
-    // Ensure the module-level session ID is set before fetching,
-    // because parent useEffect (setApiSessionId) runs after child effects.
     setApiSessionId(session.sessionId);
 
     void Promise.all([
@@ -211,9 +215,10 @@ export function PortfolioShell({
       getOrdersRead(sessionUserId),
       getPayoutsRead(sessionUserId),
       getProfileRead(sessionUserId),
-      getUserProposalsRead(sessionUserId)
+      getUserProposalsRead(sessionUserId),
+      getDepositAddress().catch(() => null)
     ])
-      .then(([nextBalances, nextPositions, nextOrders, nextPayouts, nextProfile, nextProposals]) => {
+      .then(([nextBalances, nextPositions, nextOrders, nextPayouts, nextProfile, nextProposals, nextCustodyAddr]) => {
         if (cancelled) return;
         setBalancesResult(nextBalances);
         setPositionsResult(nextPositions);
@@ -221,6 +226,7 @@ export function PortfolioShell({
         setPayoutsResult(nextPayouts);
         setProfileResult(nextProfile);
         setProposalsResult(nextProposals);
+        if (nextCustodyAddr) setCustodyAddr(nextCustodyAddr);
       })
       .finally(() => {
         if (cancelled) return;
@@ -376,6 +382,9 @@ export function PortfolioShell({
               </button>
 
               <div className={styles.addressBar}>
+                {depositAddress ? (
+                  <span className={styles.addressLabel}>充值地址{supportedCoins.length > 0 ? `（${supportedCoins.join("/")}）` : ""}</span>
+                ) : null}
                 <span className={styles.addressValue} title={profileWallet || "钱包未连接"}>
                   {profileWallet || "钱包未连接"}
                 </span>
@@ -384,8 +393,8 @@ export function PortfolioShell({
                   className={`${styles.copyButton} ${copiedWallet ? styles.copyButtonSuccess : ""}`}
                   onClick={handleCopyWallet}
                   disabled={!profileWallet}
-                  aria-label="复制钱包地址"
-                  title={copiedWallet ? "已复制" : "复制钱包地址"}
+                  aria-label={depositAddress ? "复制充值地址" : "复制钱包地址"}
+                  title={copiedWallet ? "已复制" : depositAddress ? "复制充值地址" : "复制钱包地址"}
                 >
                   {copiedWallet ? (
                     <svg viewBox="0 0 24 24" className={styles.iconSvg} aria-hidden="true">
@@ -654,14 +663,14 @@ export function PortfolioShell({
             className={styles.qrDialog}
             role="dialog"
             aria-modal="true"
-            aria-label="钱包二维码"
+            aria-label={depositAddress ? "充值地址二维码" : "钱包二维码"}
             onClick={(event) => event.stopPropagation()}
           >
             <button
               type="button"
               className={styles.qrClose}
               onClick={() => setShowWalletQr(false)}
-              aria-label="关闭钱包二维码"
+              aria-label="关闭二维码"
             >
               <svg viewBox="0 0 24 24" className={styles.iconSvg} aria-hidden="true">
                 <path d="M6 6 18 18" />
@@ -673,10 +682,10 @@ export function PortfolioShell({
               <div className={styles.qrImageWrap}>
                 <img
                   src={qrImageSrc}
-                  alt="钱包二维码"
+                  alt={depositAddress ? "充值地址二维码" : "钱包二维码"}
                   className={styles.qrImage}
                 />
-                <div className={styles.qrBrand}>w</div>
+                <div className={styles.qrBrand}>{depositAddress ? "₮" : "w"}</div>
               </div>
 
               <div className={styles.qrFooter}>
@@ -695,8 +704,8 @@ export function PortfolioShell({
                   type="button"
                   className={`${styles.copyButton} ${copiedWallet ? styles.copyButtonSuccess : ""}`}
                   onClick={handleCopyWallet}
-                  aria-label="复制钱包地址"
-                  title={copiedWallet ? "已复制" : "复制钱包地址"}
+                  aria-label={depositAddress ? "复制充值地址" : "复制钱包地址"}
+                  title={copiedWallet ? "已复制" : depositAddress ? "复制充值地址" : "复制钱包地址"}
                 >
                   {copiedWallet ? (
                     <svg viewBox="0 0 24 24" className={styles.iconSvg} aria-hidden="true">
@@ -710,6 +719,9 @@ export function PortfolioShell({
                   )}
                 </button>
               </div>
+              {depositAddress && supportedCoins.length > 0 ? (
+                <div className={styles.qrHint}>支持币种：{supportedCoins.join("、")}，非 {COLLATERAL_SYMBOL} 按实时价格折算</div>
+              ) : null}
             </div>
           </div>
         </div>

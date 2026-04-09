@@ -21,6 +21,7 @@ type AddressMapping struct {
 	Network string
 	Coin    string
 	Address string
+	KeyID   string
 }
 
 func (s *Store) LookupUserByAddress(ctx context.Context, address, chain, network string) (int64, error) {
@@ -55,12 +56,27 @@ func (s *Store) GetUserAddress(ctx context.Context, userID int64, chain, network
 	return address, nil
 }
 
+func (s *Store) GetUserAddressWithKeyID(ctx context.Context, userID int64, chain, network, coin string) (address, keyID string, err error) {
+	err = s.db.QueryRowContext(ctx, `
+		SELECT address, COALESCE(key_id, '') FROM custody_address_mapping
+		WHERE user_id = $1 AND chain = $2 AND network = $3 AND coin = $4
+		LIMIT 1
+	`, userID, norm(chain), norm(network), norm(coin)).Scan(&address, &keyID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", nil
+		}
+		return "", "", err
+	}
+	return address, keyID, nil
+}
+
 func (s *Store) SaveAddressMapping(ctx context.Context, m AddressMapping) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO custody_address_mapping (user_id, tenant_id, chain, network, coin, address)
-		VALUES ($1, 'funnyoption', $2, $3, $4, $5)
-		ON CONFLICT (tenant_id, chain, network, coin, address) DO NOTHING
-	`, m.UserID, norm(m.Chain), norm(m.Network), norm(m.Coin), norm(m.Address))
+		INSERT INTO custody_address_mapping (user_id, tenant_id, chain, network, coin, address, key_id)
+		VALUES ($1, 'funnyoption', $2, $3, $4, $5, $6)
+		ON CONFLICT (tenant_id, chain, network, coin, address) DO UPDATE SET key_id = EXCLUDED.key_id
+	`, m.UserID, norm(m.Chain), norm(m.Network), norm(m.Coin), norm(m.Address), m.KeyID)
 	return err
 }
 

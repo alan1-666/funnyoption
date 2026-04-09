@@ -230,6 +230,7 @@ func (h *Handler) GetDepositAddress(ctx *gin.Context) {
 		Network: h.network,
 		Coin:    h.coin,
 		Address: resp.Address,
+		KeyID:   resp.KeyID,
 	}); err != nil {
 		h.logger.Error("save address mapping failed", "user_id", userID, "address", resp.Address, "err", err)
 	}
@@ -297,11 +298,7 @@ func (h *Handler) RequestWithdraw(ctx *gin.Context) {
 		return
 	}
 
-	address, _ := h.store.GetUserAddress(ctx, userID, h.chain, h.network, h.coin)
-	keyID := ""
-	if address != "" {
-		keyID = fmt.Sprintf("funnyoption_%d", userID)
-	}
+	_, keyID, _ := h.store.GetUserAddressWithKeyID(ctx, userID, h.chain, h.network, h.coin)
 
 	saasResp, err := h.saas.SubmitWithdraw(ctx, CreateWithdrawRequest{
 		AccountID: fmt.Sprintf("%d", userID),

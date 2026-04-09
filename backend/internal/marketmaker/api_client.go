@@ -22,6 +22,7 @@ type OperatorAPIClient struct {
 	privateKey string
 	wallet     string
 	botUserID  int64
+	writePacer *writePacer
 }
 
 func NewOperatorAPIClient(cfg Config) *OperatorAPIClient {
@@ -31,6 +32,7 @@ func NewOperatorAPIClient(cfg Config) *OperatorAPIClient {
 		privateKey: cfg.OperatorPrivateKey,
 		wallet:     cfg.OperatorWallet,
 		botUserID:  cfg.BotUserID,
+		writePacer: newWritePacer(cfg.WriteInterval),
 	}
 }
 
@@ -216,6 +218,10 @@ func (c *OperatorAPIClient) get(ctx context.Context, path string) (*http.Respons
 }
 
 func (c *OperatorAPIClient) post(ctx context.Context, path string, body any) (*http.Response, error) {
+	if err := c.writePacer.Wait(ctx); err != nil {
+		return nil, err
+	}
+
 	data, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -225,10 +231,17 @@ func (c *OperatorAPIClient) post(ctx context.Context, path string, body any) (*h
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return c.httpClient.Do(req)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		c.writePacer.PushBack(retryAfterDelay(resp))
+	}
+	return resp, nil
 }
 
 var (
-	ErrAlreadySeeded    = fmt.Errorf("market already seeded")
+	ErrAlreadySeeded      = fmt.Errorf("market already seeded")
 	ErrOrderAlreadyExists = fmt.Errorf("bootstrap order already exists")
 )

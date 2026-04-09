@@ -190,3 +190,168 @@
     install of the fixed entrypoint
 - next:
   - future GitHub Actions runs can call the installed host entrypoint directly
+
+### 2026-04-09 11:40 Asia/Shanghai
+
+- read:
+  - `AGENTS.md`
+  - `PLAN.md`
+  - `docs/harness/README.md`
+  - `docs/harness/roles/WORKER.md`
+  - `docs/harness/PROJECT_MAP.md`
+  - `docs/harness/THREAD_PROTOCOL.md`
+  - `docs/harness/tasks/TASK-CICD-004.md`
+  - `docs/harness/handshakes/HANDSHAKE-CICD-004.md`
+  - `docs/harness/worklogs/WORKLOG-CICD-004.md`
+  - `.github/workflows/staging-deploy.yml`
+  - `deploy/staging/server-deploy-entrypoint.sh`
+  - `scripts/deploy-staging.sh`
+  - `docs/deploy/staging-bsc-testnet.md`
+- changed:
+  - no repo code change
+  - manually reconciled the staging host at `76.13.220.236` by running the
+    repo deploy script under the host deploy lock so commit
+    `6acb56bfde168a1741312bdfdd911e3ab9b6c3af` actually rebuilt and restarted
+    the affected backend services
+  - appended this operational incident note to `WORKLOG-CICD-004.md`
+- validated:
+  - staging repo checkout on host was already at
+    `6acb56bfde168a1741312bdfdd911e3ab9b6c3af`, with `.git/FETCH_HEAD` and
+    `.git/HEAD` both updated at `2026-04-08 18:01:35 +0000`
+  - before manual reconcile, app containers were still the older set from
+    roughly 11 hours earlier, proving checkout-to-new-SHA had happened without
+    the expected backend rebuild/restart
+  - dry-run plan for
+    `FUNNYOPTION_DEPLOY_REF=6acb56bfde168a1741312bdfdd911e3ab9b6c3af`
+    against diff base `6acb56bfde168a1741312bdfdd911e3ab9b6c3af^` resolved to:
+    `chain,account,matching,ledger,settlement,oracle,api,ws,market-maker,notification`
+    with `run_migrations=0`
+  - manual reconcile command:
+    `flock /var/lock/funnyoption-staging-deploy.lock bash -lc 'cd /opt/funnyoption-staging && FUNNYOPTION_DEPLOY_REF=6acb56bfde168a1741312bdfdd911e3ab9b6c3af bash ./scripts/deploy-staging.sh --skip-git-sync --diff-base 6acb56bfde168a1741312bdfdd911e3ab9b6c3af^'`
+  - post-deploy compose status showed fresh backend containers with healthy
+    `api`, `chain`, `account`, `matching`, `ledger`, `settlement`, `oracle`,
+    `ws`, and `notification`; `web` and `admin` were intentionally left on the
+    previous 11-hour-old deploy because this commit did not touch frontend
+    paths
+  - live health checks succeeded:
+    - `http://127.0.0.1:8080/healthz` -> `{"env":"staging","service":"api","status":"ok"}`
+    - `http://127.0.0.1:9191/healthz` -> `{"service":"oracle","status":"ok"}`
+- blockers:
+  - GitHub CLI on the local workstation was unauthenticated, so the latest
+    GitHub Actions run logs could not be pulled directly with `gh run list`
+  - `funnyoption-staging-market-maker-1` is still independently unhealthy on
+    staging because `MM_OPERATOR_PRIVATE_KEY` is missing from the server-side
+    environment; this predated the redeploy and is not caused by commit
+    `6acb56b`
+- next:
+  - if we need the exact original GitHub Actions failure point, inspect the
+    workflow run in GitHub UI or re-run with authenticated `gh`
+  - if market-maker is expected to be live on staging, restore
+    `MM_OPERATOR_PRIVATE_KEY` in `deploy/staging/.env.staging` and redeploy
+
+### 2026-04-09 11:50 Asia/Shanghai
+
+- read:
+  - `backend/internal/marketmaker/config.go`
+  - `backend/internal/marketmaker/api_client.go`
+  - `backend/internal/marketmaker/service.go`
+  - `backend/internal/api/router.go`
+  - `backend/internal/api/routes_auth.go`
+  - `backend/internal/api/routes_reads.go`
+  - `backend/internal/api/middleware.go`
+  - local `.secrets` key material descriptor
+  - staging host `/opt/funnyoption-staging/deploy/staging/.env.staging`
+- changed:
+  - no repo product-code change
+  - verified the local `.secrets` operator key matches the server-side
+    `FUNNYOPTION_CHAIN_OPERATOR_PRIVATE_KEY` already present in
+    `.env.staging`
+  - updated staging `.env.staging` on host to add:
+    - `MM_OPERATOR_PRIVATE_KEY`
+    - `MM_OPERATOR_WALLET`
+    - `MM_BOT_USER_ID`
+    - `MM_API_URL`
+  - corrected `MM_API_URL` from `http://api:8080` to
+    `http://api:8080/api` after confirming market-maker appends `/v1/...`
+    while the API router is mounted at `/api/v1`
+  - created timestamped backups of `.env.staging` before each edit:
+    - `/opt/funnyoption-staging/deploy/staging/.env.staging.bak.20260409T034616Z`
+    - `/opt/funnyoption-staging/deploy/staging/.env.staging.bak.20260409T034734Z`
+  - recreated only `funnyoption-staging-market-maker-1`
+- validated:
+  - `MM_OPERATOR_PRIVATE_KEY` now exists in server env with non-empty
+    64-char value; `MM_OPERATOR_WALLET`, `MM_BOT_USER_ID`, and `MM_API_URL`
+    are also present
+  - market-maker container transitioned from restart-looping on missing config
+    to `status=running health=healthy`
+  - market-maker startup log now shows:
+    - `api_url=http://api:8080/api`
+    - market discovery succeeded with `count=25`
+    - several markets were successfully seeded instead of failing with `404`
+- blockers:
+  - the bot now hits application rate limiting (`privileged write` policy:
+    `10/min`, burst `5`) while trying to seed or refresh many markets, so logs
+    contain expected `HTTP 429 {"error":"rate limit exceeded"}` warnings under
+    current staging load
+  - this is no longer a missing-secret or bad-base-URL problem; it is the
+    current runtime interaction between market-maker request volume and API
+    rate-limit policy
+- next:
+  - if staging needs the bot to cover many open markets continuously, follow up
+    with a narrow task to either reduce market-maker request burstiness or give
+    trusted operator/bot traffic a different rate-limit budget
+
+### 2026-04-09 12:05 Asia/Shanghai
+
+- read:
+  - `backend/internal/marketmaker/config.go`
+  - `backend/internal/marketmaker/api_client.go`
+  - `backend/internal/marketmaker/pacer.go`
+  - `backend/internal/marketmaker/pacer_test.go`
+  - `backend/configs/staging/funnyoption.env.example`
+  - `scripts/staging-native-deposit-e2e.mjs`
+  - staging host market-maker / chain logs and `chain_deposits` rows
+- changed:
+  - local repo:
+    - added configurable privileged-write pacing to market-maker via
+      `MM_WRITE_INTERVAL`
+    - added `Retry-After` backoff handling on `429`
+    - added pacing unit tests
+    - updated staging env example with the `MM_*` keys now needed on staging
+  - staging runtime:
+    - updated server `.env.staging` with `MM_REFRESH_INTERVAL=15s` and
+      `MM_WRITE_INTERVAL=7s`
+    - hot-patched only the server build context long enough to rebuild
+      `funnyoption-staging-market-maker`
+    - restored the server checkout to clean state after the image rebuild, so
+      future deploys are not blocked by tracked dirty files
+- validated:
+  - local:
+    - `go test ./internal/marketmaker` passed
+  - staging market-maker:
+    - container is `running` and `healthy`
+    - logs now show paced seeds roughly every 14 seconds per market instead of
+      a burst that immediately trips API privileged-write limits
+    - sampled log sequence after hotfix:
+      - `04:01:07Z seeded market 1775664728396`
+      - `04:01:21Z seeded market 1775664716553`
+      - `04:01:35Z seeded market 1775664711018`
+      - `04:01:49Z seeded market 1775664705731`
+      - `04:02:03Z seeded market 1775664703586`
+      - `04:02:17Z seeded market 1775664701433`
+  - staging deposit-credit proof:
+    - ran `node scripts/staging-native-deposit-e2e.mjs` against live staging
+    - on-chain native deposit tx:
+      `0xedc2b112c7c501227e11dc376740b089fe8619767e233660c42a36ce1c244de3`
+    - script result: `PASS: available USDT (accounting units) = 1203`
+    - database proof:
+      `chain_deposits.deposit_id=dep_f479397d2bbf47c4ca91ca1d1bcf2564`
+      with `status=CREDITED`, `amount=1203`, matching the tx hash above
+- blockers:
+  - the running staging `market-maker` container now uses the freshly built
+    hotfix image, but the server checkout was intentionally restored to clean
+    `HEAD`; a future rebuild from `origin/main` will lose the pacing behavior
+    until the repo changes are merged and deployed normally
+- next:
+  - merge and deploy the local market-maker pacing patch through the normal
+    repo path so the next staging rebuild keeps the throttled behavior

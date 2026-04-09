@@ -21,6 +21,7 @@ type Config struct {
 	InventorySkew   float64
 
 	RefreshInterval time.Duration
+	WriteInterval   time.Duration
 	SeedOnNewMarket bool
 }
 
@@ -36,6 +37,7 @@ func LoadConfig() Config {
 		Levels:             int(envInt64("MM_LEVELS", 3)),
 		InventorySkew:      envFloat("MM_INVENTORY_SKEW", 0.5),
 		RefreshInterval:    envDuration("MM_REFRESH_INTERVAL", 5*time.Second),
+		WriteInterval:      envDuration("MM_WRITE_INTERVAL", 0),
 		SeedOnNewMarket:    envBool("MM_SEED_ON_NEW_MARKET", true),
 	}
 	return cfg
@@ -62,6 +64,9 @@ func (c Config) Validate() error {
 	}
 	if c.Levels < 1 {
 		return fmt.Errorf("MM_LEVELS must be >= 1")
+	}
+	if c.WriteInterval < 0 {
+		return fmt.Errorf("MM_WRITE_INTERVAL must not be negative")
 	}
 	return nil
 }

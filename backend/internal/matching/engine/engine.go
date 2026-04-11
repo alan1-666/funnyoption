@@ -54,6 +54,11 @@ type Engine struct {
 	books    map[string]*model.OrderBookDirect
 	sequence *uint64
 	localSeq uint64
+
+	// Reusable buffers to avoid per-match allocations.
+	tradesBuf   []model.Trade
+	affectedBuf []*model.Order
+	removeBuf   []*model.DirectOrder
 }
 
 type bookWorker struct {
@@ -431,9 +436,12 @@ func (e *Engine) match(order *model.Order, book *model.OrderBookDirect) ([]model
 		return nil, nil
 	}
 
-	trades := make([]model.Trade, 0, 4)
-	affected := make([]*model.Order, 0, 4)
-	var toRemove []*model.DirectOrder
+	// Reuse pre-allocated buffers (reset length, keep backing array).
+	trades := e.tradesBuf[:0]
+	affected := e.affectedBuf[:0]
+	toRemove := e.removeBuf[:0]
+
+	bookKey := order.BookKey()
 
 	if order.IsBuy() {
 		bucket := book.FirstAskBucket()
@@ -459,10 +467,10 @@ func (e *Engine) match(order *model.Order, book *model.OrderBookDirect) ([]model
 				seq := atomic.AddUint64(e.sequence, 1)
 				trades = append(trades, model.Trade{
 					Sequence:        seq,
-					TradeID:         model.DeterministicTradeID(order.BookKey(), e.localSeq),
+					TradeID:         model.DeterministicTradeID(bookKey, e.localSeq),
 					MarketID:        order.MarketID,
 					Outcome:         order.Outcome,
-					BookKey:         order.BookKey(),
+					BookKey:         bookKey,
 					Price:           maker.Price,
 					Quantity:        tradeQty,
 					TakerOrderID:    order.OrderID,
@@ -505,10 +513,10 @@ func (e *Engine) match(order *model.Order, book *model.OrderBookDirect) ([]model
 				seq := atomic.AddUint64(e.sequence, 1)
 				trades = append(trades, model.Trade{
 					Sequence:        seq,
-					TradeID:         model.DeterministicTradeID(order.BookKey(), e.localSeq),
+					TradeID:         model.DeterministicTradeID(bookKey, e.localSeq),
 					MarketID:        order.MarketID,
 					Outcome:         order.Outcome,
-					BookKey:         order.BookKey(),
+					BookKey:         bookKey,
 					Price:           maker.Price,
 					Quantity:        tradeQty,
 					TakerOrderID:    order.OrderID,
@@ -532,6 +540,11 @@ func (e *Engine) match(order *model.Order, book *model.OrderBookDirect) ([]model
 	for _, do := range toRemove {
 		book.RemoveDirectOrder(do)
 	}
+
+	// Save buffers back for next reuse.
+	e.tradesBuf = trades
+	e.affectedBuf = affected
+	e.removeBuf = toRemove
 
 	return trades, affected
 }

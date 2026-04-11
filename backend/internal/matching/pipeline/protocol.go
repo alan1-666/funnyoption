@@ -81,9 +81,9 @@ const (
 )
 
 // MatchCommand travels through the Input Ring Buffer.
-// Fields are ordered to minimize struct padding (int64s first, then strings, then uint8s).
+// Fields are ordered to minimize struct padding: int64s first, then strings,
+// then uint8 flags packed together at the end.
 type MatchCommand struct {
-	Action ActionFlag
 	UserID            int64
 	MarketID          int64
 	Price             int64
@@ -101,6 +101,7 @@ type MatchCommand struct {
 	FreezeAsset     string
 	CollateralAsset string
 
+	Action       ActionFlag
 	Side         SideFlag
 	Type         TypeFlag
 	TimeInForce  TIFFlag

@@ -1,15 +1,24 @@
 package model
 
-const maxPrice = 100
+import "math/bits"
+
+// maxPrice is the exclusive upper bound for prices.
+// Prediction market prices are 1–9999 (0.0001–0.9999), stored at index [price].
+const maxPrice = 10000
+
+// priceBitmapWords is the number of uint64 words needed to cover maxPrice bits.
+const priceBitmapWords = (maxPrice + 63) / 64 // 157
 
 // OrderBookDirect uses fixed-size bucket arrays for O(1) price lookup,
 // intrusive doubly-linked lists for FIFO order management within each
 // price level, and a slab allocator (OrderPool) for zero-GC order storage.
-// Prices are 1–99 (prediction market cents), stored at index [price].
+// Prices are 1–9999 (prediction market 4-decimal precision), stored at index [price].
 type OrderBookDirect struct {
 	Key        string
 	askBuckets [maxPrice]Bucket
 	bidBuckets [maxPrice]Bucket
+	askBitmap  [priceBitmapWords]uint64
+	bidBitmap  [priceBitmapWords]uint64
 	orderIndex map[string]*DirectOrder
 	bestAsk    int64 // 0 means no asks
 	bestBid    int64 // 0 means no bids
@@ -40,11 +49,13 @@ func (ob *OrderBookDirect) AddOrder(order *Order) {
 	price := order.Price
 	if order.IsBuy() {
 		ob.bidBuckets[price].Append(do)
+		ob.bidBitmap[price/64] |= 1 << (uint(price) % 64)
 		if ob.bestBid == 0 || price > ob.bestBid {
 			ob.bestBid = price
 		}
 	} else {
 		ob.askBuckets[price].Append(do)
+		ob.askBitmap[price/64] |= 1 << (uint(price) % 64)
 		if ob.bestAsk == 0 || price < ob.bestAsk {
 			ob.bestAsk = price
 		}
@@ -52,25 +63,33 @@ func (ob *OrderBookDirect) AddOrder(order *Order) {
 	ob.orderIndex[order.OrderID] = do
 }
 
+func (ob *OrderBookDirect) removeFromSide(do *DirectOrder) {
+	price := do.Price
+	if do.IsBuy() {
+		ob.bidBuckets[price].Remove(do)
+		if ob.bidBuckets[price].IsEmpty() {
+			ob.bidBitmap[price/64] &^= 1 << (uint(price) % 64)
+			if price == ob.bestBid {
+				ob.bestBid = ob.scanBestBid()
+			}
+		}
+	} else {
+		ob.askBuckets[price].Remove(do)
+		if ob.askBuckets[price].IsEmpty() {
+			ob.askBitmap[price/64] &^= 1 << (uint(price) % 64)
+			if price == ob.bestAsk {
+				ob.bestAsk = ob.scanBestAsk()
+			}
+		}
+	}
+}
+
 func (ob *OrderBookDirect) RemoveOrder(order *Order) {
 	do, ok := ob.orderIndex[order.OrderID]
 	if !ok {
 		return
 	}
-	price := do.Price
-	isBuy := do.IsBuy()
-
-	if isBuy {
-		ob.bidBuckets[price].Remove(do)
-		if ob.bidBuckets[price].IsEmpty() && price == ob.bestBid {
-			ob.bestBid = ob.scanBestBid()
-		}
-	} else {
-		ob.askBuckets[price].Remove(do)
-		if ob.askBuckets[price].IsEmpty() && price == ob.bestAsk {
-			ob.bestAsk = ob.scanBestAsk()
-		}
-	}
+	ob.removeFromSide(do)
 	delete(ob.orderIndex, order.OrderID)
 	ob.pool.Put(do)
 }
@@ -79,20 +98,7 @@ func (ob *OrderBookDirect) RemoveDirectOrder(do *DirectOrder) {
 	if do == nil {
 		return
 	}
-	price := do.Price
-	isBuy := do.IsBuy()
-
-	if isBuy {
-		ob.bidBuckets[price].Remove(do)
-		if ob.bidBuckets[price].IsEmpty() && price == ob.bestBid {
-			ob.bestBid = ob.scanBestBid()
-		}
-	} else {
-		ob.askBuckets[price].Remove(do)
-		if ob.askBuckets[price].IsEmpty() && price == ob.bestAsk {
-			ob.bestAsk = ob.scanBestAsk()
-		}
-	}
+	ob.removeFromSide(do)
 	delete(ob.orderIndex, do.OrderID)
 	ob.pool.Put(do)
 }
@@ -102,20 +108,7 @@ func (ob *OrderBookDirect) RemoveFromMap(orderID string) {
 	if !ok {
 		return
 	}
-	price := do.Price
-	isBuy := do.IsBuy()
-
-	if isBuy {
-		ob.bidBuckets[price].Remove(do)
-		if ob.bidBuckets[price].IsEmpty() && price == ob.bestBid {
-			ob.bestBid = ob.scanBestBid()
-		}
-	} else {
-		ob.askBuckets[price].Remove(do)
-		if ob.askBuckets[price].IsEmpty() && price == ob.bestAsk {
-			ob.bestAsk = ob.scanBestAsk()
-		}
-	}
+	ob.removeFromSide(do)
 	delete(ob.orderIndex, orderID)
 	ob.pool.Put(do)
 }
@@ -208,9 +201,25 @@ func (ob *OrderBookDirect) FirstAskBucket() *Bucket {
 }
 
 func (ob *OrderBookDirect) NextAskBucket(currentPrice int64) *Bucket {
-	for p := currentPrice + 1; p < maxPrice; p++ {
-		if !ob.askBuckets[p].IsEmpty() {
-			return &ob.askBuckets[p]
+	p := currentPrice + 1
+	if p >= maxPrice {
+		return nil
+	}
+	word := int(p / 64)
+	bit := uint(p) % 64
+	// Mask off bits below 'bit' in the current word.
+	masked := ob.askBitmap[word] >> bit << bit
+	for word < priceBitmapWords {
+		if masked != 0 {
+			price := int64(word*64) + int64(bits.TrailingZeros64(masked))
+			if price >= maxPrice {
+				return nil
+			}
+			return &ob.askBuckets[price]
+		}
+		word++
+		if word < priceBitmapWords {
+			masked = ob.askBitmap[word]
 		}
 	}
 	return nil
@@ -224,9 +233,25 @@ func (ob *OrderBookDirect) FirstBidBucket() *Bucket {
 }
 
 func (ob *OrderBookDirect) NextBidBucket(currentPrice int64) *Bucket {
-	for p := currentPrice - 1; p >= 1; p-- {
-		if !ob.bidBuckets[p].IsEmpty() {
-			return &ob.bidBuckets[p]
+	p := currentPrice - 1
+	if p < 1 {
+		return nil
+	}
+	word := int(p / 64)
+	bit := uint(p) % 64
+	// Mask off bits above 'bit' in the current word.
+	masked := ob.bidBitmap[word] & ((1 << (bit + 1)) - 1)
+	for word >= 0 {
+		if masked != 0 {
+			price := int64(word*64) + int64(63-bits.LeadingZeros64(masked))
+			if price < 1 {
+				return nil
+			}
+			return &ob.bidBuckets[price]
+		}
+		word--
+		if word >= 0 {
+			masked = ob.bidBitmap[word]
 		}
 	}
 	return nil
@@ -246,18 +271,30 @@ func (ob *OrderBookDirect) RestingOrders() []*Order {
 }
 
 func (ob *OrderBookDirect) scanBestAsk() int64 {
-	for p := int64(1); p < maxPrice; p++ {
-		if !ob.askBuckets[p].IsEmpty() {
-			return p
+	// Start from word 0; skip price 0 by masking.
+	for w := 0; w < priceBitmapWords; w++ {
+		word := ob.askBitmap[w]
+		if w == 0 {
+			word &^= 1 // clear bit 0 (price 0 is invalid)
+		}
+		if word != 0 {
+			price := int64(w*64) + int64(bits.TrailingZeros64(word))
+			if price < maxPrice {
+				return price
+			}
 		}
 	}
 	return 0
 }
 
 func (ob *OrderBookDirect) scanBestBid() int64 {
-	for p := int64(maxPrice - 1); p >= 1; p-- {
-		if !ob.bidBuckets[p].IsEmpty() {
-			return p
+	for w := priceBitmapWords - 1; w >= 0; w-- {
+		word := ob.bidBitmap[w]
+		if word != 0 {
+			price := int64(w*64) + int64(63-bits.LeadingZeros64(word))
+			if price >= 1 && price < maxPrice {
+				return price
+			}
 		}
 	}
 	return 0

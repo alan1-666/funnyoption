@@ -32,8 +32,8 @@ func (o *Order) Validate() error {
 	if o.Quantity <= 0 {
 		return fmt.Errorf("assert: quantity must be positive")
 	}
-	if o.Price < 1 || o.Price > 99 {
-		return fmt.Errorf("assert: price out of range [1, 99]")
+	if o.Price < 1 || o.Price > 9999 {
+		return fmt.Errorf("assert: price out of range [1, 9999]")
 	}
 	return nil
 }

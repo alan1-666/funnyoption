@@ -30,7 +30,7 @@ func BenchmarkPlaceOrder_EmptyBook(b *testing.B) {
 	eng := New(benchLogger)
 	orders := make([]*model.Order, b.N)
 	for i := range orders {
-		orders[i] = mkOrder(fmt.Sprintf("o-%d", i), 1, int64(i+1), "YES", model.OrderSideBuy, 50, 10)
+		orders[i] = mkOrder(fmt.Sprintf("o-%d", i), 1, int64(i+1), "YES", model.OrderSideBuy, 5000, 10)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -43,11 +43,11 @@ func BenchmarkPlaceOrder_EmptyBook(b *testing.B) {
 func BenchmarkPlaceOrder_DeepBook(b *testing.B) {
 	eng := New(benchLogger)
 	for j := 0; j < 1000; j++ {
-		eng.PlaceOrder(mkOrder(fmt.Sprintf("m-%d", j), int64(j%500)+1, 1, "YES", model.OrderSideSell, int64(51+j%49), 1_000_000_000))
+		eng.PlaceOrder(mkOrder(fmt.Sprintf("m-%d", j), int64(j%500)+1, 1, "YES", model.OrderSideSell, int64(5001+j%4999), 1_000_000_000))
 	}
 	orders := make([]*model.Order, b.N)
 	for i := range orders {
-		orders[i] = mkOrder(fmt.Sprintf("t-%d", i), 999, 1, "YES", model.OrderSideBuy, 55, 1)
+		orders[i] = mkOrder(fmt.Sprintf("t-%d", i), 999, 1, "YES", model.OrderSideBuy, 5500, 1)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -58,14 +58,14 @@ func BenchmarkPlaceOrder_DeepBook(b *testing.B) {
 // 50 ask levels × 10 orders. Taker crosses entire spread matching 1 lot at best ask.
 func BenchmarkMatch_CrossSpread(b *testing.B) {
 	eng := New(benchLogger)
-	for p := int64(1); p <= 50; p++ {
+	for p := int64(100); p <= 5000; p += 100 {
 		for j := 0; j < 10; j++ {
 			eng.PlaceOrder(mkOrder(fmt.Sprintf("a-%d-%d", p, j), int64(j+1), 1, "YES", model.OrderSideSell, p, 1_000_000_000))
 		}
 	}
 	orders := make([]*model.Order, b.N)
 	for i := range orders {
-		orders[i] = mkOrder(fmt.Sprintf("c-%d", i), 999, 1, "YES", model.OrderSideBuy, 50, 1)
+		orders[i] = mkOrder(fmt.Sprintf("c-%d", i), 999, 1, "YES", model.OrderSideBuy, 5000, 1)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -84,14 +84,14 @@ func BenchmarkDeterministicTradeID(b *testing.B) {
 // additional overhead from localSeq increment + DeterministicTradeID.
 func BenchmarkMatch_CrossSpread_WithEpoch(b *testing.B) {
 	eng := New(benchLogger)
-	for p := int64(1); p <= 50; p++ {
+	for p := int64(100); p <= 5000; p += 100 {
 		for j := 0; j < 10; j++ {
 			eng.PlaceOrder(mkOrder(fmt.Sprintf("a-%d-%d", p, j), int64(j+1), 1, "YES", model.OrderSideSell, p, 1_000_000_000))
 		}
 	}
 	orders := make([]*model.Order, b.N)
 	for i := range orders {
-		orders[i] = mkOrder(fmt.Sprintf("c-%d", i), 999, 1, "YES", model.OrderSideBuy, 50, 1)
+		orders[i] = mkOrder(fmt.Sprintf("c-%d", i), 999, 1, "YES", model.OrderSideBuy, 5000, 1)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -103,7 +103,7 @@ func BenchmarkMatch_CrossSpread_WithEpoch(b *testing.B) {
 func BenchmarkAddOrder_Fresh(b *testing.B) {
 	orders := make([]*model.Order, b.N)
 	for i := range orders {
-		orders[i] = mkOrder(fmt.Sprintf("n-%d", i), 1, int64(i+1), "YES", model.OrderSideBuy, 50, 10)
+		orders[i] = mkOrder(fmt.Sprintf("n-%d", i), 1, int64(i+1), "YES", model.OrderSideBuy, 5000, 10)
 	}
 	books := make([]*model.OrderBook, b.N)
 	for i := range books {
@@ -115,10 +115,10 @@ func BenchmarkAddOrder_Fresh(b *testing.B) {
 	}
 }
 
-// IOC order (replaces MARKET): BUY IOC@99 sweeps the book just like MARKET did.
+// IOC order (replaces MARKET): BUY IOC@9999 sweeps the book just like MARKET did.
 func BenchmarkMatch_IOC_SweepBook(b *testing.B) {
 	eng := New(benchLogger)
-	for p := int64(1); p <= 50; p++ {
+	for p := int64(100); p <= 5000; p += 100 {
 		for j := 0; j < 10; j++ {
 			eng.PlaceOrder(mkOrder(fmt.Sprintf("a-%d-%d", p, j), int64(j+1), 1, "YES", model.OrderSideSell, p, 1_000_000_000))
 		}
@@ -128,7 +128,7 @@ func BenchmarkMatch_IOC_SweepBook(b *testing.B) {
 		orders[i] = &model.Order{
 			OrderID: fmt.Sprintf("ioc-%d", i), UserID: 999, MarketID: 1, Outcome: "YES",
 			Side: model.OrderSideBuy, Type: model.OrderTypeLimit, TimeInForce: model.TimeInForceIOC,
-			Price: 99, Quantity: 1,
+			Price: 9999, Quantity: 1,
 		}
 	}
 	b.ResetTimer()
@@ -141,12 +141,12 @@ func BenchmarkMatch_IOC_SweepBook(b *testing.B) {
 func BenchmarkPlaceOrder_MultiBook100(b *testing.B) {
 	eng := New(benchLogger)
 	for m := int64(1); m <= 100; m++ {
-		eng.PlaceOrder(mkOrder(fmt.Sprintf("seed-%d", m), 1, m, "YES", model.OrderSideSell, 50, 1_000_000_000))
+		eng.PlaceOrder(mkOrder(fmt.Sprintf("seed-%d", m), 1, m, "YES", model.OrderSideSell, 5000, 1_000_000_000))
 	}
 	orders := make([]*model.Order, b.N)
 	for i := range orders {
 		m := int64(i%100) + 1
-		orders[i] = mkOrder(fmt.Sprintf("t-%d", i), 999, m, "YES", model.OrderSideBuy, 50, 1)
+		orders[i] = mkOrder(fmt.Sprintf("t-%d", i), 999, m, "YES", model.OrderSideBuy, 5000, 1)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -159,7 +159,7 @@ func BenchmarkCancelOrders(b *testing.B) {
 	eng := New(benchLogger)
 	orders := make([]*model.Order, b.N)
 	for i := range orders {
-		o := mkOrder(fmt.Sprintf("r-%d", i), 1, 1, "YES", model.OrderSideBuy, 50, 10)
+		o := mkOrder(fmt.Sprintf("r-%d", i), 1, 1, "YES", model.OrderSideBuy, 5000, 10)
 		eng.PlaceOrder(o)
 		orders[i] = o
 	}
@@ -175,8 +175,8 @@ func BenchmarkMatch_InterleavedAddMatch(b *testing.B) {
 	makers := make([]*model.Order, b.N)
 	takers := make([]*model.Order, b.N)
 	for i := 0; i < b.N; i++ {
-		makers[i] = mkOrder(fmt.Sprintf("mk-%d", i), int64(i%500)+1, 1, "YES", model.OrderSideSell, 50, 10)
-		takers[i] = mkOrder(fmt.Sprintf("tk-%d", i), int64(i%500)+501, 1, "YES", model.OrderSideBuy, 50, 10)
+		makers[i] = mkOrder(fmt.Sprintf("mk-%d", i), int64(i%500)+1, 1, "YES", model.OrderSideSell, 5000, 10)
+		takers[i] = mkOrder(fmt.Sprintf("tk-%d", i), int64(i%500)+501, 1, "YES", model.OrderSideBuy, 5000, 10)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -189,11 +189,11 @@ func BenchmarkMatch_InterleavedAddMatch(b *testing.B) {
 func BenchmarkMatch_STPSkip(b *testing.B) {
 	eng := New(benchLogger)
 	for j := 0; j < 100; j++ {
-		eng.PlaceOrder(mkOrder(fmt.Sprintf("self-ask-%d", j), 999, 1, "YES", model.OrderSideSell, 50, 1_000_000_000))
+		eng.PlaceOrder(mkOrder(fmt.Sprintf("self-ask-%d", j), 999, 1, "YES", model.OrderSideSell, 5000, 1_000_000_000))
 	}
 	orders := make([]*model.Order, b.N)
 	for i := range orders {
-		orders[i] = mkOrder(fmt.Sprintf("self-bid-%d", i), 999, 1, "YES", model.OrderSideBuy, 50, 1)
+		orders[i] = mkOrder(fmt.Sprintf("self-bid-%d", i), 999, 1, "YES", model.OrderSideBuy, 5000, 1)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

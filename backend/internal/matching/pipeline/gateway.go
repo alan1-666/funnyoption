@@ -2,9 +2,10 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"sync/atomic"
+
+	json "github.com/goccy/go-json"
 	"time"
 
 	"funnyoption/internal/matching/ringbuffer"

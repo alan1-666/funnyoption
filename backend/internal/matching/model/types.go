@@ -1,7 +1,7 @@
 package model
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -62,5 +62,10 @@ func (t TimeInForce) IsValid() bool {
 }
 
 func BuildBookKey(marketID int64, outcome string) string {
-	return fmt.Sprintf("%d:%s", marketID, strings.ToUpper(strings.TrimSpace(outcome)))
+	out := strings.ToUpper(strings.TrimSpace(outcome))
+	buf := make([]byte, 0, 20+len(out))
+	buf = strconv.AppendInt(buf, marketID, 10)
+	buf = append(buf, ':')
+	buf = append(buf, out...)
+	return string(buf)
 }

@@ -1,7 +1,13 @@
 name: funnyoption-staging
 
+# Needed when FUNNYOPTION_POSTGRES_DSN points to host Patroni/HAProxy (e.g. host.docker.internal:5000).
+x-host-db: &host-db
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
 services:
   postgres:
+    profiles: ["bundled-postgres"]
     image: postgres:16
     restart: unless-stopped
     environment:
@@ -51,11 +57,9 @@ services:
       retries: 12
 
   migrate:
+    <<: *host-db
     image: postgres:16
     profiles: ["ops"]
-    depends_on:
-      postgres:
-        condition: service_healthy
     env_file:
       - ./.env.staging
     working_dir: /workspace
@@ -71,13 +75,12 @@ services:
         done
 
   account:
+    <<: *host-db
     build:
       context: ../..
       dockerfile: deploy/docker/account.Dockerfile
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       kafka:
         condition: service_healthy
     env_file:
@@ -92,13 +95,12 @@ services:
       retries: 5
 
   matching:
+    <<: *host-db
     build:
       context: ../..
       dockerfile: deploy/docker/matching.Dockerfile
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       kafka:
         condition: service_healthy
     env_file:
@@ -112,13 +114,12 @@ services:
       retries: 5
 
   ledger:
+    <<: *host-db
     build:
       context: ../..
       dockerfile: deploy/docker/ledger.Dockerfile
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       kafka:
         condition: service_healthy
     env_file:
@@ -133,13 +134,12 @@ services:
       retries: 5
 
   settlement:
+    <<: *host-db
     build:
       context: ../..
       dockerfile: deploy/docker/settlement.Dockerfile
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       kafka:
         condition: service_healthy
     env_file:
@@ -154,13 +154,12 @@ services:
       retries: 5
 
   chain:
+    <<: *host-db
     build:
       context: ../..
       dockerfile: deploy/docker/chain.Dockerfile
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       kafka:
         condition: service_healthy
       account:
@@ -178,13 +177,12 @@ services:
       retries: 5
 
   oracle:
+    <<: *host-db
     build:
       context: ../..
       dockerfile: deploy/docker/oracle.Dockerfile
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       kafka:
         condition: service_healthy
     env_file:
@@ -200,13 +198,12 @@ services:
       retries: 5
 
   api:
+    <<: *host-db
     build:
       context: ../..
       dockerfile: deploy/docker/api.Dockerfile
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       kafka:
         condition: service_healthy
       account:
@@ -225,13 +222,12 @@ services:
       retries: 5
 
   ws:
+    <<: *host-db
     build:
       context: ../..
       dockerfile: deploy/docker/ws.Dockerfile
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       kafka:
         condition: service_healthy
       redis:
@@ -249,13 +245,12 @@ services:
       retries: 5
 
   notification:
+    <<: *host-db
     build:
       context: ../..
       dockerfile: deploy/docker/notification.Dockerfile
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       kafka:
         condition: service_healthy
     env_file:

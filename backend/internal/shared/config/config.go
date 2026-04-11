@@ -46,6 +46,7 @@ type ServiceConfig struct {
 	ShutdownTimeout         time.Duration
 	PollInterval            time.Duration
 	PostgresDSN             string
+	PostgresReadDSN         string
 	RedisAddr               string
 	KafkaBrokers            []string
 	KafkaTopicPrefx         string
@@ -80,6 +81,7 @@ func Load(serviceName string) ServiceConfig {
 		ShutdownTimeout:         getenvDuration("FUNNYOPTION_SHUTDOWN_TIMEOUT", 10*time.Second),
 		PollInterval:            getenvDuration("FUNNYOPTION_CHAIN_POLL_INTERVAL", 5*time.Second),
 		PostgresDSN:             getenv("FUNNYOPTION_POSTGRES_DSN", "postgres://postgres:postgres@127.0.0.1:5432/funnyoption?sslmode=disable"),
+		PostgresReadDSN:         getenv("FUNNYOPTION_POSTGRES_READ_DSN", ""),
 		RedisAddr:               getenv("FUNNYOPTION_REDIS_ADDR", "127.0.0.1:6379"),
 		KafkaTopicPrefx:         getenv("FUNNYOPTION_KAFKA_TOPIC_PREFIX", "funnyoption."),
 	}
@@ -97,6 +99,10 @@ func Load(serviceName string) ServiceConfig {
 	cfg.TakerFeeBps = int64(getenvInt("FUNNYOPTION_TAKER_FEE_BPS", 200))
 	cfg.MakerFeeBps = int64(getenvInt("FUNNYOPTION_MAKER_FEE_BPS", -50))
 	cfg.KafkaTopics = kafka.NewTopics(cfg.KafkaTopicPrefx)
+
+	if strings.TrimSpace(cfg.PostgresReadDSN) == "" {
+		cfg.PostgresReadDSN = cfg.PostgresDSN
+	}
 
 	return cfg
 }

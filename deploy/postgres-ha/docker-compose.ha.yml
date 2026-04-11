@@ -1,0 +1,66 @@
+# 3-node Patroni + etcd + HAProxy (host networking).
+# On each server: copy env-common.example → env-common.env, env-node.example → env-node.local.env, edit secrets + node id.
+# Build: docker compose -f docker-compose.ha.yml --env-file env-common.env --env-file env-node.local.env build
+# Run:  docker compose -f docker-compose.ha.yml --env-file env-common.env --env-file env-node.local.env up -d
+name: postgres-ha
+
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.15
+    container_name: etcd
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ./env-common.env
+      - ./env-node.local.env
+    environment:
+      ETCD_NAME: ${ETCD_NAME}
+      ETCD_DATA_DIR: /etcd-data
+      # Override ETCD_CLIENT_PORT / ETCD_PEER_PORT in env-node when 2379/2380 are taken (e.g. another etcd on the host).
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:${ETCD_CLIENT_PORT:-2379}
+      ETCD_ADVERTISE_CLIENT_URLS: http://${NODE_IP}:${ETCD_CLIENT_PORT:-2379}
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:${ETCD_PEER_PORT:-2380}
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://${NODE_IP}:${ETCD_PEER_PORT:-2380}
+      ETCD_INITIAL_CLUSTER: ${ETCD_INITIAL_CLUSTER}
+      ETCD_INITIAL_CLUSTER_TOKEN: ${ETCD_CLUSTER_TOKEN}
+      ETCD_INITIAL_CLUSTER_STATE: ${ETCD_INITIAL_CLUSTER_STATE:-new}
+    volumes:
+      - etcd-data:/etcd-data
+
+  patroni:
+    build:
+      context: .
+      dockerfile: Dockerfile.patroni
+    image: funnyoption-patroni:16
+    pull_policy: build
+    container_name: patroni
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ./env-common.env
+      - ./env-node.local.env
+    environment:
+      PATRONI_NAME: ${PATRONI_NAME}
+      NODE_IP: ${NODE_IP}
+      ETCD_HOSTS: ${ETCD_HOSTS}
+      POSTGRES_SUPERUSER_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+      REPLICATOR_PASSWORD: ${REPLICATOR_PASSWORD}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./patroni.yml.template:/etc/patroni/patroni.yml.template:ro
+    depends_on:
+      - etcd
+
+  haproxy:
+    image: haproxy:2.8-alpine
+    container_name: pg-haproxy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - patroni
+
+volumes:
+  etcd-data:
+  pg-data:

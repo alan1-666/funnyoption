@@ -1,0 +1,16 @@
+# Copy to env-common.env on ALL nodes (same file). Do not commit env-common.env.
+
+# Strong passwords; avoid $ in values (breaks envsubst for Patroni template).
+POSTGRES_SUPERUSER_PASSWORD=change-me-superuser
+REPLICATOR_PASSWORD=change-me-replication
+
+# Same token on all nodes; change only if rebuilding a fresh etcd cluster.
+ETCD_CLUSTER_TOKEN=funnyoption-pg-ha-token-1
+
+# Etcd client endpoints for Patroni live in env-node.local.env (per-node list; local 127.0.0.1 first).
+
+# Static cluster definition (same on all nodes).
+ETCD_INITIAL_CLUSTER=node1=http://76.13.220.236:2380,node2=http://117.72.160.220:2380,node3=http://118.193.33.87:2380
+
+# First-time bring-up: new. After etcd has data, use existing (see README).
+ETCD_INITIAL_CLUSTER_STATE=new

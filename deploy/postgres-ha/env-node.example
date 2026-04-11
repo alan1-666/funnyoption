@@ -1,0 +1,20 @@
+# Copy to env-node.local.env on EACH node — only this file differs per machine.
+# ETCD_HOSTS: put 127.0.0.1:2379 first on *this* host so Patroni does not depend on hairpin NAT to the public IP.
+
+# 76.13.220.236
+NODE_IP=76.13.220.236
+ETCD_NAME=node1
+PATRONI_NAME=node1
+ETCD_HOSTS=127.0.0.1:2379,117.72.160.220:2379,118.193.33.87:2379
+
+# 117.72.160.220 — example:
+# NODE_IP=117.72.160.220
+# ETCD_NAME=node2
+# PATRONI_NAME=node2
+# ETCD_HOSTS=127.0.0.1:2379,76.13.220.236:2379,118.193.33.87:2379
+
+# 118.193.33.87 — example:
+# NODE_IP=118.193.33.87
+# ETCD_NAME=node3
+# PATRONI_NAME=node3
+# ETCD_HOSTS=127.0.0.1:2379,76.13.220.236:2379,117.72.160.220:2379

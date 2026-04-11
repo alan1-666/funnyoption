@@ -11,8 +11,8 @@ func registerCustodyRoutes(engine *gin.Engine, deps handler.Dependencies, ch *cu
 	internal := engine.Group("/internal/custody")
 	internal.POST("/deposit/notify", ch.DepositNotify)
 
-	// SaaS callback also uses the legacy path
-	internal.POST("/v1/account/asset/deposit/notify", ch.DepositNotify)
+	// SaaS ProjectNotify callback path (called from scan-account-service)
+	engine.POST("/v1/account/asset/deposit/notify", ch.DepositNotify)
 
 	orderHandler := handler.NewOrderHandler(deps)
 	api := engine.Group("/api/v1/custody")

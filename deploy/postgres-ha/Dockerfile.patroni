@@ -1,0 +1,23 @@
+# PostgreSQL 16 + Patroni (etcd DCS). Build: docker compose build patroni
+FROM postgres:16-bookworm
+
+USER root
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    gettext-base \
+    python3 \
+    python3-venv \
+  && python3 -m venv /opt/patroni-venv \
+  && /opt/patroni-venv/bin/pip install --no-cache-dir --upgrade pip \
+  && /opt/patroni-venv/bin/pip install --no-cache-dir 'patroni[etcd3]>=3.2.0,<5' psycopg2-binary \
+  && apt-get purge -y python3-venv \
+  && apt-get autoremove -y \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY patroni-entrypoint.sh /usr/local/bin/patroni-entrypoint.sh
+RUN chmod +x /usr/local/bin/patroni-entrypoint.sh
+
+USER postgres
+ENV PATH=/opt/patroni-venv/bin:/usr/lib/postgresql/16/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+ENTRYPOINT ["/usr/local/bin/patroni-entrypoint.sh"]

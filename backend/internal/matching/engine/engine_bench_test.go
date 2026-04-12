@@ -25,15 +25,17 @@ func mkOrder(id string, uid, market int64, outcome string, side model.OrderSide,
 	}
 }
 
-// Each order placed into its own fresh book → measures pure insert path.
+// Measures book creation + first insert. Fresh engine per iteration so GC can
+// reclaim each ~1MB OrderBookDirect between iterations. Cost includes
+// Engine.New + getOrCreateBook + PlaceOrder.
 func BenchmarkPlaceOrder_EmptyBook(b *testing.B) {
-	eng := New(benchLogger)
 	orders := make([]*model.Order, b.N)
 	for i := range orders {
-		orders[i] = mkOrder(fmt.Sprintf("o-%d", i), 1, int64(i+1), "YES", model.OrderSideBuy, 5000, 10)
+		orders[i] = mkOrder(fmt.Sprintf("o-%d", i), 1, 1, "YES", model.OrderSideBuy, 5000, 10)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		eng := New(benchLogger)
 		eng.PlaceOrder(orders[i])
 	}
 }

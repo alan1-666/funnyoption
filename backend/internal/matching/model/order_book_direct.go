@@ -158,24 +158,16 @@ func (ob *OrderBookDirect) Snapshot(limit int) BookSnapshot {
 	}
 	snapshot := BookSnapshot{Key: ob.Key}
 
-	count := 0
-	for p := ob.bestBid; p >= 1 && count < limit; p-- {
-		b := &ob.bidBuckets[p]
-		if b.IsEmpty() {
-			continue
-		}
-		snapshot.Bids = append(snapshot.Bids, BookLevel{Price: p, Quantity: b.Volume})
-		count++
+	b := ob.FirstBidBucket()
+	for b != nil && len(snapshot.Bids) < limit {
+		snapshot.Bids = append(snapshot.Bids, BookLevel{Price: b.Price, Quantity: b.Volume})
+		b = ob.NextBidBucket(b.Price)
 	}
 
-	count = 0
-	for p := ob.bestAsk; p < maxPrice && count < limit; p++ {
-		b := &ob.askBuckets[p]
-		if b.IsEmpty() {
-			continue
-		}
-		snapshot.Asks = append(snapshot.Asks, BookLevel{Price: p, Quantity: b.Volume})
-		count++
+	a := ob.FirstAskBucket()
+	for a != nil && len(snapshot.Asks) < limit {
+		snapshot.Asks = append(snapshot.Asks, BookLevel{Price: a.Price, Quantity: a.Volume})
+		a = ob.NextAskBucket(a.Price)
 	}
 
 	if ob.bestBid > 0 {

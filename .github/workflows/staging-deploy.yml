@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   deploy-staging:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     environment: staging
     env:
       STAGING_DEPLOY_ENTRYPOINT: /usr/local/bin/funnyoption-staging-deploy
@@ -56,66 +56,21 @@ jobs:
           printf 'deploy_ref=%s\n' "${deploy_ref}" >> "${GITHUB_OUTPUT}"
           printf 'deploy_scope=%s\n' "${deploy_scope}" >> "${GITHUB_OUTPUT}"
 
-      - name: Validate required secrets
-        shell: bash
-        env:
-          STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
-          STAGING_SSH_USER: ${{ secrets.STAGING_SSH_USER }}
-          STAGING_SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
-        run: |
-          [[ -n "${STAGING_SSH_HOST}" ]] || { echo "missing STAGING_SSH_HOST"; exit 1; }
-          [[ -n "${STAGING_SSH_USER}" ]] || { echo "missing STAGING_SSH_USER"; exit 1; }
-          [[ -n "${STAGING_SSH_PRIVATE_KEY}" ]] || { echo "missing STAGING_SSH_PRIVATE_KEY"; exit 1; }
-
-      - name: Configure SSH
-        shell: bash
-        env:
-          STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
-          STAGING_SSH_PORT: ${{ secrets.STAGING_SSH_PORT || '22' }}
-          STAGING_SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
-          STAGING_SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "${STAGING_SSH_PRIVATE_KEY}" > ~/.ssh/funnyoption_staging
-          chmod 600 ~/.ssh/funnyoption_staging
-          if [[ -n "${STAGING_SSH_KNOWN_HOSTS}" ]]; then
-            printf '%s\n' "${STAGING_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
-          else
-            ssh-keyscan -T 10 -p "${STAGING_SSH_PORT}" "${STAGING_SSH_HOST}" >> ~/.ssh/known_hosts
-          fi
-
-      - name: Trigger server-side staging deploy
+      - name: Run server-side deploy
         shell: bash
         env:
           DEPLOY_REF: ${{ steps.deploy-request.outputs.deploy_ref }}
           DEPLOY_SCOPE: ${{ steps.deploy-request.outputs.deploy_scope }}
-          STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
-          STAGING_SSH_PORT: ${{ secrets.STAGING_SSH_PORT || '22' }}
-          STAGING_SSH_USER: ${{ secrets.STAGING_SSH_USER }}
           STAGING_DEPLOY_ENTRYPOINT: ${{ env.STAGING_DEPLOY_ENTRYPOINT }}
           STAGING_DEPLOY_REPO: ${{ env.STAGING_DEPLOY_REPO }}
         run: |
-          deploy_ref_q="$(printf '%q' "${DEPLOY_REF}")"
-          entrypoint_q="$(printf '%q' "${STAGING_DEPLOY_ENTRYPOINT}")"
-          repo_q="$(printf '%q' "${STAGING_DEPLOY_REPO}")"
+          set -euo pipefail
 
-          remote_command="set -euo pipefail"
-          remote_command+="; ${entrypoint_q} --repo ${repo_q} --ref ${deploy_ref_q}"
+          cmd=("${STAGING_DEPLOY_ENTRYPOINT}" --repo "${STAGING_DEPLOY_REPO}" --ref "${DEPLOY_REF}")
 
           if [[ "${DEPLOY_SCOPE}" == "full" ]]; then
-            remote_command+=" --all-services"
+            cmd+=(--all-services)
           fi
 
           echo "triggering ${DEPLOY_SCOPE} staging deploy for ${DEPLOY_REF}"
-
-          ssh \
-            -i ~/.ssh/funnyoption_staging \
-            -o BatchMode=yes \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o ConnectTimeout=30 \
-            -o ServerAliveInterval=15 \
-            -o ServerAliveCountMax=3 \
-            -p "${STAGING_SSH_PORT}" \
-            "${STAGING_SSH_USER}@${STAGING_SSH_HOST}" \
-            "${remote_command}"
+          "${cmd[@]}"

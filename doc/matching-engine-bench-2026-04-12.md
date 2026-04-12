@@ -195,8 +195,10 @@ pq: insert or update on table "trades" violates foreign key constraint "trades_t
 - [x] ~~前后对比~~ → 见下方对比表
 - [x] ~~pprof 采样~~ → Snapshot 是 83% CPU 热点，已修复
 - [x] ~~EmptyBook OOM~~ → bench 改为 fresh engine/iteration，GC 回收正常
-- [ ] E2E gateway fan-out / dispatcher 落库优化 — 后续迭代
-- [ ] CI/CD SSH 偶发 timeout — GitHub runner IP 不固定，需要防火墙放行或改用 self-hosted runner
+- [x] ~~E2E dispatcher 落库优化~~ → batch persist + multi-row INSERT + 4 workers 实测 56/s → 1,300/s (23x)
+- [x] ~~CI/CD SSH 偶发 timeout~~ → 改用 self-hosted runner，不再经过 SSH
+- [x] ~~`salvage/server-custody-wip` push 到 origin~~ → 已 push
+- [ ] Gateway 优化 — 当前 ~980/s 是新的 E2E 瓶颈，方向：多 partition 并行消费
 
 ---
 
@@ -242,7 +244,7 @@ pq: insert or update on table "trades" violates foreign key constraint "trades_t
 
 > `83c4eca` 的 InterleavedAddMatch/CancelOrders 回退是因为 `Snapshot()` 用 O(maxPrice) 线性扫描。`20169a6` 用 bitmap 遍历修复后，**全面超越 e86fca4**。
 
-### E2E Kafka 压测最终数据 (cross-match 5000 单, `--pg-dsn` pre-insert)
+### E2E Kafka 压测数据 — batch persist 前 (cross-match 5000 单, `--pg-dsn` pre-insert)
 
 | 指标 | 值 |
 |---|---|
@@ -256,19 +258,59 @@ pq: insert or update on table "trades" violates foreign key constraint "trades_t
 
 > 延迟大是因为引擎瞬间处理完 5000 单，但 dispatcher 只有 ~56/s 的 DB fsync 速度。真正的引擎撮合延迟 sub-ms。
 
-### E2E 吞吐分层分析
+### E2E Kafka 压测数据 — batch persist 后 (`3fbc033`, 单 tx 多 result)
+
+| 指标 | 5k c=8 (修复前) | **5k c=8 (修复后)** | **10k c=32 (修复后)** |
+|---|--:|--:|--:|
+| orders sent | 5 000 | 5 000 | 10 000 |
+| trades observed | 5 000 (100%) | **5 000 (100%)** | **10 000 (100%)** |
+| disp_errors | 0 | **0** | **0** |
+| send throughput | 2 287/s | 2 282/s | 4 950/s |
+| **matching throughput** | **56/s** | **421/s (7.5x)** | **453/s (8.1x)** |
+| trade window | ~89s | **11.9s** | **22.1s** |
+| **latency p50** | **43.8s** | **5.3s (8.3x)** | **10.6s** |
+| latency p90 | — | 8.7s | 18.3s |
+| latency p95 | — | 9.2s | 19.3s |
+| latency p99 | 1m26.9s | **9.8s (8.8x)** | **20.0s** |
+
+> batch persist 将 dispatcher 吞吐从 56/s 提升到 421-453/s (**7.5-8x**)。排队延迟从 43s 降到 5s。
+> 10k c=32 的延迟更高是因为 blast 速度 (4950/s) 远超 dispatcher 消费速度 (453/s)，队列积压更深。
+
+### E2E Kafka 压测数据 — multi-row INSERT + 并发 workers (`38444a4`)
+
+| 指标 | 原始 (56/s) | batch persist (453/s) | **multi-row + workers** |
+|---|--:|--:|--:|
+| **5k c=8 throughput** | 56/s | 421/s | **1,299/s (23x)** |
+| **10k c=32 throughput** | — | 453/s | **1,319/s (23x)** |
+| 5k trade window | ~89s | 11.9s | **3.8s** |
+| 10k trade window | — | 22.1s | **7.6s** |
+| **5k p50 latency** | 43.8s | 5.3s | **678ms (65x)** |
+| 5k p90 | — | 8.7s | **1.17s** |
+| 5k p99 | 86.9s | 9.8s | **1.29s (67x)** |
+| **10k p50 latency** | — | 10.6s | **2.9s** |
+| 10k p99 | — | 20.0s | **5.2s** |
+
+> multi-row INSERT 将 ~60 条/batch 的单独 SQL 合并为 ~4 条 bulk INSERT。
+> 4 个并发 worker (按 bookKey 分片) 在多 book 场景下可进一步并行；
+> 单 book 压测中所有 result 落到同一 worker，提升主要来自 multi-row INSERT。
+
+### E2E 吞吐分层分析 (multi-row + workers 后)
 
 ```
-Client (c=32)  →  6 547 orders/s
+Client (c=32)  →  4 188 orders/s
     ↓ Kafka produce
-Gateway        →  ~980 orders/s   ← batch commit 优化后 2x
+Gateway        →  ~980 orders/s   ← 当前 E2E 瓶颈
     ↓ ringbuffer route
 Engine         →  ~1M+ ops/s      ← 不是瓶颈
     ↓ output channel
-Dispatcher     →  ~56 trades/s    ← DB fsync，是 E2E 瓶颈
+Dispatcher     →  ~1,300 trades/s ← 不再是瓶颈 (multi-row + workers)
     ↓ Kafka publish
 Consumer       →  观测到的 trade
 ```
+
+> **瓶颈已从 dispatcher 转移到 gateway (~980/s)**。
+> Dispatcher 1,300/s 已超过 gateway 消费速度，有充分余量。
+> 下一步如需进一步提升 E2E 吞吐，优化方向是 gateway: 多 partition 并行消费 + 更快的 JSON 解码。
 
 ## pprof 发现
 
@@ -286,7 +328,7 @@ Consumer       →  观测到的 trade
 
 ## 残留问题
 
-1. **CI/CD SSH timeout** — GitHub Actions runner IP 不固定，偶发连不上服务器 port 22。解法：防火墙放行 GitHub Actions IP 段，或改用 self-hosted runner
-2. **Dispatcher 落库 ~56/s** — E2E 真正瓶颈。每笔 cross-match trade 需要 upsert 2 行 orders + insert 1 行 trades + rollup append，受 PG fsync 限制。优化方向：批量 persist、async write-ahead、或 WAL-only 模式
-3. **`salvage/server-custody-wip` 未 push 到 origin** — 服务器没有 GitHub push 权限，需要从本地 fetch 后 push
-4. **Gateway 进一步优化** — 当前单 goroutine fetch 已提到 ~980/s，如需更高可考虑 fan-out decode + 多 partition 并行消费
+1. ~~**CI/CD SSH timeout**~~ → **已修复**: 改用 self-hosted runner (服务器本地运行，不再经过 SSH)
+2. ~~**Dispatcher 落库 ~56/s**~~ → **已修复**: batch persist + multi-row INSERT + 4 workers 实测 1,299-1,319/s (**23x** 提升)
+3. ~~**`salvage/server-custody-wip` 未 push 到 origin**~~ → **已修复**: 从服务器 fetch 后 push 到 origin
+4. **Gateway 优化** — Dispatcher 1,300/s 已超 gateway 980/s，瓶颈转移。方向：多 partition 并行消费 + 更快的 JSON 解码

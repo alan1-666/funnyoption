@@ -16,6 +16,7 @@ type OrderCommand struct {
 	Side              string `json:"side"`
 	Type              string `json:"type"`
 	TimeInForce       string `json:"time_in_force"`
+	STPStrategy       string `json:"stp_strategy,omitempty"`
 	Price             int64  `json:"price"`
 	Quantity          int64  `json:"quantity"`
 	RequestedAtMillis int64  `json:"requested_at_millis"`

@@ -11,6 +11,7 @@ type Order struct {
 	Side            OrderSide
 	Type            OrderType
 	TimeInForce     TimeInForce
+	STPStrategy     STPStrategy
 	Price           int64
 	Quantity        int64
 	FilledQuantity  int64

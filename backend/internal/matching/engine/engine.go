@@ -408,8 +408,97 @@ func (e *Engine) CancelOrders(orders []*model.Order, reason model.CancelReason) 
 }
 
 func (e *Engine) processLimitOrder(order *model.Order, book *model.OrderBookDirect) ([]model.Trade, []*model.Order) {
+	switch order.TimeInForce {
+	case model.TimeInForcePostOnly:
+		return e.processPostOnly(order, book)
+	case model.TimeInForceFOK:
+		return e.processFOK(order, book)
+	default:
+		// GTC and IOC both attempt immediate matching.
+		return e.processGTCOrIOC(order, book)
+	}
+}
+
+// processPostOnly adds the order to the book only if it would NOT cross.
+func (e *Engine) processPostOnly(order *model.Order, book *model.OrderBookDirect) ([]model.Trade, []*model.Order) {
+	if book.IsCross(order) {
+		order.Cancel(model.CancelReasonPostOnlyCross)
+		return nil, nil
+	}
+	book.AddOrder(order)
+	order.Status = model.OrderStatusNew
+	return nil, nil
+}
+
+// processFOK implements Fill-or-Kill with a two-phase approach:
+// Phase 1 — simulate matching (read-only) to check if the full quantity can fill.
+// Phase 2 — if yes, execute the real match.
+func (e *Engine) processFOK(order *model.Order, book *model.OrderBookDirect) ([]model.Trade, []*model.Order) {
+	if !book.IsCross(order) {
+		order.Cancel(model.CancelReasonFOKNotFilled)
+		return nil, nil
+	}
+	if !e.fokCanFill(order, book) {
+		order.Cancel(model.CancelReasonFOKNotFilled)
+		return nil, nil
+	}
+	// Full fill guaranteed — execute real match.
+	trades, affected := e.match(order, book)
+	return trades, affected
+}
+
+// fokCanFill simulates matching without modifying any state, returning true
+// only if the order's full quantity can be filled against the current book.
+func (e *Engine) fokCanFill(order *model.Order, book *model.OrderBookDirect) bool {
+	remaining := order.RemainingQuantity()
+
+	type bucketIter struct {
+		first func() *model.Bucket
+		next  func(int64) *model.Bucket
+		cross func(int64) bool
+	}
+	var it bucketIter
+	if order.IsBuy() {
+		it = bucketIter{
+			first: book.FirstAskBucket,
+			next:  book.NextAskBucket,
+			cross: func(p int64) bool { return order.Price >= p },
+		}
+	} else {
+		it = bucketIter{
+			first: book.FirstBidBucket,
+			next:  book.NextBidBucket,
+			cross: func(p int64) bool { return order.Price <= p },
+		}
+	}
+
+	for bucket := it.first(); bucket != nil && remaining > 0; bucket = it.next(bucket.Price) {
+		if !it.cross(bucket.Price) {
+			break
+		}
+		for maker := bucket.Head; maker != nil && remaining > 0; maker = maker.Next() {
+			if e.stpWouldCancelTaker(order, maker) {
+				return false
+			}
+			if e.stpWouldSkipMaker(order, maker) {
+				continue
+			}
+			qty := min(remaining, maker.RemainingQuantity())
+			if qty > 0 {
+				remaining -= qty
+			}
+		}
+	}
+	return remaining == 0
+}
+
+func (e *Engine) processGTCOrIOC(order *model.Order, book *model.OrderBookDirect) ([]model.Trade, []*model.Order) {
 	trades, affected := e.match(order, book)
 	if order.RemainingQuantity() == 0 {
+		return trades, affected
+	}
+	// STP may have cancelled the taker inside match() — don't rest or overwrite.
+	if order.Status == model.OrderStatusCancelled {
 		return trades, affected
 	}
 
@@ -422,6 +511,7 @@ func (e *Engine) processLimitOrder(order *model.Order, book *model.OrderBookDire
 		return trades, affected
 	}
 
+	// GTC: rest remainder on the book.
 	book.AddOrder(order)
 	if order.FilledQuantity > 0 {
 		order.Status = model.OrderStatusPartiallyFilled
@@ -429,6 +519,67 @@ func (e *Engine) processLimitOrder(order *model.Order, book *model.OrderBookDire
 		order.Status = model.OrderStatusNew
 	}
 	return trades, affected
+}
+
+// AmendOrder cancels an existing resting order and places a new one with
+// updated price/quantity. The new order loses time priority (cancel + relist).
+func (e *Engine) AmendOrder(original *model.Order, newPrice, newQty int64) (Result, error) {
+	if original == nil {
+		return Result{}, fmt.Errorf("original order is nil")
+	}
+
+	book, ok := e.books[original.BookKey()]
+	if !ok {
+		return Result{}, fmt.Errorf("book not found: %s", original.BookKey())
+	}
+	existing, ok := book.GetDirectOrder(original.OrderID)
+	if !ok || existing.RemainingQuantity() <= 0 {
+		return Result{}, fmt.Errorf("order not found or already filled: %s", original.OrderID)
+	}
+
+	// Cancel existing.
+	existing.Cancel(model.CancelReasonAmended)
+	existing.UpdatedAtMillis = time.Now().UnixMilli()
+	cancelled := existing.ToOrder()
+	book.RemoveDirectOrder(existing)
+
+	// Build replacement order.
+	amended := cloneOrder(cancelled)
+	amended.Status = model.OrderStatusNew
+	amended.CancelReason = ""
+	amended.FilledQuantity = 0
+	if newPrice > 0 {
+		amended.Price = newPrice
+	}
+	if newQty > 0 {
+		amended.Quantity = newQty
+	}
+
+	// Place the amended order through normal flow.
+	result, err := e.PlaceOrder(amended)
+	// Attach the cancelled original as the first affected order.
+	result.Affected = append([]*model.Order{cancelled}, result.Affected...)
+	return result, err
+}
+
+// ---- STP helpers ----
+
+// stpWouldCancelTaker returns true if the taker's STP strategy means the
+// taker itself should be cancelled upon encountering this maker.
+func (e *Engine) stpWouldCancelTaker(taker *model.Order, maker *model.DirectOrder) bool {
+	if taker.UserID != maker.UserID || taker.STPStrategy == model.STPNone {
+		return false
+	}
+	return taker.STPStrategy == model.STPCancelTaker || taker.STPStrategy == model.STPCancelBoth
+}
+
+// stpWouldSkipMaker returns true if the taker's STP strategy means this
+// maker should be skipped (and later cancelled).
+func (e *Engine) stpWouldSkipMaker(taker *model.Order, maker *model.DirectOrder) bool {
+	if taker.UserID != maker.UserID || taker.STPStrategy == model.STPNone {
+		return false
+	}
+	return taker.STPStrategy == model.STPCancelMaker || taker.STPStrategy == model.STPCancelBoth
 }
 
 func (e *Engine) match(order *model.Order, book *model.OrderBookDirect) ([]model.Trade, []*model.Order) {
@@ -442,98 +593,92 @@ func (e *Engine) match(order *model.Order, book *model.OrderBookDirect) ([]model
 	toRemove := e.removeBuf[:0]
 
 	bookKey := order.BookKey()
+	stpStrategy := order.STPStrategy
 
+	type bucketIter struct {
+		first func() *model.Bucket
+		next  func(int64) *model.Bucket
+		cross func(int64) bool
+	}
+	var it bucketIter
 	if order.IsBuy() {
-		bucket := book.FirstAskBucket()
-		for bucket != nil && order.RemainingQuantity() > 0 {
-			if order.Price < bucket.Price {
-				break
-			}
-			maker := bucket.Head
-			for maker != nil && order.RemainingQuantity() > 0 {
-				nextMaker := maker.Next()
-				if order.UserID == maker.UserID {
-					maker = nextMaker
-					continue
-				}
-				tradeQty := min(order.RemainingQuantity(), maker.RemainingQuantity())
-				if tradeQty <= 0 {
-					maker = nextMaker
-					continue
-				}
-				order.ApplyFill(tradeQty)
-				maker.ApplyFill(tradeQty)
-				e.localSeq++
-				seq := atomic.AddUint64(e.sequence, 1)
-				trades = append(trades, model.Trade{
-					Sequence:        seq,
-					TradeID:         model.DeterministicTradeID(bookKey, e.localSeq),
-					MarketID:        order.MarketID,
-					Outcome:         order.Outcome,
-					BookKey:         bookKey,
-					Price:           maker.Price,
-					Quantity:        tradeQty,
-					TakerOrderID:    order.OrderID,
-					MakerOrderID:    maker.OrderID,
-					TakerUserID:     order.UserID,
-					MakerUserID:     maker.UserID,
-					TakerSide:       order.Side,
-					MakerSide:       maker.Side,
-					MatchedAtMillis: time.Now().UnixMilli(),
-				})
-				affected = append(affected, maker.ToOrder())
-				if maker.RemainingQuantity() == 0 {
-					toRemove = append(toRemove, maker)
-				}
-				maker = nextMaker
-			}
-			bucket = book.NextAskBucket(bucket.Price)
+		it = bucketIter{
+			first: book.FirstAskBucket,
+			next:  book.NextAskBucket,
+			cross: func(p int64) bool { return order.Price >= p },
 		}
 	} else {
-		bucket := book.FirstBidBucket()
-		for bucket != nil && order.RemainingQuantity() > 0 {
-			if order.Price > bucket.Price {
-				break
-			}
-			maker := bucket.Head
-			for maker != nil && order.RemainingQuantity() > 0 {
-				nextMaker := maker.Next()
-				if order.UserID == maker.UserID {
-					maker = nextMaker
-					continue
-				}
-				tradeQty := min(order.RemainingQuantity(), maker.RemainingQuantity())
-				if tradeQty <= 0 {
-					maker = nextMaker
-					continue
-				}
-				order.ApplyFill(tradeQty)
-				maker.ApplyFill(tradeQty)
-				e.localSeq++
-				seq := atomic.AddUint64(e.sequence, 1)
-				trades = append(trades, model.Trade{
-					Sequence:        seq,
-					TradeID:         model.DeterministicTradeID(bookKey, e.localSeq),
-					MarketID:        order.MarketID,
-					Outcome:         order.Outcome,
-					BookKey:         bookKey,
-					Price:           maker.Price,
-					Quantity:        tradeQty,
-					TakerOrderID:    order.OrderID,
-					MakerOrderID:    maker.OrderID,
-					TakerUserID:     order.UserID,
-					MakerUserID:     maker.UserID,
-					TakerSide:       order.Side,
-					MakerSide:       maker.Side,
-					MatchedAtMillis: time.Now().UnixMilli(),
-				})
-				affected = append(affected, maker.ToOrder())
-				if maker.RemainingQuantity() == 0 {
+		it = bucketIter{
+			first: book.FirstBidBucket,
+			next:  book.NextBidBucket,
+			cross: func(p int64) bool { return order.Price <= p },
+		}
+	}
+
+	takerDone := false
+	for bucket := it.first(); bucket != nil && order.RemainingQuantity() > 0 && !takerDone; bucket = it.next(bucket.Price) {
+		if !it.cross(bucket.Price) {
+			break
+		}
+		for maker := bucket.Head; maker != nil && order.RemainingQuantity() > 0 && !takerDone; {
+			nextMaker := maker.Next()
+
+			// Self-trade prevention.
+			if order.UserID == maker.UserID && stpStrategy != model.STPNone {
+				switch stpStrategy {
+				case model.STPCancelTaker:
+					order.Cancel(model.CancelReasonSTPTaker)
+					takerDone = true
+				case model.STPCancelMaker:
+					maker.Cancel(model.CancelReasonSTPMaker)
+					affected = append(affected, maker.ToOrder())
 					toRemove = append(toRemove, maker)
+				case model.STPCancelBoth:
+					order.Cancel(model.CancelReasonSTPBoth)
+					maker.Cancel(model.CancelReasonSTPBoth)
+					affected = append(affected, maker.ToOrder())
+					toRemove = append(toRemove, maker)
+					takerDone = true
 				}
 				maker = nextMaker
+				continue
 			}
-			bucket = book.NextBidBucket(bucket.Price)
+			// Legacy: skip same-user when no STP strategy set (backward compat).
+			if order.UserID == maker.UserID {
+				maker = nextMaker
+				continue
+			}
+
+			tradeQty := min(order.RemainingQuantity(), maker.RemainingQuantity())
+			if tradeQty <= 0 {
+				maker = nextMaker
+				continue
+			}
+			order.ApplyFill(tradeQty)
+			maker.ApplyFill(tradeQty)
+			e.localSeq++
+			seq := atomic.AddUint64(e.sequence, 1)
+			trades = append(trades, model.Trade{
+				Sequence:        seq,
+				TradeID:         model.DeterministicTradeID(bookKey, e.localSeq),
+				MarketID:        order.MarketID,
+				Outcome:         order.Outcome,
+				BookKey:         bookKey,
+				Price:           maker.Price,
+				Quantity:        tradeQty,
+				TakerOrderID:    order.OrderID,
+				MakerOrderID:    maker.OrderID,
+				TakerUserID:     order.UserID,
+				MakerUserID:     maker.UserID,
+				TakerSide:       order.Side,
+				MakerSide:       maker.Side,
+				MatchedAtMillis: time.Now().UnixMilli(),
+			})
+			affected = append(affected, maker.ToOrder())
+			if maker.RemainingQuantity() == 0 {
+				toRemove = append(toRemove, maker)
+			}
+			maker = nextMaker
 		}
 	}
 
@@ -546,10 +691,7 @@ func (e *Engine) match(order *model.Order, book *model.OrderBookDirect) ([]model
 	e.affectedBuf = affected
 	e.removeBuf = toRemove
 
-	// Detach returned slices from the reusable backing arrays. The caller
-	// (BookEngine) sends the result over a channel to the OutputDispatcher;
-	// without a copy the next PlaceOrder call would overwrite the same memory
-	// before the dispatcher consumes the previous result.
+	// Detach returned slices from the reusable backing arrays.
 	out := make([]model.Trade, len(trades))
 	copy(out, trades)
 	outAff := make([]*model.Order, len(affected))

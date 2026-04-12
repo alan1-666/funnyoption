@@ -8,6 +8,7 @@ type DirectOrder struct {
 	Side            OrderSide
 	Type            OrderType
 	TimeInForce     TimeInForce
+	STPStrategy     STPStrategy
 	Price           int64
 	Quantity        int64
 	FilledQuantity  int64
@@ -64,6 +65,7 @@ func (d *DirectOrder) FromOrder(o *Order) *DirectOrder {
 	d.Side = o.Side
 	d.Type = o.Type
 	d.TimeInForce = o.TimeInForce
+	d.STPStrategy = o.STPStrategy
 	d.Price = o.Price
 	d.Quantity = o.Quantity
 	d.FilledQuantity = o.FilledQuantity
@@ -87,6 +89,7 @@ func (d *DirectOrder) ToOrder() *Order {
 		Side:            d.Side,
 		Type:            d.Type,
 		TimeInForce:     d.TimeInForce,
+		STPStrategy:     d.STPStrategy,
 		Price:           d.Price,
 		Quantity:        d.Quantity,
 		FilledQuantity:  d.FilledQuantity,
@@ -106,6 +109,7 @@ func (d *DirectOrder) reset() {
 	d.Side = ""
 	d.Type = ""
 	d.TimeInForce = ""
+	d.STPStrategy = ""
 	d.Price = 0
 	d.Quantity = 0
 	d.FilledQuantity = 0

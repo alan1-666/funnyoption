@@ -331,4 +331,96 @@ Consumer       →  观测到的 trade
 1. ~~**CI/CD SSH timeout**~~ → **已修复**: 改用 self-hosted runner (服务器本地运行，不再经过 SSH)
 2. ~~**Dispatcher 落库 ~56/s**~~ → **已修复**: batch persist + multi-row INSERT + 4 workers 实测 1,299-1,319/s (**23x** 提升)
 3. ~~**`salvage/server-custody-wip` 未 push 到 origin**~~ → **已修复**: 从服务器 fetch 后 push 到 origin
-4. **Gateway 优化** — Dispatcher 1,300/s 已超 gateway 980/s，瓶颈转移。方向：多 partition 并行消费 + 更快的 JSON 解码
+4. ~~**Gateway 优化**~~ → **已优化** (`4f22c4a`): async commit goroutine + QueueCapacity 100→1000 + MinBytes 10KB。E2E 实测 980/s → 1,485/s (+52%)
+
+---
+
+# Gateway 优化 + 功能扩展 (2026-04-12 晚)
+
+## Gateway 优化 (`4f22c4a`)
+
+### 改动
+
+1. **Async commit goroutine** — `CommitMessages` (5-20ms 同步 Kafka RPC) 从 fetch→decode→route 热路径移到后台 goroutine
+2. **QueueCapacity 100→1000** — kafka-go 内部预取 buffer 10 倍，减少等待 broker round-trip 的概率
+3. **MinBytes 1→10KB** — broker 端攒 ~20 条消息再响应，减少每条消息的网络开销
+4. **移除无效 CommitInterval** — 该字段仅用于 ReadMessage 自动提交模式，对 FetchMessage 手动提交无效
+
+### E2E 对比 (cross-match, 同机 2vCPU EPYC)
+
+| 指标 | 优化前 (`38444a4`) | **优化后 (`4f22c4a`)** | 提升 |
+|---|--:|--:|---|
+| **5k c=8 throughput** | 1,299/s | **1,391/s** | +7% |
+| **10k c=32 throughput** | 1,319/s | **1,485/s** | +13% |
+| **20k c=32 throughput** | — | **1,267/s** | (new) |
+| 5k p50 latency | 678 ms | 774 ms | (noise) |
+| 5k p99 latency | 1.29 s | **1.17 s** | +9% |
+| **10k p50 latency** | 2.9 s | **2.4 s** | +17% |
+| 10k p99 latency | 5.2 s | **4.5 s** | +13% |
+
+### 吞吐分层 (优化后)
+
+```
+Client (c=32)  →  4,360/s
+Gateway        →  ~1,400-1,500/s  ← 提升后仍是瓶颈，和 dispatcher 接近平衡
+Engine         →  ~1M+ ops/s
+Dispatcher     →  ~1,300/s
+```
+
+## 功能扩展：STP 策略 + POST_ONLY + FOK + Amend Order
+
+参考 laser-matching-engine (Aeron Cluster + SBE) 的设计，新增 4 项功能：
+
+### 1. STP (Self-Trade Prevention) 三策略
+
+之前只有 skip-same-user (跳过同 userID 的 maker，不撤销任何一方)。
+新增 `Order.STPStrategy` 字段，支持：
+
+| 策略 | 行为 | 用途 |
+|---|---|---|
+| `""` (空/默认) | 跳过 same-user maker，继续下一个 (向后兼容) | 普通用户 |
+| `CANCEL_TAKER` | 撤销 taker，保留 maker | 保护流动性 |
+| `CANCEL_MAKER` | 撤销 maker，taker 继续和下一个 maker 撮合 | 做市商换仓 |
+| `CANCEL_BOTH` | 双撤 | 严格防自成交 |
+
+从 Kafka `OrderCommand.stp_strategy` 字段传入，pipeline 内部用 `STPFlag` (uint8) 编码。
+
+### 2. POST_ONLY (Maker-Only)
+
+`TimeInForce=POST_ONLY`: 如果订单会与对手盘交叉则立即撤单 (`POST_ONLY_CROSS`)，否则挂单。
+做市商必需功能 — 确保只做 maker 不做 taker，避免意外支付 taker fee。
+
+### 3. FOK (Fill-or-Kill) 两阶段撮合
+
+`TimeInForce=FOK`: all-or-nothing，要么全部成交要么全部撤销。
+
+实现采用两阶段：
+- **Phase 1 (`fokCanFill`)**: read-only 遍历对手盘，模拟扣减，不修改任何 maker 状态。考虑 STP (若遇到 CANCEL_TAKER 直接判定不可填)。
+- **Phase 2 (`match`)**: 确认全填后执行真实撮合。
+
+Benchmark: FOK ~394 ns/op (和 CrossSpread ~375 ns/op 接近 — 预检开销极低)。
+
+### 4. Amend Order (改单)
+
+`Engine.AmendOrder(original, newPrice, newQty)`: cancel + relist 模式。
+- 撤销原单 (CancelReason=`AMENDED`)
+- 以新价格/数量重新下单 (走完整 PlaceOrder 流程，可能触发撮合)
+- 注意：改价后失去时间优先级
+
+### 新增/修改的文件
+
+| 文件 | 改动 |
+|---|---|
+| `model/types.go` | +`STPStrategy` 类型, +`TimeInForceFOK/PostOnly`, +5 个 CancelReason |
+| `model/order.go` | +`STPStrategy` 字段 |
+| `model/direct_order.go` | +`STPStrategy` 字段, 同步 FromOrder/ToOrder/reset |
+| `engine/engine.go` | 重写 `processLimitOrder` (switch TIF), 重写 `match` (STP 三策略), +`processFOK/fokCanFill/processPostOnly/processGTCOrIOC/AmendOrder` |
+| `pipeline/protocol.go` | +`TIFFlag` FOK/PostOnly, +`STPFlag` 类型及编解码 |
+| `shared/kafka/messages.go` | +`OrderCommand.STPStrategy` 字段 |
+| `engine/engine_test.go` | +15 个新测试 (STP×4, PostOnly×2, FOK×5, Amend×3, legacy) |
+| `engine/engine_bench_test.go` | +`BenchmarkMatch_FOK`, +`BenchmarkPlaceOrder_PostOnly` |
+| `pipeline/pipeline_test.go` | 更新 ProtocolRoundTrip 覆盖 FOK + STP |
+
+### 测试结果
+
+全量测试 (31 个 test package) 通过，零失败。新增 15 个引擎测试全部通过。

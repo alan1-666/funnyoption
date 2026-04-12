@@ -187,6 +187,45 @@ func BenchmarkMatch_InterleavedAddMatch(b *testing.B) {
 	}
 }
 
+// FOK: full fill against deep book.
+func BenchmarkMatch_FOK(b *testing.B) {
+	eng := New(benchLogger)
+	for p := int64(100); p <= 5000; p += 100 {
+		for j := 0; j < 10; j++ {
+			eng.PlaceOrder(mkOrder(fmt.Sprintf("a-%d-%d", p, j), int64(j+1), 1, "YES", model.OrderSideSell, p, 1_000_000_000))
+		}
+	}
+	orders := make([]*model.Order, b.N)
+	for i := range orders {
+		orders[i] = &model.Order{
+			OrderID: fmt.Sprintf("fok-%d", i), UserID: 999, MarketID: 1, Outcome: "YES",
+			Side: model.OrderSideBuy, Type: model.OrderTypeLimit, TimeInForce: model.TimeInForceFOK,
+			Price: 5000, Quantity: 1,
+		}
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		eng.PlaceOrder(orders[i])
+	}
+}
+
+// POST_ONLY: order that doesn't cross — pure resting path.
+func BenchmarkPlaceOrder_PostOnly(b *testing.B) {
+	eng := New(benchLogger)
+	orders := make([]*model.Order, b.N)
+	for i := range orders {
+		orders[i] = &model.Order{
+			OrderID: fmt.Sprintf("po-%d", i), UserID: 1, MarketID: int64(i+1), Outcome: "YES",
+			Side: model.OrderSideBuy, Type: model.OrderTypeLimit, TimeInForce: model.TimeInForcePostOnly,
+			Price: 5000, Quantity: 10,
+		}
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		eng.PlaceOrder(orders[i])
+	}
+}
+
 // STP (self-trade prevention): taker and maker share same userID — engine skips.
 func BenchmarkMatch_STPSkip(b *testing.B) {
 	eng := New(benchLogger)

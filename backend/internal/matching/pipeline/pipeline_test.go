@@ -405,7 +405,8 @@ func TestProtocolRoundTrip(t *testing.T) {
 		Outcome:           "YES",
 		Side:              "BUY",
 		Type:              "LIMIT",
-		TimeInForce:       "GTC",
+		TimeInForce:       "FOK",
+		STPStrategy:       "CANCEL_MAKER",
 		Price:             55,
 		Quantity:          10,
 		RequestedAtMillis: 1234567890,
@@ -431,5 +432,11 @@ func TestProtocolRoundTrip(t *testing.T) {
 	}
 	if roundtripped.Side != original.Side {
 		t.Errorf("Side mismatch: %s != %s", roundtripped.Side, original.Side)
+	}
+	if roundtripped.TimeInForce != original.TimeInForce {
+		t.Errorf("TimeInForce mismatch: %s != %s", roundtripped.TimeInForce, original.TimeInForce)
+	}
+	if roundtripped.STPStrategy != original.STPStrategy {
+		t.Errorf("STPStrategy mismatch: %s != %s", roundtripped.STPStrategy, original.STPStrategy)
 	}
 }

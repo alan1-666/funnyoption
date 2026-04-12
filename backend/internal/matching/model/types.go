@@ -26,8 +26,21 @@ const (
 )
 
 const (
-	TimeInForceGTC TimeInForce = "GTC"
-	TimeInForceIOC TimeInForce = "IOC"
+	TimeInForceGTC      TimeInForce = "GTC"
+	TimeInForceIOC      TimeInForce = "IOC"
+	TimeInForceFOK      TimeInForce = "FOK"
+	TimeInForcePostOnly TimeInForce = "POST_ONLY"
+)
+
+// STPStrategy controls self-trade prevention behavior when a taker's order
+// would match against a maker order from the same user.
+type STPStrategy string
+
+const (
+	STPNone         STPStrategy = ""             // no STP — allow self-trade
+	STPCancelTaker  STPStrategy = "CANCEL_TAKER" // cancel taker, keep maker (protect liquidity)
+	STPCancelMaker  STPStrategy = "CANCEL_MAKER" // cancel maker, continue matching (market-maker rebalance)
+	STPCancelBoth   STPStrategy = "CANCEL_BOTH"  // cancel both taker and maker
 )
 
 const (
@@ -47,6 +60,12 @@ const (
 	CancelReasonMarketNotTradable CancelReason = "MARKET_NOT_TRADABLE"
 	CancelReasonMarketResolved    CancelReason = "MARKET_RESOLVED"
 	CancelReasonValidationFailed  CancelReason = "VALIDATION_FAILED"
+	CancelReasonSTPTaker          CancelReason = "STP_CANCEL_TAKER"
+	CancelReasonSTPMaker          CancelReason = "STP_CANCEL_MAKER"
+	CancelReasonSTPBoth           CancelReason = "STP_CANCEL_BOTH"
+	CancelReasonFOKNotFilled      CancelReason = "FOK_NOT_FILLED"
+	CancelReasonPostOnlyCross     CancelReason = "POST_ONLY_CROSS"
+	CancelReasonAmended           CancelReason = "AMENDED"
 )
 
 func (s OrderSide) IsValid() bool {
@@ -58,7 +77,11 @@ func (t OrderType) IsValid() bool {
 }
 
 func (t TimeInForce) IsValid() bool {
-	return t == TimeInForceGTC || t == TimeInForceIOC
+	switch t {
+	case TimeInForceGTC, TimeInForceIOC, TimeInForceFOK, TimeInForcePostOnly:
+		return true
+	}
+	return false
 }
 
 func BuildBookKey(marketID int64, outcome string) string {

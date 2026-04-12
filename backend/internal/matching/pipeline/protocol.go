@@ -54,22 +54,72 @@ func (f TypeFlag) ToModel() model.OrderType {
 type TIFFlag uint8
 
 const (
-	TIFGTC TIFFlag = 0
-	TIFIOC TIFFlag = 1
+	TIFGTC      TIFFlag = 0
+	TIFIOC      TIFFlag = 1
+	TIFFOK      TIFFlag = 2
+	TIFPostOnly TIFFlag = 3
 )
 
 func TIFFlagFrom(t model.TimeInForce) TIFFlag {
-	if t == model.TimeInForceIOC {
+	switch t {
+	case model.TimeInForceIOC:
 		return TIFIOC
+	case model.TimeInForceFOK:
+		return TIFFOK
+	case model.TimeInForcePostOnly:
+		return TIFPostOnly
+	default:
+		return TIFGTC
 	}
-	return TIFGTC
 }
 
 func (f TIFFlag) ToModel() model.TimeInForce {
-	if f == TIFIOC {
+	switch f {
+	case TIFIOC:
 		return model.TimeInForceIOC
+	case TIFFOK:
+		return model.TimeInForceFOK
+	case TIFPostOnly:
+		return model.TimeInForcePostOnly
+	default:
+		return model.TimeInForceGTC
 	}
-	return model.TimeInForceGTC
+}
+
+// STPFlag encodes STPStrategy as uint8.
+type STPFlag uint8
+
+const (
+	STPFlagNone        STPFlag = 0
+	STPFlagCancelTaker STPFlag = 1
+	STPFlagCancelMaker STPFlag = 2
+	STPFlagCancelBoth  STPFlag = 3
+)
+
+func STPFlagFrom(s model.STPStrategy) STPFlag {
+	switch s {
+	case model.STPCancelTaker:
+		return STPFlagCancelTaker
+	case model.STPCancelMaker:
+		return STPFlagCancelMaker
+	case model.STPCancelBoth:
+		return STPFlagCancelBoth
+	default:
+		return STPFlagNone
+	}
+}
+
+func (f STPFlag) ToModel() model.STPStrategy {
+	switch f {
+	case STPFlagCancelTaker:
+		return model.STPCancelTaker
+	case STPFlagCancelMaker:
+		return model.STPCancelMaker
+	case STPFlagCancelBoth:
+		return model.STPCancelBoth
+	default:
+		return model.STPNone
+	}
 }
 
 // ActionFlag distinguishes place-order from cancel-orders in the ring buffer.
@@ -105,6 +155,7 @@ type MatchCommand struct {
 	Side         SideFlag
 	Type         TypeFlag
 	TimeInForce  TIFFlag
+	STP          STPFlag
 	CancelReason CancelReasonFlag
 }
 
@@ -119,6 +170,7 @@ func (c *MatchCommand) ToOrder(nowMillis int64) *model.Order {
 		Side:            c.Side.ToModel(),
 		Type:            c.Type.ToModel(),
 		TimeInForce:     c.TimeInForce.ToModel(),
+		STPStrategy:     c.STP.ToModel(),
 		Price:           c.Price,
 		Quantity:        c.Quantity,
 		CreatedAtMillis: c.RequestedAtMillis,
@@ -144,6 +196,7 @@ func (c *MatchCommand) ToKafkaCommand() sharedkafka.OrderCommand {
 		Side:              string(c.Side.ToModel()),
 		Type:              string(c.Type.ToModel()),
 		TimeInForce:       string(c.TimeInForce.ToModel()),
+		STPStrategy:       string(c.STP.ToModel()),
 		Price:             c.Price,
 		Quantity:          c.Quantity,
 		RequestedAtMillis: c.RequestedAtMillis,
@@ -178,6 +231,7 @@ func CommandFromKafka(cmd sharedkafka.OrderCommand) MatchCommand {
 		Side:              SideFlagFrom(model.OrderSide(cmd.Side)),
 		Type:              TypeFlagFrom(model.OrderType(cmd.Type)),
 		TimeInForce:       TIFFlagFrom(model.TimeInForce(cmd.TimeInForce)),
+		STP:               STPFlagFrom(model.STPStrategy(cmd.STPStrategy)),
 	}
 }
 

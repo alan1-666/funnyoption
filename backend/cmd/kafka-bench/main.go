@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -33,6 +34,7 @@ import (
 	sharedkafka "funnyoption/internal/shared/kafka"
 
 	kafkago "github.com/segmentio/kafka-go"
+	_ "github.com/lib/pq"
 )
 
 type config struct {
@@ -52,6 +54,7 @@ type config struct {
 	consumerGroup string
 	label         string
 	noMatch       bool
+	pgDSN         string
 }
 
 func parseFlags() config {
@@ -73,6 +76,7 @@ func parseFlags() config {
 	flag.DurationVar(&cfg.drainTimeout, "drain-timeout", 90*time.Second, "max wait after blast for trade consumer to drain")
 	flag.StringVar(&cfg.label, "label", "", "optional label included in stats output")
 	flag.BoolVar(&cfg.noMatch, "no-match", false, "taker orders rest on the opposite side without crossing (isolates placement path, skips trade FK issue)")
+	flag.StringVar(&cfg.pgDSN, "pg-dsn", "", "postgres DSN for pre-inserting taker order rows (e.g. postgres://user:pw@postgres:5432/funnyoption?sslmode=disable)")
 	flag.Parse()
 
 	cfg.brokers = strings.Split(brokersCSV, ",")
@@ -90,6 +94,7 @@ type stats struct {
 	lastMillis  atomic.Int64
 	matchedQty  atomic.Int64
 
+	sentAt     []int64 // indexed by taker seq, stores UnixNano send time (atomic writes)
 	latMu      sync.Mutex
 	latencies  []time.Duration
 	unmatched  int
@@ -116,20 +121,15 @@ func percentile(sorted []time.Duration, p float64) time.Duration {
 	return sorted[idx]
 }
 
-func encodeTakerID(seq int, sentNanos int64) string {
-	return fmt.Sprintf("bench-t-%d-%d", sentNanos, seq)
+func encodeTakerID(seq int) string {
+	return fmt.Sprintf("bench-t-%d", seq)
 }
 
-func decodeTakerID(id string) (sentNanos int64, ok bool) {
+func decodeTakerSeq(id string) (seq int, ok bool) {
 	if !strings.HasPrefix(id, "bench-t-") {
 		return 0, false
 	}
-	rest := id[len("bench-t-"):]
-	dash := strings.IndexByte(rest, '-')
-	if dash < 0 {
-		return 0, false
-	}
-	n, err := strconv.ParseInt(rest[:dash], 10, 64)
+	n, err := strconv.Atoi(id[len("bench-t-"):])
 	if err != nil {
 		return 0, false
 	}
@@ -178,9 +178,7 @@ func buildMakerCmd(cfg config, level int, seq int64) sharedkafka.OrderCommand {
 	}
 }
 
-func buildTakerCmd(cfg config, seq int, sentNanos int64) sharedkafka.OrderCommand {
-	// Default: taker crosses the spread and matches. no-match mode: rest on the
-	// BUY side far below the ask so nothing matches — isolates placement path.
+func buildTakerCmd(cfg config, seq int) sharedkafka.OrderCommand {
 	takerPrice := cfg.basePrice + int64(cfg.seedLevels-1)*cfg.priceStep
 	tif := "IOC"
 	if cfg.noMatch {
@@ -192,7 +190,7 @@ func buildTakerCmd(cfg config, seq int, sentNanos int64) sharedkafka.OrderComman
 	}
 	return sharedkafka.OrderCommand{
 		CommandID:         fmt.Sprintf("bench-tk-cmd-%d", seq),
-		OrderID:           encodeTakerID(seq, sentNanos),
+		OrderID:           encodeTakerID(seq),
 		UserID:            cfg.takerUser,
 		MarketID:          cfg.market,
 		Outcome:           cfg.outcome,
@@ -202,8 +200,57 @@ func buildTakerCmd(cfg config, seq int, sentNanos int64) sharedkafka.OrderComman
 		Price:             takerPrice,
 		Quantity:          1,
 		CollateralAsset:   "USDT",
-		RequestedAtMillis: sentNanos / int64(time.Millisecond),
+		RequestedAtMillis: time.Now().UnixMilli(),
 	}
+}
+
+func preInsertTakers(ctx context.Context, cfg config) error {
+	db, err := sql.Open("postgres", cfg.pgDSN)
+	if err != nil {
+		return fmt.Errorf("pg connect: %w", err)
+	}
+	defer db.Close()
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO markets (market_id, title, description, collateral_asset, status,
+			open_at, close_at, resolve_at, resolved_outcome, created_by, metadata, created_at, updated_at)
+		VALUES ($1, $2, '', 'USDT', 'OPEN', 0, 0, 0, '', 0, '{}'::jsonb,
+			EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT)
+		ON CONFLICT (market_id) DO NOTHING
+	`, cfg.market, fmt.Sprintf("Market %d", cfg.market))
+	if err != nil {
+		return fmt.Errorf("ensure market: %w", err)
+	}
+
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO orders (order_id, client_order_id, command_id, user_id, market_id,
+			outcome, side, order_type, time_in_force, collateral_asset,
+			freeze_id, freeze_asset, freeze_amount,
+			price, quantity, filled_quantity, remaining_quantity, status,
+			cancel_reason, created_at, updated_at)
+		VALUES ($1, '', '', $2, $3, $4, 'BUY', 'LIMIT', 'IOC', 'USDT',
+			'', 'USDT', 0, $5, 1, 0, 1, 'NEW', '',
+			EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT)
+		ON CONFLICT (order_id) DO NOTHING
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare: %w", err)
+	}
+	defer stmt.Close()
+
+	takerPrice := cfg.basePrice + int64(cfg.seedLevels-1)*cfg.priceStep
+	for i := 0; i < cfg.orders; i++ {
+		if _, err := stmt.ExecContext(ctx, encodeTakerID(i), cfg.takerUser, cfg.market, cfg.outcome, takerPrice); err != nil {
+			return fmt.Errorf("insert seq %d: %w", i, err)
+		}
+	}
+	return tx.Commit()
 }
 
 func runConsumer(ctx context.Context, cfg config, st *stats, targetTrades int, done chan<- struct{}) {
@@ -236,9 +283,12 @@ func runConsumer(ctx context.Context, cfg config, st *stats, targetTrades int, d
 		if err := json.Unmarshal(msg.Value, &ev); err != nil {
 			continue
 		}
-		if sentNs, ok := decodeTakerID(ev.TakerOrderID); ok {
-			latency := time.Since(time.Unix(0, sentNs))
-			st.observeLatency(latency)
+		if seq, ok := decodeTakerSeq(ev.TakerOrderID); ok && seq >= 0 && seq < len(st.sentAt) {
+			sentNs := atomic.LoadInt64(&st.sentAt[seq])
+			if sentNs > 0 {
+				latency := time.Since(time.Unix(0, sentNs))
+				st.observeLatency(latency)
+			}
 			nowCount := st.trades.Add(1)
 			st.matchedQty.Add(ev.Quantity)
 			if nowCount == 1 {
@@ -281,7 +331,16 @@ func main() {
 	log.Printf("seed phase complete in %s, waiting 2s for maker orders to rest on the book", time.Since(seedStart))
 	time.Sleep(2 * time.Second)
 
+	if cfg.pgDSN != "" {
+		log.Printf("pre-inserting %d taker order rows into postgres", cfg.orders)
+		if err := preInsertTakers(ctx, cfg); err != nil {
+			log.Fatalf("pre-insert takers failed: %v", err)
+		}
+		log.Printf("pre-insert complete")
+	}
+
 	st := &stats{}
+	st.sentAt = make([]int64, cfg.orders)
 	st.latencies = make([]time.Duration, 0, cfg.orders)
 
 	doneCh := make(chan struct{}, 1)
@@ -309,8 +368,8 @@ func main() {
 				end = cfg.orders
 			}
 			for i := start; i < end; i++ {
-				sentNs := time.Now().UnixNano()
-				cmd := buildTakerCmd(cfg, i, sentNs)
+				atomic.StoreInt64(&st.sentAt[i], time.Now().UnixNano())
+				cmd := buildTakerCmd(cfg, i)
 				if err := produceCommand(ctx, localWriter, cmd); err != nil {
 					if ctx.Err() != nil {
 						return

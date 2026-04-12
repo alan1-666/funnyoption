@@ -43,11 +43,13 @@ func NewInputGateway(
 	router CommandRouter,
 ) *InputGateway {
 	reader := kafkago.NewReader(kafkago.ReaderConfig{
-		Brokers:  brokers,
-		GroupID:  groupID,
-		Topic:    topic,
-		MinBytes: 1,
-		MaxBytes: 10e6,
+		Brokers:        brokers,
+		GroupID:        groupID,
+		Topic:          topic,
+		MinBytes:       1,
+		MaxBytes:       10e6,
+		MaxWait:        10 * time.Millisecond,
+		CommitInterval: 200 * time.Millisecond,
 	})
 	return &InputGateway{
 		logger: logger,
@@ -64,6 +66,10 @@ func (g *InputGateway) Start(ctx context.Context) {
 func (g *InputGateway) run(ctx context.Context) {
 	g.logger.Info("input gateway started")
 	defer g.logger.Info("input gateway stopped")
+
+	const commitBatch = 256
+	uncommitted := make([]kafkago.Message, 0, commitBatch)
+	lastCommit := time.Now()
 
 	for {
 		if ctx.Err() != nil {
@@ -83,7 +89,7 @@ func (g *InputGateway) run(ctx context.Context) {
 		var cmd sharedkafka.OrderCommand
 		if err := json.Unmarshal(msg.Value, &cmd); err != nil {
 			g.logger.Error("gateway: json decode failed", "err", err, "offset", msg.Offset)
-			g.commitMsg(ctx, msg)
+			uncommitted = append(uncommitted, msg)
 			continue
 		}
 
@@ -99,13 +105,14 @@ func (g *InputGateway) run(ctx context.Context) {
 		g.idle.Reset()
 		g.received.Add(1)
 
-		g.commitMsg(ctx, msg)
-	}
-}
-
-func (g *InputGateway) commitMsg(ctx context.Context, msg kafkago.Message) {
-	if err := g.reader.CommitMessages(ctx, msg); err != nil {
-		g.logger.Error("gateway: commit failed", "err", err)
+		uncommitted = append(uncommitted, msg)
+		if len(uncommitted) >= commitBatch || time.Since(lastCommit) >= 200*time.Millisecond {
+			if err := g.reader.CommitMessages(ctx, uncommitted...); err != nil {
+				g.logger.Error("gateway: batch commit failed", "err", err)
+			}
+			uncommitted = uncommitted[:0]
+			lastCommit = time.Now()
+		}
 	}
 }
 

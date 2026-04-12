@@ -2,10 +2,10 @@ package kafka
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"time"
 
+	json "github.com/goccy/go-json"
 	kafkago "github.com/segmentio/kafka-go"
 )
 
@@ -32,7 +32,10 @@ func NewJSONPublisher(logger *slog.Logger, brokers []string) *JSONPublisher {
 		writer: &kafkago.Writer{
 			Addr:                   kafkago.TCP(brokers...),
 			Balancer:               &kafkago.Hash{},
-			BatchTimeout:           10 * time.Millisecond,
+			BatchSize:              1000,                  // default ~100; mega-batches (384+ events) flush in one round-trip
+			BatchBytes:             10 * 1024 * 1024,      // 10 MB per batch — match consumer MaxBytes
+			BatchTimeout:           5 * time.Millisecond,  // tighter flush for lower latency
+			Compression:            kafkago.Lz4,           // ~30% smaller payloads, lz4 is cheapest CPU
 			RequiredAcks:           kafkago.RequireOne,
 			AllowAutoTopicCreation: false,
 		},
@@ -49,7 +52,6 @@ func (p *JSONPublisher) PublishJSON(ctx context.Context, topic, key string, payl
 		Topic: topic,
 		Key:   []byte(key),
 		Value: value,
-		Time:  time.Now(),
 	}
 	return p.writer.WriteMessages(ctx, msg)
 }
@@ -58,19 +60,17 @@ func (p *JSONPublisher) PublishJSONBatch(ctx context.Context, items []BatchItem)
 	if len(items) == 0 {
 		return nil
 	}
-	now := time.Now()
-	msgs := make([]kafkago.Message, 0, len(items))
-	for _, item := range items {
+	msgs := make([]kafkago.Message, len(items))
+	for i, item := range items {
 		value, err := json.Marshal(item.Payload)
 		if err != nil {
 			return err
 		}
-		msgs = append(msgs, kafkago.Message{
+		msgs[i] = kafkago.Message{
 			Topic: item.Topic,
 			Key:   []byte(item.Key),
 			Value: value,
-			Time:  now,
-		})
+		}
 	}
 	return p.writer.WriteMessages(ctx, msgs...)
 }

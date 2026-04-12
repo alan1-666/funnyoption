@@ -14,8 +14,10 @@ import (
 
 const (
 	// dispatchBatchMax is the maximum number of results to accumulate before
-	// flushing a batch. Larger batches amortise the DB fsync cost.
-	dispatchBatchMax = 64
+	// flushing a batch. Larger batches amortise the DB fsync and Kafka
+	// round-trip cost. 128 items × ~6 events each = ~768 Kafka messages
+	// per flush, well within the publisher's BatchSize=1000.
+	dispatchBatchMax = 128
 
 	// dispatchBatchTimeout is how long to wait for additional results after
 	// receiving the first one before flushing an incomplete batch.
@@ -131,6 +133,9 @@ func (d *OutputDispatcher) Run(ctx context.Context) {
 // runWorker drains a per-shard channel in batches and flushes them.
 func (d *OutputDispatcher) runWorker(ctx context.Context, ch <-chan MatchResult) {
 	batch := make([]*posttrade.MatchResult, 0, dispatchBatchMax)
+	timer := time.NewTimer(dispatchBatchTimeout)
+	timer.Stop() // start stopped; reset on first receive
+
 	for {
 		batch = batch[:0]
 
@@ -145,8 +150,8 @@ func (d *OutputDispatcher) runWorker(ctx context.Context, ch <-chan MatchResult)
 			batch = append(batch, d.convertResult(mr))
 		}
 
-		// Non-blocking drain.
-		timer := time.NewTimer(dispatchBatchTimeout)
+		// Non-blocking drain with reused timer.
+		timer.Reset(dispatchBatchTimeout)
 	drain:
 		for len(batch) < dispatchBatchMax {
 			select {
@@ -159,7 +164,13 @@ func (d *OutputDispatcher) runWorker(ctx context.Context, ch <-chan MatchResult)
 				break drain
 			}
 		}
-		timer.Stop()
+		// Stop and drain timer if it hasn't fired (batch filled before timeout).
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
 
 		if err := d.pt.ProcessBatch(ctx, batch); err != nil {
 			d.errors.Add(uint64(len(batch)))

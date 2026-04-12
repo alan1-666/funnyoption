@@ -9,6 +9,7 @@ import (
 
 	"funnyoption/internal/matching/engine"
 	"funnyoption/internal/matching/model"
+	"funnyoption/internal/posttrade"
 	"funnyoption/internal/shared/fee"
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
@@ -19,6 +20,13 @@ type capturePersistStore struct {
 
 func (s *capturePersistStore) PersistResult(_ context.Context, _ sharedkafka.OrderCommand, result engine.Result) error {
 	s.results = append(s.results, result)
+	return nil
+}
+
+func (s *capturePersistStore) PersistBatch(_ context.Context, items []posttrade.PersistItem) error {
+	for _, item := range items {
+		s.results = append(s.results, item.Result)
+	}
 	return nil
 }
 

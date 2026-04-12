@@ -18,9 +18,16 @@ type CandleTracker interface {
 	ApplyTrade(trade model.Trade) sharedkafka.QuoteCandleEvent
 }
 
+// PersistItem pairs a command with its engine result for batch persistence.
+type PersistItem struct {
+	Command sharedkafka.OrderCommand
+	Result  engine.Result
+}
+
 // PersistStore is the interface the post-trade service needs for DB writes.
 type PersistStore interface {
 	PersistResult(ctx context.Context, command sharedkafka.OrderCommand, result engine.Result) error
+	PersistBatch(ctx context.Context, items []PersistItem) error
 }
 
 // MatchResult is the input the post-trade service processes.
@@ -274,6 +281,55 @@ func (s *Service) buildCandleEvent(traceID string, trade model.Trade) sharedkafk
 	event := s.candles.ApplyTrade(trade)
 	event.TraceID = traceID
 	return sharedkafka.BatchItem{Topic: s.topics.QuoteCandle, Key: trade.BookKey, Payload: event}
+}
+
+// ProcessBatch handles multiple match results in one DB transaction + one Kafka publish.
+func (s *Service) ProcessBatch(ctx context.Context, mrs []*MatchResult) error {
+	if len(mrs) == 0 {
+		return nil
+	}
+	// Fast path: single item, use existing ProcessResult.
+	if len(mrs) == 1 {
+		return s.ProcessResult(ctx, mrs[0])
+	}
+
+	// Batch persist: one tx for all results.
+	if s.store != nil {
+		items := make([]PersistItem, len(mrs))
+		for i, mr := range mrs {
+			items[i] = PersistItem{Command: mr.Command, Result: mr.Result}
+		}
+		if err := s.store.PersistBatch(ctx, items); err != nil {
+			return err
+		}
+	}
+
+	// Build one mega-batch of Kafka events.
+	batch := make([]sharedkafka.BatchItem, 0, len(mrs)*6)
+	for _, mr := range mrs {
+		cmd := mr.Command
+		result := mr.Result
+
+		if item := s.buildOrderEvent(cmd, result.Order); item != nil {
+			batch = append(batch, *item)
+		}
+		for _, affected := range result.Affected {
+			if item := s.buildPassiveOrderEvent(cmd.TraceID, cmd.CollateralAsset, affected); item != nil {
+				batch = append(batch, *item)
+			}
+		}
+		for _, trade := range result.Trades {
+			batch = append(batch, s.buildTradeEvent(cmd.TraceID, cmd.CollateralAsset, trade))
+			batch = append(batch, s.buildPositionEvents(cmd.TraceID, trade)...)
+			batch = append(batch, s.buildCandleEvent(cmd.TraceID, trade))
+		}
+		batch = append(batch, s.buildQuoteEvents(cmd.TraceID, result)...)
+	}
+
+	if len(batch) == 0 {
+		return nil
+	}
+	return s.publisher.PublishJSONBatch(ctx, batch)
 }
 
 // Stats returns counters for monitoring.

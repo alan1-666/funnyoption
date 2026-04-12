@@ -16,6 +16,7 @@ import (
 // commandStore is the persistence interface for the legacy CommandProcessor.
 type commandStore interface {
 	PersistResult(ctx context.Context, command sharedkafka.OrderCommand, result engine.Result) error
+	PersistBatch(ctx context.Context, items []posttrade.PersistItem) error
 	MarketIsTradable(ctx context.Context, marketID int64) (bool, error)
 }
 

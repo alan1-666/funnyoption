@@ -4,10 +4,21 @@ import (
 	"context"
 	"log/slog"
 	"sync/atomic"
+	"time"
 
 	"funnyoption/internal/posttrade"
 	"funnyoption/internal/shared/fee"
 	sharedkafka "funnyoption/internal/shared/kafka"
+)
+
+const (
+	// dispatchBatchMax is the maximum number of results to accumulate before
+	// flushing a batch. Larger batches amortise the DB fsync cost.
+	dispatchBatchMax = 64
+
+	// dispatchBatchTimeout is how long to wait for additional results after
+	// receiving the first one before flushing an incomplete batch.
+	dispatchBatchTimeout = 5 * time.Millisecond
 )
 
 // CandleTracker applies trades and returns candle events.
@@ -71,7 +82,12 @@ func (d *OutputDispatcher) Run(ctx context.Context) {
 	d.logger.Info("output dispatcher started")
 	defer d.logger.Info("output dispatcher stopped")
 
+	batch := make([]*posttrade.MatchResult, 0, dispatchBatchMax)
+
 	for {
+		batch = batch[:0]
+
+		// Step 1: block until we get the first result (or shutdown).
 		select {
 		case <-ctx.Done():
 			return
@@ -83,18 +99,46 @@ func (d *OutputDispatcher) Run(ctx context.Context) {
 				d.shadowed.Add(1)
 				continue
 			}
-			ptResult := posttrade.MatchResult{
-				Command:  mr.Command.ToKafkaCommand(),
-				Result:   mr.Result,
-				Rejected: mr.Rejected,
-				EpochID:  mr.EpochID,
-			}
-			if err := d.pt.ProcessResult(ctx, &ptResult); err != nil {
-				d.errors.Add(1)
-				d.logger.Error("dispatcher: failed", "err", err, "order_id", mr.Command.OrderID)
-			}
-			d.dispatched.Add(1)
+			batch = append(batch, d.convertResult(mr))
 		}
+
+		// Step 2: non-blocking drain up to dispatchBatchMax, with a short timeout.
+		if len(batch) > 0 {
+			timer := time.NewTimer(dispatchBatchTimeout)
+		drain:
+			for len(batch) < dispatchBatchMax {
+				select {
+				case mr, ok := <-d.outputCh:
+					if !ok {
+						break drain
+					}
+					if d.Mode() == DispatchModeShadow {
+						d.shadowed.Add(1)
+						continue
+					}
+					batch = append(batch, d.convertResult(mr))
+				case <-timer.C:
+					break drain
+				}
+			}
+			timer.Stop()
+
+			// Step 3: flush the batch.
+			if err := d.pt.ProcessBatch(ctx, batch); err != nil {
+				d.errors.Add(uint64(len(batch)))
+				d.logger.Error("dispatcher: batch failed", "err", err, "batch_size", len(batch))
+			}
+			d.dispatched.Add(uint64(len(batch)))
+		}
+	}
+}
+
+func (d *OutputDispatcher) convertResult(mr MatchResult) *posttrade.MatchResult {
+	return &posttrade.MatchResult{
+		Command:  mr.Command.ToKafkaCommand(),
+		Result:   mr.Result,
+		Rejected: mr.Rejected,
+		EpochID:  mr.EpochID,
 	}
 }
 

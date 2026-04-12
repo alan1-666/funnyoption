@@ -9,6 +9,7 @@ import (
 
 	"funnyoption/internal/matching/engine"
 	"funnyoption/internal/matching/model"
+	"funnyoption/internal/posttrade"
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
 
@@ -21,6 +22,14 @@ type stubCommandStore struct {
 func (s *stubCommandStore) PersistResult(_ context.Context, command sharedkafka.OrderCommand, result engine.Result) error {
 	s.command = command
 	s.result = result
+	return nil
+}
+
+func (s *stubCommandStore) PersistBatch(_ context.Context, items []posttrade.PersistItem) error {
+	if len(items) > 0 {
+		s.command = items[0].Command
+		s.result = items[0].Result
+	}
 	return nil
 }
 

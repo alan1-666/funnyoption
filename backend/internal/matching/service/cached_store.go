@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"funnyoption/internal/matching/engine"
+	"funnyoption/internal/posttrade"
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
 
@@ -28,4 +29,8 @@ func (c *CachedCommandStore) MarketIsTradable(ctx context.Context, marketID int6
 
 func (c *CachedCommandStore) PersistResult(ctx context.Context, command sharedkafka.OrderCommand, result engine.Result) error {
 	return c.inner.PersistResult(ctx, command, result)
+}
+
+func (c *CachedCommandStore) PersistBatch(ctx context.Context, items []posttrade.PersistItem) error {
+	return c.inner.PersistBatch(ctx, items)
 }

@@ -81,7 +81,7 @@ jobs:
           if [[ -n "${STAGING_SSH_KNOWN_HOSTS}" ]]; then
             printf '%s\n' "${STAGING_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
           else
-            ssh-keyscan -p "${STAGING_SSH_PORT}" "${STAGING_SSH_HOST}" >> ~/.ssh/known_hosts
+            ssh-keyscan -T 10 -p "${STAGING_SSH_PORT}" "${STAGING_SSH_HOST}" >> ~/.ssh/known_hosts
           fi
 
       - name: Trigger server-side staging deploy
@@ -113,6 +113,9 @@ jobs:
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=30 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=3 \
             -p "${STAGING_SSH_PORT}" \
             "${STAGING_SSH_USER}@${STAGING_SSH_HOST}" \
             "${remote_command}"

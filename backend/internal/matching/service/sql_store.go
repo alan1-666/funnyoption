@@ -10,6 +10,7 @@ import (
 
 	"funnyoption/internal/matching/engine"
 	"funnyoption/internal/matching/model"
+	"funnyoption/internal/posttrade"
 	"funnyoption/internal/rollup"
 	sharedkafka "funnyoption/internal/shared/kafka"
 )
@@ -294,6 +295,52 @@ func (s *SQLStore) PersistResult(ctx context.Context, command sharedkafka.OrderC
 		entries := buildRollupEntries(command, result)
 		if err := s.rollup.AppendEntriesTx(ctx, tx, entries); err != nil {
 			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// PersistBatch persists multiple results in a single transaction, amortising
+// the fsync cost across all items instead of paying it once per result.
+func (s *SQLStore) PersistBatch(ctx context.Context, items []posttrade.PersistItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	if len(items) == 1 {
+		return s.PersistResult(ctx, items[0].Command, items[0].Result)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, item := range items {
+		if err := s.ensureMarket(ctx, tx, item.Command.MarketID, item.Command.CollateralAsset); err != nil {
+			return err
+		}
+		if item.Result.Order != nil {
+			if err := s.upsertOrder(ctx, tx, item.Command, item.Result.Order, true); err != nil {
+				return err
+			}
+		}
+		for _, affected := range item.Result.Affected {
+			if err := s.upsertOrder(ctx, tx, item.Command, affected, false); err != nil {
+				return err
+			}
+		}
+		for _, trade := range item.Result.Trades {
+			if err := s.insertTrade(ctx, tx, item.Command.CollateralAsset, trade); err != nil {
+				return err
+			}
+		}
+		if s.rollup != nil {
+			entries := buildRollupEntries(item.Command, item.Result)
+			if err := s.rollup.AppendEntriesTx(ctx, tx, entries); err != nil {
+				return err
+			}
 		}
 	}
 

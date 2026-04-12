@@ -546,7 +546,15 @@ func (e *Engine) match(order *model.Order, book *model.OrderBookDirect) ([]model
 	e.affectedBuf = affected
 	e.removeBuf = toRemove
 
-	return trades, affected
+	// Detach returned slices from the reusable backing arrays. The caller
+	// (BookEngine) sends the result over a channel to the OutputDispatcher;
+	// without a copy the next PlaceOrder call would overwrite the same memory
+	// before the dispatcher consumes the previous result.
+	out := make([]model.Trade, len(trades))
+	copy(out, trades)
+	outAff := make([]*model.Order, len(affected))
+	copy(outAff, affected)
+	return out, outAff
 }
 
 // ExportBooks returns the internal book map for snapshot export.

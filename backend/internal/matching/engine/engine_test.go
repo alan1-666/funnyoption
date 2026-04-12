@@ -242,3 +242,44 @@ func TestAsyncEngineCancelOrdersRemovesRestingLiquidity(t *testing.T) {
 		t.Fatalf("expected empty matcher after cancellation, got %d books", async.BookCount())
 	}
 }
+
+func TestTradeSliceDoesNotAliasReusableBuffer(t *testing.T) {
+	eng := New(slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	eng.PlaceOrder(&model.Order{
+		OrderID: "maker-1", UserID: 1, MarketID: 1, Outcome: "YES",
+		Side: model.OrderSideSell, Type: model.OrderTypeLimit,
+		TimeInForce: model.TimeInForceGTC, Price: 5000, Quantity: 1_000_000,
+	})
+
+	r1, err := eng.PlaceOrder(&model.Order{
+		OrderID: "taker-1", UserID: 2, MarketID: 1, Outcome: "YES",
+		Side: model.OrderSideBuy, Type: model.OrderTypeLimit,
+		TimeInForce: model.TimeInForceIOC, Price: 5000, Quantity: 1,
+	})
+	if err != nil {
+		t.Fatalf("taker-1 failed: %v", err)
+	}
+	if len(r1.Trades) != 1 || r1.Trades[0].TakerOrderID != "taker-1" {
+		t.Fatalf("expected 1 trade with TakerOrderID=taker-1, got %+v", r1.Trades)
+	}
+
+	r2, err := eng.PlaceOrder(&model.Order{
+		OrderID: "taker-2", UserID: 2, MarketID: 1, Outcome: "YES",
+		Side: model.OrderSideBuy, Type: model.OrderTypeLimit,
+		TimeInForce: model.TimeInForceIOC, Price: 5000, Quantity: 1,
+	})
+	if err != nil {
+		t.Fatalf("taker-2 failed: %v", err)
+	}
+	if len(r2.Trades) != 1 || r2.Trades[0].TakerOrderID != "taker-2" {
+		t.Fatalf("expected 1 trade with TakerOrderID=taker-2, got %+v", r2.Trades)
+	}
+
+	if r1.Trades[0].TakerOrderID != "taker-1" {
+		t.Fatalf("r1 trade was corrupted by subsequent PlaceOrder: TakerOrderID=%q, want taker-1", r1.Trades[0].TakerOrderID)
+	}
+	if r1.Order.OrderID != "taker-1" {
+		t.Fatalf("r1 order was corrupted: OrderID=%q, want taker-1", r1.Order.OrderID)
+	}
+}

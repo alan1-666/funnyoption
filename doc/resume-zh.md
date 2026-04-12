@@ -25,9 +25,9 @@ Web3 预测市场平台，覆盖订单簿交易、实时行情、裁决、结算
 **技术栈**：Go、Gin、gRPC、Kafka、PostgreSQL、Redis、WebSocket、Solidity
 
 **【撮合引擎 — 借鉴 Aeron 设计理念】**
-- 主导撮合引擎建设，采用 InputGateway → BookEngine → OutputDispatcher 三级流水线，借鉴 Aeron single-writer 原则，热路径零 I/O、接近零 GC 分配；每 book 独立 SPSC 无锁环形缓冲区 + bitmap 位运算价位跳跃；**实测单 book 撮合 127 万 ops/s**
-- 支持 GTC / IOC / FOK（两阶段预检）/ POST_ONLY + 三种 STP 自成交保护策略 + Amend Order；确定性 TradeID 支持 Kafka 重放复现；Shadow 模式 HA 切换
-- **pprof 驱动四层 E2E 优化**：bitmap Snapshot（7.3x）→ multi-row INSERT + 并发 worker（23x）→ async commit + LZ4（4.1x 延迟降低）→ ConsumerGroup 多 partition 并行消费；**E2E 吞吐 56 → 3,400 trades/s（61x），p50 延迟 43.8s → 188ms（230x）**
+- 主导撮合引擎架构设计，三级流水线 + SPSC 无锁环形缓冲区 + bitmap 位运算价位跳跃，热路径零 I/O、接近零 GC；**实测单 book 撮合 127 万 ops/s**
+- 支持 GTC / IOC / FOK（两阶段预检）/ POST_ONLY + 三种 STP 自成交保护 + Amend Order；确定性 TradeID 支持 Kafka 重放复现；Shadow 模式 HA 切换
+- 主导 E2E 全链路性能调优：通过 pprof 逐层定位瓶颈，从引擎层 bitmap 优化、DB 批量落盘、Kafka 异步提交与 LZ4 压缩到多 partition 并行消费逐级打通；**最终吞吐 61 倍提升（56 → 3,400 trades/s），p50 延迟从 43.8s 降至 188ms**
 
 **【核心业务】**
 - 负责 20+ 微服务规划开发，设计 Kafka 驱动的交易链路（撮合 → 冻结 → 结算 → 账变），matching 作为 book 唯一写入者，分区键对齐保证全序

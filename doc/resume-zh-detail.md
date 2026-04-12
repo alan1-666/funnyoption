@@ -31,13 +31,10 @@
 
 ### 高性能链下撮合引擎（借鉴 Aeron 设计理念）
 
-- 主导撮合引擎建设，采用 **InputGateway → BookEngine → OutputDispatcher** 三级流水线架构，借鉴 Aeron 的 single-writer 原则与 mechanical sympathy 思想，实现热路径零 I/O、接近零 GC 分配的撮合循环
-- 每 book 配备独立 **SPSC 无锁环形缓冲区**（2 的幂容量、`atomic` head/tail、cache-line padding 防伪共享），支持 `TryPublish` / `DrainTo` 批量消费（每轮最多 64 条）；**实测单 book 撮合 127 万 ops/s**（2vCPU EPYC，含 Snapshot 开销）
-- 采用 Aeron 风格 **IdleStrategy**（busy-spin → `Gosched` → 短时 sleep 渐进退避），在延迟与 CPU 占用之间动态折中
-- 价格索引利用预测市场 1–9999 固定区间，以 **固定数组位桶 O(1) 寻址 + bitmap 跳跃遍历 + 侵入式双向链表 FIFO** 实现价格-时间优先撮合；配合 OrderPool slab 分配减少堆分配与 GC 压力
-- 实现完整订单类型支持：GTC / IOC / **FOK（两阶段预检+执行）** / **POST_ONLY（maker-only）**；支持三种 **STP 自成交保护策略**（CANCEL_TAKER / CANCEL_MAKER / CANCEL_BOTH）及 **Amend Order（cancel + relist）**
-- 全局单调递增 `sequence`（atomic）与 book 级 `localSeq` 生成确定性 `TradeID`，Kafka 重放可精确复现同一交易序列；`TakeSnapshot` 导出挂单与序列号用于 HA 故障恢复
-- 备节点以 `DispatchModeShadow` 运行——消费 Kafka 更新内存 book 状态但不执行任何 I/O 副作用，实现无缝主备切换
+- 主导撮合引擎架构设计，采用 **InputGateway → BookEngine → OutputDispatcher** 三级流水线，借鉴 Aeron single-writer 原则实现热路径零 I/O、接近零 GC；每 book 独立 SPSC 无锁环形缓冲区 + Aeron 风格渐进退避 IdleStrategy；**实测单 book 撮合 127 万 ops/s**
+- 利用预测市场价格有界的特性，以**固定数组 O(1) 寻址 + bitmap 位运算跳跃 + 侵入式链表 FIFO + slab 对象池**实现价格-时间优先撮合，替代传统红黑树方案
+- 实现完整订单类型：GTC / IOC / **FOK（read-only 预检 + 真实撮合两阶段）** / **POST_ONLY**；三种 **STP 自成交保护策略** + **Amend Order**
+- 确定性 `TradeID`（全局 sequence + book 级 localSeq）保证 Kafka 重放可复现；备节点 Shadow 模式消费状态但不执行 I/O，支持无缝 HA 切换
 
 ### E2E 吞吐优化（pprof 驱动，56 → 3,400 trades/s，61 倍提升）
 

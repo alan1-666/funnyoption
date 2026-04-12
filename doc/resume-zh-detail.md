@@ -32,18 +32,10 @@
 ### 高性能链下撮合引擎（借鉴 Aeron 设计理念）
 
 - 主导撮合引擎架构设计，采用 **InputGateway → BookEngine → OutputDispatcher** 三级流水线，借鉴 Aeron single-writer 原则实现热路径零 I/O、接近零 GC；每 book 独立 SPSC 无锁环形缓冲区 + Aeron 风格渐进退避 IdleStrategy；**实测单 book 撮合 127 万 ops/s**
-- 利用预测市场价格有界的特性，以**固定数组 O(1) 寻址 + bitmap 位运算跳跃 + 侵入式链表 FIFO + slab 对象池**实现价格-时间优先撮合，替代传统红黑树方案
+- 利用预测市场价格有界的特性，以**固定数组 O(1) 寻址 + bitmap 位运算跳跃 + 侵入式链表 FIFO + slab 对象池**实现价格-时间优先撮合，替代传统红黑树方案；pprof 发现 Snapshot 线性扫描占 83% CPU 后改为 bitmap 遍历，关键路径提速 **7–9x**
+- Gateway 层由单 Reader 演进为 **ConsumerGroup per-partition 并行消费**，producer 按 bookKey Hash 分区天然保证 SPSC 不变式；Dispatcher 层采用 **multi-row INSERT + 4 并发 worker 分片保序 + LZ4 压缩批量发布**；通过 pprof 逐层打通后 **E2E 吞吐从 56 提升至 3,400 trades/s（61x），p50 延迟从 43.8s 降至 188ms**
 - 实现完整订单类型：GTC / IOC / **FOK（read-only 预检 + 真实撮合两阶段）** / **POST_ONLY**；三种 **STP 自成交保护策略** + **Amend Order**
 - 确定性 `TradeID`（全局 sequence + book 级 localSeq）保证 Kafka 重放可复现；备节点 Shadow 模式消费状态但不执行 I/O，支持无缝 HA 切换
-
-### E2E 吞吐优化（pprof 驱动，56 → 3,400 trades/s，61 倍提升）
-
-- **pprof 定位热点** → Snapshot 线性扫描占 83% CPU → 改为 **bitmap 位运算遍历**，InterleavedAddMatch **7.3x** 提速，CancelOrders **9.3x** 提速
-- **Dispatcher 落库瓶颈**：逐条 INSERT 仅 56 trades/s → 改为 **multi-row INSERT + 4 并发 worker**（按 bookKey hash 分片保序），实测 **1,300/s（23x 提升）**
-- **Gateway 消费瓶颈**：CommitMessages 同步阻塞热路径 → **async commit goroutine + QueueCapacity 10x + MinBytes 10KB broker 端攒批**，实测 980 → **1,500/s**
-- **Kafka Publisher**：stdlib json.Marshal → **goccy/go-json + LZ4 压缩 + BatchSize 1000**，实测 1,500 → **1,900/s**；p50 延迟 774ms → **188ms（4.1x）**
-- **多 partition 并行消费**：kafka-go Reader 替换为 **ConsumerGroup per-partition goroutine**，producer 按 bookKey Hash 分区保证 SPSC 不变式；9 partition + 4 market 并行实测聚合 **3,400 trades/s**，吞吐随 `min(partitions, cores, markets)` 线性扩展
-- 自研 **kafka-bench E2E 压测工具**，直接往 Kafka 灌 OrderCommand 消费 trade.matched，覆盖 cross-match / no-match / 多 market 并行场景，支持 pg-dsn pre-insert 绕过 FK 约束
 
 ### 核心业务实现
 

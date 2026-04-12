@@ -25,9 +25,9 @@ Web3 预测市场平台，覆盖订单簿交易、实时行情、裁决、结算
 **技术栈**：Go、Gin、gRPC、Kafka、PostgreSQL、Redis、WebSocket、Solidity
 
 **【撮合引擎 — 借鉴 Aeron 设计理念】**
-- 主导撮合引擎架构设计，三级流水线 + SPSC 无锁环形缓冲区 + bitmap 位运算价位跳跃，热路径零 I/O、接近零 GC；**实测单 book 撮合 127 万 ops/s**
-- 支持 GTC / IOC / FOK（两阶段预检）/ POST_ONLY + 三种 STP 自成交保护 + Amend Order；确定性 TradeID 支持 Kafka 重放复现；Shadow 模式 HA 切换
-- 主导 E2E 全链路性能调优：通过 pprof 逐层定位瓶颈，从引擎层 bitmap 优化、DB 批量落盘、Kafka 异步提交与 LZ4 压缩到多 partition 并行消费逐级打通；**最终吞吐 61 倍提升（56 → 3,400 trades/s），p50 延迟从 43.8s 降至 188ms**
+- 主导撮合引擎架构设计，三级流水线 + SPSC 无锁环形缓冲区 + O(1) 固定数组价位索引 + bitmap 跳跃遍历，热路径零 I/O、接近零 GC；**实测单 book 撮合 127 万 ops/s**
+- Gateway 层 ConsumerGroup 多 partition 并行消费 + Dispatcher 层 multi-row INSERT 并发 worker 分片保序 + LZ4 压缩批量发布；通过 pprof 逐层定位打通后 **E2E 吞吐 61x（56 → 3,400 trades/s），p50 延迟 43.8s → 188ms**
+- 支持 GTC / IOC / FOK（两阶段预检）/ POST_ONLY + 三种 STP 自成交保护 + Amend Order；确定性 TradeID + Shadow 模式 HA
 
 **【核心业务】**
 - 负责 20+ 微服务规划开发，设计 Kafka 驱动的交易链路（撮合 → 冻结 → 结算 → 账变），matching 作为 book 唯一写入者，分区键对齐保证全序

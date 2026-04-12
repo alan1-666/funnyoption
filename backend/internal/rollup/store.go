@@ -102,6 +102,50 @@ func (s *Store) AppendEntriesTx(ctx context.Context, tx *sql.Tx, entries []Journ
 	return nil
 }
 
+// AppendBatchTx inserts multiple journal entries in one multi-row INSERT,
+// reducing per-entry round-trip overhead to a single query.
+func (s *Store) AppendBatchTx(ctx context.Context, tx *sql.Tx, entries []JournalAppend) error {
+	if s == nil || len(entries) == 0 {
+		return nil
+	}
+	// For small batches, fall back to the sequential path.
+	if len(entries) <= 2 {
+		return s.AppendEntriesTx(ctx, tx, entries)
+	}
+
+	const pp = 6 // params per row
+	args := make([]any, 0, len(entries)*pp)
+	n := 0
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.EntryType) == "" || strings.TrimSpace(entry.SourceType) == "" || strings.TrimSpace(entry.SourceRef) == "" {
+			return fmt.Errorf("rollup entry missing required field")
+		}
+		payload, err := json.Marshal(entry.Payload)
+		if err != nil {
+			return err
+		}
+		entryID := strings.TrimSpace(entry.EntryID)
+		if entryID == "" {
+			entryID = sharedkafka.NewID("rj")
+		}
+		args = append(args, entryID, strings.TrimSpace(entry.EntryType), strings.TrimSpace(entry.SourceType), strings.TrimSpace(entry.SourceRef), entry.OccurredAtMillis, payload)
+		n++
+	}
+
+	var b strings.Builder
+	b.WriteString(`INSERT INTO rollup_shadow_journal_entries (entry_id,entry_type,source_type,source_ref,occurred_at_millis,payload,created_at) VALUES `)
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		p := i * pp
+		fmt.Fprintf(&b, "($%d,$%d,$%d,$%d,$%d,$%d,EXTRACT(EPOCH FROM NOW())::BIGINT)", p+1, p+2, p+3, p+4, p+5, p+6)
+	}
+	b.WriteString(` ON CONFLICT (entry_type,source_type,source_ref) DO NOTHING`)
+	_, err := tx.ExecContext(ctx, b.String(), args...)
+	return err
+}
+
 func appendEntry(ctx context.Context, q sqlQueryer, entry JournalAppend) error {
 	if strings.TrimSpace(entry.EntryType) == "" {
 		return fmt.Errorf("rollup entry type is required")

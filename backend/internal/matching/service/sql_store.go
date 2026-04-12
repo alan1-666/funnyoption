@@ -301,8 +301,9 @@ func (s *SQLStore) PersistResult(ctx context.Context, command sharedkafka.OrderC
 	return tx.Commit()
 }
 
-// PersistBatch persists multiple results in a single transaction, amortising
-// the fsync cost across all items instead of paying it once per result.
+// PersistBatch persists multiple results in a single transaction using
+// multi-row INSERT statements, amortising both the fsync cost and the
+// per-query round-trip overhead.
 func (s *SQLStore) PersistBatch(ctx context.Context, items []posttrade.PersistItem) error {
 	if len(items) == 0 {
 		return nil
@@ -317,34 +318,155 @@ func (s *SQLStore) PersistBatch(ctx context.Context, items []posttrade.PersistIt
 	}
 	defer tx.Rollback()
 
-	for _, item := range items {
-		if err := s.ensureMarket(ctx, tx, item.Command.MarketID, item.Command.CollateralAsset); err != nil {
+	if err := s.bulkEnsureMarkets(ctx, tx, items); err != nil {
+		return err
+	}
+	if err := s.bulkUpsertOrders(ctx, tx, items); err != nil {
+		return err
+	}
+	if err := s.bulkInsertTrades(ctx, tx, items); err != nil {
+		return err
+	}
+	if s.rollup != nil {
+		var entries []rollup.JournalAppend
+		for _, item := range items {
+			entries = append(entries, buildRollupEntries(item.Command, item.Result)...)
+		}
+		if err := s.rollup.AppendBatchTx(ctx, tx, entries); err != nil {
 			return err
-		}
-		if item.Result.Order != nil {
-			if err := s.upsertOrder(ctx, tx, item.Command, item.Result.Order, true); err != nil {
-				return err
-			}
-		}
-		for _, affected := range item.Result.Affected {
-			if err := s.upsertOrder(ctx, tx, item.Command, affected, false); err != nil {
-				return err
-			}
-		}
-		for _, trade := range item.Result.Trades {
-			if err := s.insertTrade(ctx, tx, item.Command.CollateralAsset, trade); err != nil {
-				return err
-			}
-		}
-		if s.rollup != nil {
-			entries := buildRollupEntries(item.Command, item.Result)
-			if err := s.rollup.AppendEntriesTx(ctx, tx, entries); err != nil {
-				return err
-			}
 		}
 	}
 
 	return tx.Commit()
+}
+
+// bulkEnsureMarkets inserts all unique markets in one multi-row upsert.
+func (s *SQLStore) bulkEnsureMarkets(ctx context.Context, tx *sql.Tx, items []posttrade.PersistItem) error {
+	seen := make(map[int64]bool, len(items))
+	const pp = 3 // params per row
+	args := make([]any, 0, len(items)*pp)
+	n := 0
+	for _, item := range items {
+		if seen[item.Command.MarketID] {
+			continue
+		}
+		seen[item.Command.MarketID] = true
+		args = append(args, item.Command.MarketID, fmt.Sprintf("Market %d", item.Command.MarketID), normalizeAsset(item.Command.CollateralAsset))
+		n++
+	}
+	if n == 0 {
+		return nil
+	}
+
+	var b strings.Builder
+	b.WriteString(`INSERT INTO markets (market_id,title,description,collateral_asset,status,open_at,close_at,resolve_at,resolved_outcome,created_by,metadata,created_at,updated_at) VALUES `)
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		p := i * pp
+		fmt.Fprintf(&b, "($%d,$%d,'',$%d,'OPEN',0,0,0,'',0,'{}'::jsonb,EXTRACT(EPOCH FROM NOW())::BIGINT,EXTRACT(EPOCH FROM NOW())::BIGINT)", p+1, p+2, p+3)
+	}
+	b.WriteString(` ON CONFLICT (market_id) DO UPDATE SET collateral_asset=CASE WHEN markets.collateral_asset='' THEN EXCLUDED.collateral_asset ELSE markets.collateral_asset END,updated_at=EXCLUDED.updated_at`)
+	_, err := tx.ExecContext(ctx, b.String(), args...)
+	return err
+}
+
+// bulkUpsertOrders inserts/updates all orders (taker + affected) in one multi-row upsert.
+func (s *SQLStore) bulkUpsertOrders(ctx context.Context, tx *sql.Tx, items []posttrade.PersistItem) error {
+	const pp = 20 // params per row
+	args := make([]any, 0, len(items)*2*pp)
+	n := 0
+
+	addRow := func(cmd sharedkafka.OrderCommand, order *model.Order, isTaker bool) {
+		if order == nil {
+			return
+		}
+		freezeID, freezeAsset, commandID := "", "", ""
+		var freezeAmount int64
+		if isTaker {
+			freezeID = cmd.FreezeID
+			freezeAsset = cmd.FreezeAsset
+			freezeAmount = cmd.FreezeAmount
+			commandID = cmd.CommandID
+		}
+		args = append(args,
+			order.OrderID, order.ClientOrderID, commandID,
+			order.UserID, order.MarketID,
+			strings.ToUpper(strings.TrimSpace(order.Outcome)),
+			string(order.Side), string(order.Type), string(order.TimeInForce),
+			normalizeAsset(cmd.CollateralAsset),
+			freezeID, normalizeAsset(freezeAsset), freezeAmount,
+			order.Price, order.Quantity, order.FilledQuantity, order.RemainingQuantity(),
+			string(order.Status), string(order.CancelReason),
+			order.CreatedAtMillis/1000,
+		)
+		n++
+	}
+
+	for _, item := range items {
+		addRow(item.Command, item.Result.Order, true)
+		for _, affected := range item.Result.Affected {
+			addRow(item.Command, affected, false)
+		}
+	}
+	if n == 0 {
+		return nil
+	}
+
+	var b strings.Builder
+	b.WriteString(`INSERT INTO orders (order_id,client_order_id,command_id,user_id,market_id,outcome,side,order_type,time_in_force,collateral_asset,freeze_id,freeze_asset,freeze_amount,price,quantity,filled_quantity,remaining_quantity,status,cancel_reason,created_at,updated_at) VALUES `)
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		p := i * pp
+		fmt.Fprintf(&b, "($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,EXTRACT(EPOCH FROM NOW())::BIGINT)",
+			p+1, p+2, p+3, p+4, p+5, p+6, p+7, p+8, p+9, p+10,
+			p+11, p+12, p+13, p+14, p+15, p+16, p+17, p+18, p+19, p+20)
+	}
+	b.WriteString(` ON CONFLICT (order_id) DO UPDATE SET client_order_id=CASE WHEN EXCLUDED.client_order_id<>'' THEN EXCLUDED.client_order_id ELSE orders.client_order_id END,command_id=CASE WHEN EXCLUDED.command_id<>'' THEN EXCLUDED.command_id ELSE orders.command_id END,user_id=EXCLUDED.user_id,market_id=EXCLUDED.market_id,outcome=EXCLUDED.outcome,side=EXCLUDED.side,order_type=EXCLUDED.order_type,time_in_force=EXCLUDED.time_in_force,collateral_asset=EXCLUDED.collateral_asset,freeze_id=CASE WHEN EXCLUDED.freeze_id<>'' THEN EXCLUDED.freeze_id ELSE orders.freeze_id END,freeze_asset=CASE WHEN EXCLUDED.freeze_asset<>'' THEN EXCLUDED.freeze_asset ELSE orders.freeze_asset END,freeze_amount=CASE WHEN EXCLUDED.freeze_amount<>0 THEN EXCLUDED.freeze_amount ELSE orders.freeze_amount END,price=EXCLUDED.price,quantity=EXCLUDED.quantity,filled_quantity=EXCLUDED.filled_quantity,remaining_quantity=EXCLUDED.remaining_quantity,status=EXCLUDED.status,cancel_reason=CASE WHEN EXCLUDED.cancel_reason<>'' THEN EXCLUDED.cancel_reason ELSE orders.cancel_reason END,updated_at=EXCLUDED.updated_at`)
+	_, err := tx.ExecContext(ctx, b.String(), args...)
+	return err
+}
+
+// bulkInsertTrades inserts all trades in one multi-row INSERT.
+func (s *SQLStore) bulkInsertTrades(ctx context.Context, tx *sql.Tx, items []posttrade.PersistItem) error {
+	const pp = 14 // params per row
+	args := make([]any, 0, len(items)*pp)
+	n := 0
+	for _, item := range items {
+		for _, trade := range item.Result.Trades {
+			args = append(args,
+				fmt.Sprintf("trd_%d", trade.Sequence), trade.Sequence,
+				trade.MarketID, strings.ToUpper(strings.TrimSpace(trade.Outcome)),
+				normalizeAsset(item.Command.CollateralAsset),
+				trade.Price, trade.Quantity,
+				trade.TakerOrderID, trade.MakerOrderID,
+				trade.TakerUserID, trade.MakerUserID,
+				string(trade.TakerSide), string(trade.MakerSide),
+				trade.MatchedAtMillis/1000,
+			)
+			n++
+		}
+	}
+	if n == 0 {
+		return nil
+	}
+
+	var b strings.Builder
+	b.WriteString(`INSERT INTO trades (trade_id,sequence_no,market_id,outcome,collateral_asset,price,quantity,taker_order_id,maker_order_id,taker_user_id,maker_user_id,taker_side,maker_side,occurred_at) VALUES `)
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		p := i * pp
+		fmt.Fprintf(&b, "($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
+			p+1, p+2, p+3, p+4, p+5, p+6, p+7, p+8, p+9, p+10, p+11, p+12, p+13, p+14)
+	}
+	b.WriteString(` ON CONFLICT (trade_id) DO NOTHING`)
+	_, err := tx.ExecContext(ctx, b.String(), args...)
+	return err
 }
 
 func (s *SQLStore) ensureMarket(ctx context.Context, tx *sql.Tx, marketID int64, collateralAsset string) error {

@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -19,6 +20,11 @@ const (
 	// dispatchBatchTimeout is how long to wait for additional results after
 	// receiving the first one before flushing an incomplete batch.
 	dispatchBatchTimeout = 5 * time.Millisecond
+
+	// dispatchWorkers is the number of concurrent persist workers.
+	// Each worker handles a shard of bookKeys, preserving per-book ordering
+	// while parallelising DB writes across different books.
+	dispatchWorkers = 4
 )
 
 // CandleTracker applies trades and returns candle events.
@@ -79,15 +85,32 @@ func (d *OutputDispatcher) Mode() DispatchMode {
 }
 
 func (d *OutputDispatcher) Run(ctx context.Context) {
-	d.logger.Info("output dispatcher started")
+	d.logger.Info("output dispatcher started", "workers", dispatchWorkers)
 	defer d.logger.Info("output dispatcher stopped")
 
-	batch := make([]*posttrade.MatchResult, 0, dispatchBatchMax)
+	// Start sharded workers — each owns a channel and a batch buffer.
+	workerChs := make([]chan MatchResult, dispatchWorkers)
+	var wg sync.WaitGroup
+	for i := range workerChs {
+		workerChs[i] = make(chan MatchResult, dispatchBatchMax*2)
+		wg.Add(1)
+		go func(ch <-chan MatchResult) {
+			defer wg.Done()
+			d.runWorker(ctx, ch)
+		}(workerChs[i])
+	}
 
+	defer func() {
+		for _, ch := range workerChs {
+			close(ch)
+		}
+		wg.Wait()
+	}()
+
+	// Router: read from the shared fan-in channel and route by bookKey hash
+	// so that results for the same book always go to the same worker,
+	// preserving per-book ordering.
 	for {
-		batch = batch[:0]
-
-		// Step 1: block until we get the first result (or shutdown).
 		select {
 		case <-ctx.Done():
 			return
@@ -99,38 +122,61 @@ func (d *OutputDispatcher) Run(ctx context.Context) {
 				d.shadowed.Add(1)
 				continue
 			}
+			idx := fnvHash(mr.Command.BookKey) % dispatchWorkers
+			workerChs[idx] <- mr
+		}
+	}
+}
+
+// runWorker drains a per-shard channel in batches and flushes them.
+func (d *OutputDispatcher) runWorker(ctx context.Context, ch <-chan MatchResult) {
+	batch := make([]*posttrade.MatchResult, 0, dispatchBatchMax)
+	for {
+		batch = batch[:0]
+
+		// Block on first result.
+		select {
+		case <-ctx.Done():
+			return
+		case mr, ok := <-ch:
+			if !ok {
+				return
+			}
 			batch = append(batch, d.convertResult(mr))
 		}
 
-		// Step 2: non-blocking drain up to dispatchBatchMax, with a short timeout.
-		if len(batch) > 0 {
-			timer := time.NewTimer(dispatchBatchTimeout)
-		drain:
-			for len(batch) < dispatchBatchMax {
-				select {
-				case mr, ok := <-d.outputCh:
-					if !ok {
-						break drain
-					}
-					if d.Mode() == DispatchModeShadow {
-						d.shadowed.Add(1)
-						continue
-					}
-					batch = append(batch, d.convertResult(mr))
-				case <-timer.C:
+		// Non-blocking drain.
+		timer := time.NewTimer(dispatchBatchTimeout)
+	drain:
+		for len(batch) < dispatchBatchMax {
+			select {
+			case mr, ok := <-ch:
+				if !ok {
 					break drain
 				}
+				batch = append(batch, d.convertResult(mr))
+			case <-timer.C:
+				break drain
 			}
-			timer.Stop()
-
-			// Step 3: flush the batch.
-			if err := d.pt.ProcessBatch(ctx, batch); err != nil {
-				d.errors.Add(uint64(len(batch)))
-				d.logger.Error("dispatcher: batch failed", "err", err, "batch_size", len(batch))
-			}
-			d.dispatched.Add(uint64(len(batch)))
 		}
+		timer.Stop()
+
+		if err := d.pt.ProcessBatch(ctx, batch); err != nil {
+			d.errors.Add(uint64(len(batch)))
+			d.logger.Error("dispatcher: batch failed", "err", err, "batch_size", len(batch))
+		}
+		d.dispatched.Add(uint64(len(batch)))
 	}
+}
+
+// fnvHash returns a consistent hash for routing bookKeys to workers.
+func fnvHash(s string) int {
+	h := uint32(2166136261)
+	for i := 0; i < len(s); i++ {
+		h ^= uint32(s[i])
+		h *= 16777619
+	}
+	return int(h & 0x7fffffff) // ensure non-negative
 }
 
 func (d *OutputDispatcher) convertResult(mr MatchResult) *posttrade.MatchResult {

@@ -358,13 +358,62 @@ Consumer       →  观测到的 trade
 | **10k p50 latency** | 2.9 s | **2.4 s** | +17% |
 | 10k p99 latency | 5.2 s | **4.5 s** | +13% |
 
-### 吞吐分层 (优化后)
+### 吞吐分层 (gateway 优化后)
 
 ```
 Client (c=32)  →  4,360/s
 Gateway        →  ~1,400-1,500/s  ← 提升后仍是瓶颈，和 dispatcher 接近平衡
 Engine         →  ~1M+ ops/s
 Dispatcher     →  ~1,300/s
+```
+
+## Kafka Publisher + Dispatcher 优化 (`d3c06c9`)
+
+### 改动
+
+**Publisher (`shared/kafka/publisher.go`):**
+1. `encoding/json` → `goccy/go-json` — marshal 速度 2-5x 提升，和 consumer 侧一致
+2. `BatchSize` 默认100 → 1000 — mega-batch (384+ events) 一次 round-trip 完成
+3. `BatchBytes` 10MB — 匹配 consumer MaxBytes
+4. `BatchTimeout` 10ms → 5ms — 更紧的 flush，降低尾部延迟
+5. LZ4 压缩 — ~30% 更小的 payload，lz4 CPU 开销极低
+6. 移除 per-message `Time` 字段 — kafka-go 自动打时间戳
+
+**Dispatcher (`pipeline/dispatcher.go`):**
+7. `dispatchBatchMax` 64 → 128 — 每次 flush 处理更多 result，摊薄 DB fsync + Kafka round-trip
+8. Timer 复用 — 避免 per-batch 分配 `time.NewTimer`
+
+### E2E 对比 (cross-match, 同机 2vCPU EPYC)
+
+| 指标 | gateway async (`4f22c4a`) | **kafka perf (`d3c06c9`)** | 提升 |
+|---|--:|--:|---|
+| **5k c=8 throughput** | 1,391/s | **1,881/s** | **+35%** |
+| **10k c=32 throughput** | 1,485/s | **1,951/s** | **+31%** |
+| **20k c=32 throughput** | 1,267/s | **1,801/s** | **+42%** |
+| **5k p50 latency** | 774 ms | **188 ms** | **4.1x** |
+| **5k p90 latency** | 1.13 s | **284 ms** | **4.0x** |
+| **5k p99 latency** | 1.17 s | **313 ms** | **3.7x** |
+| **10k p50 latency** | 2.4 s | **2.1 s** | +17% |
+| **10k p99 latency** | 4.5 s | **2.7 s** | **1.7x** |
+| **20k p50 latency** | 6.1 s | **3.9 s** | **1.6x** |
+
+### 全链路优化总结 (从原始 56/s 到现在)
+
+| 阶段 | 5k throughput | 5k p50 | 5k p99 | 关键改动 |
+|---|--:|--:|--:|---|
+| 原始 | 56/s | 43.8 s | 86.9 s | — |
+| batch persist | 421/s (7.5x) | 5.3 s | 9.8 s | multi-row INSERT + 4 workers |
+| multi-row+workers | 1,299/s (23x) | 678 ms | 1.29 s | bulk INSERT 合并 |
+| gateway async | 1,391/s (25x) | 774 ms | 1.17 s | async commit + QueueCapacity |
+| **kafka perf** | **1,881/s (34x)** | **188 ms** | **313 ms** | goccy/json + LZ4 + BatchSize 1000 |
+
+**累计：吞吐 34x 提升，延迟 230x 降低 (p50: 43.8s → 188ms)**
+
+```
+Client (c=32)  →  4,539 orders/s
+Gateway        →  ~1,900/s       ← 仍是瓶颈但已大幅改善
+Engine         →  ~1M+ ops/s
+Dispatcher     →  ~1,900/s       ← 和 gateway 基本平衡
 ```
 
 ## 功能扩展：STP 策略 + POST_ONLY + FOK + Amend Order

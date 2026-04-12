@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -21,19 +20,21 @@ type CommandRouter interface {
 	Route(cmd MatchCommand) bool
 }
 
-// InputGateway is the IO-thread that sits between Kafka and the BookSupervisor.
-// It does: FetchMessage → JSON decode → MatchCommand → Route.
-// Market-tradable checks are performed upstream in OrderService; the gateway is
-// a pure Kafka→RingBuffer forwarder with zero DB dependency.
-// When the book's RB is full, it spins/yields (backpressure).
+// InputGateway sits between Kafka and the BookSupervisor.
+// It uses a ConsumerGroup to consume from multiple partitions in parallel —
+// one goroutine per assigned partition. Because the upstream producer keys
+// messages by bookKey (Hash partitioner), all orders for a given book always
+// land on the same partition. This guarantees that each per-book SPSC
+// ringbuffer has exactly one producer goroutine at any time.
 //
-// Offset commits run in a background goroutine so CommitMessages never blocks
-// the fetch→decode→route hot path.
+// Offset commits run in a background goroutine per partition so
+// CommitOffsets never blocks the fetch→decode→route hot path.
 type InputGateway struct {
-	logger *slog.Logger
-	reader *kafkago.Reader
-	router CommandRouter
-	idle   *ringbuffer.IdleStrategy
+	logger  *slog.Logger
+	brokers []string
+	topic   string
+	groupID string
+	router  CommandRouter
 
 	received atomic.Uint64
 	dropped  atomic.Uint64
@@ -46,20 +47,12 @@ func NewInputGateway(
 	topic, groupID string,
 	router CommandRouter,
 ) *InputGateway {
-	reader := kafkago.NewReader(kafkago.ReaderConfig{
-		Brokers:       brokers,
-		GroupID:       groupID,
-		Topic:         topic,
-		MinBytes:      10e3,                  // 10 KB — broker batches ~20 msgs before responding
-		MaxBytes:      10e6,                  // 10 MB
-		MaxWait:       10 * time.Millisecond, // ceiling on broker-side wait
-		QueueCapacity: 1000,                  // internal pre-fetch buffer (default 100)
-	})
 	return &InputGateway{
-		logger: logger,
-		reader: reader,
-		router: router,
-		idle:   ringbuffer.NewIdleStrategy(200, 20, 100*time.Microsecond),
+		logger:  logger,
+		brokers: brokers,
+		topic:   topic,
+		groupID: groupID,
+		router:  router,
 	}
 }
 
@@ -68,43 +61,104 @@ func (g *InputGateway) Start(ctx context.Context) {
 }
 
 func (g *InputGateway) run(ctx context.Context) {
-	g.logger.Info("input gateway started")
+	g.logger.Info("input gateway started (consumer group mode)")
 	defer g.logger.Info("input gateway stopped")
 
-	// Async commit goroutine — CommitMessages is a synchronous Kafka RPC
-	// that takes 5-20 ms. Running it in the hot loop blocks ~256 fetches
-	// worth of processing each time. Moving it here removes that stall.
-	commitCh := make(chan kafkago.Message, 512)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		g.commitLoop(ctx, commitCh)
-	}()
-	defer func() {
-		close(commitCh)
-		wg.Wait()
-	}()
+	group, err := kafkago.NewConsumerGroup(kafkago.ConsumerGroupConfig{
+		ID:                     g.groupID,
+		Brokers:                g.brokers,
+		Topics:                 []string{g.topic},
+		HeartbeatInterval:      3 * time.Second,
+		RebalanceTimeout:       30 * time.Second,
+		SessionTimeout:         30 * time.Second,
+		WatchPartitionChanges:  true,
+		PartitionWatchInterval: 10 * time.Second,
+	})
+	if err != nil {
+		g.logger.Error("gateway: failed to create consumer group", "err", err)
+		return
+	}
+	defer group.Close()
+
+	for {
+		gen, err := group.Next(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			g.logger.Error("gateway: consumer group next failed", "err", err)
+			time.Sleep(time.Second)
+			continue
+		}
+
+		assignments := gen.Assignments[g.topic]
+		g.logger.Info("gateway: new generation",
+			"generation", gen.ID,
+			"member", gen.MemberID,
+			"partitions", len(assignments),
+		)
+
+		for _, assignment := range assignments {
+			partition := assignment.ID
+			offset := assignment.Offset
+			gen.Start(func(ctx context.Context) {
+				g.runPartition(ctx, gen, partition, offset)
+			})
+		}
+	}
+}
+
+// runPartition runs the fetch→decode→route loop for a single partition.
+// It exits when the generation context is cancelled (rebalance or shutdown).
+func (g *InputGateway) runPartition(ctx context.Context, gen *kafkago.Generation, partition int, startOffset int64) {
+	logger := g.logger.With("partition", partition)
+	logger.Info("partition worker started", "offset", startOffset)
+	defer logger.Info("partition worker stopped")
+
+	reader := kafkago.NewReader(kafkago.ReaderConfig{
+		Brokers:       g.brokers,
+		Topic:         g.topic,
+		Partition:     partition,
+		MinBytes:      10e3,                  // 10 KB — broker batches ~20 msgs
+		MaxBytes:      10e6,                  // 10 MB
+		MaxWait:       10 * time.Millisecond, // ceiling on broker-side wait
+		QueueCapacity: 1000,                  // pre-fetch buffer
+	})
+	defer reader.Close()
+
+	// Seek to the assigned offset.
+	if startOffset >= 0 {
+		if err := reader.SetOffset(startOffset); err != nil {
+			logger.Error("partition worker: set offset failed", "err", err, "offset", startOffset)
+			return
+		}
+	}
+
+	// Async offset commit goroutine.
+	commitCh := make(chan int64, 512)
+	go g.partitionCommitLoop(ctx, gen, partition, commitCh)
+
+	idle := ringbuffer.NewIdleStrategy(200, 20, 100*time.Microsecond)
 
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 
-		msg, err := g.reader.FetchMessage(ctx)
+		msg, err := reader.FetchMessage(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			g.logger.Error("gateway: kafka fetch failed", "err", err)
+			logger.Error("partition worker: fetch failed", "err", err)
 			time.Sleep(time.Second)
 			continue
 		}
 
 		var cmd sharedkafka.OrderCommand
 		if err := json.Unmarshal(msg.Value, &cmd); err != nil {
-			g.logger.Error("gateway: json decode failed", "err", err, "offset", msg.Offset)
-			commitCh <- msg
+			logger.Error("partition worker: json decode failed", "err", err, "offset", msg.Offset)
+			commitCh <- msg.Offset + 1
 			continue
 		}
 
@@ -112,61 +166,73 @@ func (g *InputGateway) run(ctx context.Context) {
 
 		for !g.router.Route(mc) {
 			g.paused.Add(1)
-			g.idle.Idle()
+			idle.Idle()
 			if ctx.Err() != nil {
 				return
 			}
 		}
-		g.idle.Reset()
+		idle.Reset()
 		g.received.Add(1)
 
-		commitCh <- msg
+		commitCh <- msg.Offset + 1
 	}
 }
 
-// commitLoop batches Kafka offset commits in a dedicated goroutine.
-// Flushes on batch-full (256) or time (200 ms), whichever comes first.
-func (g *InputGateway) commitLoop(ctx context.Context, ch <-chan kafkago.Message) {
+// partitionCommitLoop batches offset commits for a single partition.
+func (g *InputGateway) partitionCommitLoop(ctx context.Context, gen *kafkago.Generation, partition int, ch <-chan int64) {
+	const flushInterval = 200 * time.Millisecond
 	const batchCap = 256
-	batch := make([]kafkago.Message, 0, batchCap)
-	ticker := time.NewTicker(200 * time.Millisecond)
+
+	ticker := time.NewTicker(flushInterval)
 	defer ticker.Stop()
 
+	var maxOffset int64
+	pending := 0
+
 	flush := func() {
-		if len(batch) == 0 {
+		if pending == 0 {
 			return
 		}
-		if err := g.reader.CommitMessages(ctx, batch...); err != nil {
+		offsets := map[string]map[int]int64{
+			g.topic: {partition: maxOffset},
+		}
+		if err := gen.CommitOffsets(offsets); err != nil {
 			if ctx.Err() == nil {
-				g.logger.Error("gateway: batch commit failed", "err", err)
+				g.logger.Error("partition commit failed", "partition", partition, "err", err)
 			}
 		}
-		batch = batch[:0]
+		pending = 0
 	}
 
 	for {
 		select {
-		case msg, ok := <-ch:
+		case off, ok := <-ch:
 			if !ok {
 				flush()
 				return
 			}
-			batch = append(batch, msg)
-			// Greedily drain channel without blocking.
-			for len(batch) < batchCap {
+			if off > maxOffset {
+				maxOffset = off
+			}
+			pending++
+			// Greedily drain.
+			for pending < batchCap {
 				select {
-				case m, ok := <-ch:
+				case off, ok := <-ch:
 					if !ok {
 						flush()
 						return
 					}
-					batch = append(batch, m)
+					if off > maxOffset {
+						maxOffset = off
+					}
+					pending++
 				default:
 					goto checkFlush
 				}
 			}
 		checkFlush:
-			if len(batch) >= batchCap {
+			if pending >= batchCap {
 				flush()
 			}
 		case <-ticker.C:
@@ -179,7 +245,8 @@ func (g *InputGateway) commitLoop(ctx context.Context, ch <-chan kafkago.Message
 }
 
 func (g *InputGateway) Close() error {
-	return g.reader.Close()
+	// The consumer group is owned by run() and closed there.
+	return nil
 }
 
 // Stats returns counters for monitoring.

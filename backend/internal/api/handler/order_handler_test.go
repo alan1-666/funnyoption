@@ -199,10 +199,6 @@ type fakeQueryStore struct {
 	listSessionsReq               dto.ListSessionsRequest
 	listSessionsResp              []dto.SessionResponse
 	listSessionsErr               error
-	listDepositsResp              []dto.DepositResponse
-	listDepositsErr               error
-	listWithdrawResp              []dto.WithdrawalResponse
-	listWithdrawErr               error
 	listRollupForcedWithdrawResp  []dto.RollupForcedWithdrawalResponse
 	listRollupForcedWithdrawErr   error
 	listRollupEscapeClaimsResp    []dto.RollupEscapeCollateralClaimResponse
@@ -522,18 +518,6 @@ func (f *fakeQueryStore) ListSessions(ctx context.Context, req dto.ListSessionsR
 	_ = ctx
 	f.listSessionsReq = req
 	return f.listSessionsResp, f.listSessionsErr
-}
-
-func (f *fakeQueryStore) ListDeposits(ctx context.Context, req dto.ListDepositsRequest) ([]dto.DepositResponse, error) {
-	_ = ctx
-	_ = req
-	return f.listDepositsResp, f.listDepositsErr
-}
-
-func (f *fakeQueryStore) ListWithdrawals(ctx context.Context, req dto.ListWithdrawalsRequest) ([]dto.WithdrawalResponse, error) {
-	_ = ctx
-	_ = req
-	return f.listWithdrawResp, f.listWithdrawErr
 }
 
 func (f *fakeQueryStore) ListRollupForcedWithdrawals(ctx context.Context, req dto.ListRollupForcedWithdrawalsRequest) ([]dto.RollupForcedWithdrawalResponse, error) {
@@ -878,7 +862,6 @@ func TestCreateTradingKeyChallengeReturnsCreated(t *testing.T) {
 		Logger:               slog.Default(),
 		QueryStore:           store,
 		ExpectedChainID:      97,
-		ExpectedVaultAddress: "0x00000000000000000000000000000000000000bb",
 	})
 
 	body := map[string]any{
@@ -943,7 +926,6 @@ func TestRegisterTradingKeyVerifiesWalletSignature(t *testing.T) {
 		Logger:               slog.Default(),
 		QueryStore:           store,
 		ExpectedChainID:      97,
-		ExpectedVaultAddress: authz.VaultAddress,
 	})
 
 	body := map[string]any{

@@ -1,0 +1,9 @@
+networks:
+  custody-bridge:
+    external: true
+
+services:
+  api:
+    networks:
+      - default
+      - custody-bridge

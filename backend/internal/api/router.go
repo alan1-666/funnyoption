@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"funnyoption/internal/api/handler"
+	"funnyoption/internal/custody"
 
 	"github.com/gin-gonic/gin"
 )
@@ -16,10 +17,15 @@ type Meta struct {
 type routerOptions struct {
 	rateLimiter      *rateLimiter
 	corsExtraOrigins []string
+	custodyHandler   *custody.Handler
 }
 
 func NewEngine(meta Meta, deps handler.Dependencies, corsExtraOrigins []string) *gin.Engine {
 	return newEngine(meta, deps, routerOptions{corsExtraOrigins: corsExtraOrigins})
+}
+
+func NewEngineWithCustody(meta Meta, deps handler.Dependencies, ch *custody.Handler, corsExtraOrigins []string) *gin.Engine {
+	return newEngine(meta, deps, routerOptions{corsExtraOrigins: corsExtraOrigins, custodyHandler: ch})
 }
 
 func newEngine(meta Meta, deps handler.Dependencies, opts routerOptions) *gin.Engine {
@@ -36,6 +42,9 @@ func newEngine(meta Meta, deps handler.Dependencies, opts routerOptions) *gin.En
 	engine := gin.New()
 	applyGlobalMiddleware(engine, logger, opts)
 	registerRoutes(engine, meta, deps, limiter)
+	if opts.custodyHandler != nil {
+		registerCustodyRoutes(engine, deps, opts.custodyHandler)
+	}
 	return engine
 }
 

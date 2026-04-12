@@ -163,43 +163,25 @@ export interface Position {
 export interface Deposit {
   deposit_id: string;
   user_id: number;
-  wallet_address: string;
-  vault_address: string;
+  address: string;
   asset: string;
-  amount: number;
-  chain_name: string;
-  network_name: string;
+  chain_amount: string;
+  credit_amount: number;
+  chain_id: number;
   tx_hash: string;
-  log_index: number;
-  block_number: number;
   status: string;
-  credited_at: number;
   created_at: number;
-  updated_at: number;
 }
 
 export interface Withdrawal {
-  withdrawal_id: string;
+  withdraw_id: string;
   user_id: number;
-  wallet_address: string;
-  recipient_address: string;
-  vault_address: string;
+  to_address: string;
   asset: string;
   amount: number;
-  chain_name: string;
-  network_name: string;
-  tx_hash: string;
-  log_index: number;
-  block_number: number;
   status: string;
-  claim_status: string;
-  claim_tx_hash: string;
-  claim_submitted_at: number;
-  claimed_at: number;
-  last_error: string;
-  debited_at: number;
+  tx_hash: string;
   created_at: number;
-  updated_at: number;
 }
 
 export interface Payout {

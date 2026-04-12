@@ -26,15 +26,19 @@ type ServiceConfig struct {
 	ChainOperatorPrivateKey string
 	ChainName               string
 	NetworkName             string
-	VaultAddress            string
 	ChainID                 int64
 	Confirmations           int64
 	StartBlock              int64
-	ClaimPollInterval       time.Duration
 	RollupCoreAddress       string
 	RollupBatchLimit        int
 	RollupPollInterval      time.Duration
 	ChainGasLimit           uint64
+	CustodySaaSBaseURL      string
+	CustodySaaSTenantID     string
+	CustodySaaSAPIToken     string
+	CustodyDepositToken     string
+	CustodyChainName        string
+	CustodyNetworkName      string
 	CORSExtraOrigins        []string
 	TakerFeeBps             int64
 	MakerFeeBps             int64
@@ -65,11 +69,9 @@ func Load(serviceName string) ServiceConfig {
 		ChainOperatorPrivateKey: getenv("FUNNYOPTION_CHAIN_OPERATOR_PRIVATE_KEY", ""),
 		ChainName:               getenv("FUNNYOPTION_CHAIN_NAME", "bsc"),
 		NetworkName:             getenv("FUNNYOPTION_NETWORK_NAME", "testnet"),
-		VaultAddress:            getenv("FUNNYOPTION_VAULT_ADDRESS", ""),
 		ChainID:                 int64(getenvInt("FUNNYOPTION_CHAIN_ID", 97)),
 		Confirmations:           int64(getenvInt("FUNNYOPTION_CHAIN_CONFIRMATIONS", 6)),
 		StartBlock:              int64(getenvInt("FUNNYOPTION_CHAIN_START_BLOCK", 0)),
-		ClaimPollInterval:       getenvDuration("FUNNYOPTION_CHAIN_CLAIM_POLL_INTERVAL", 10*time.Second),
 		RollupCoreAddress:       getenv("FUNNYOPTION_ROLLUP_CORE_ADDRESS", ""),
 		RollupBatchLimit:        getenvInt("FUNNYOPTION_ROLLUP_BATCH_LIMIT", 128),
 		RollupPollInterval:      getenvDuration("FUNNYOPTION_ROLLUP_POLL_INTERVAL", 10*time.Second),
@@ -86,6 +88,12 @@ func Load(serviceName string) ServiceConfig {
 	cfg.KafkaBrokers = strings.Split(brokers, ",")
 	cfg.ChainRPCFallbackURLs = splitCSV(getenv("FUNNYOPTION_CHAIN_RPC_FALLBACK_URLS", ""))
 	cfg.CORSExtraOrigins = splitCSV(getenv("FUNNYOPTION_CORS_EXTRA_ORIGINS", ""))
+	cfg.CustodySaaSBaseURL = getenv("FUNNYOPTION_CUSTODY_SAAS_BASE_URL", "")
+	cfg.CustodySaaSTenantID = getenv("FUNNYOPTION_CUSTODY_SAAS_TENANT_ID", "funnyoption")
+	cfg.CustodySaaSAPIToken = getenv("FUNNYOPTION_CUSTODY_SAAS_API_TOKEN", "")
+	cfg.CustodyDepositToken = getenv("FUNNYOPTION_CUSTODY_DEPOSIT_TOKEN", "")
+	cfg.CustodyChainName = getenv("FUNNYOPTION_CUSTODY_CHAIN_NAME", "binance")
+	cfg.CustodyNetworkName = getenv("FUNNYOPTION_CUSTODY_NETWORK_NAME", cfg.NetworkName)
 	cfg.TakerFeeBps = int64(getenvInt("FUNNYOPTION_TAKER_FEE_BPS", 200))
 	cfg.MakerFeeBps = int64(getenvInt("FUNNYOPTION_MAKER_FEE_BPS", -50))
 	cfg.KafkaTopics = kafka.NewTopics(cfg.KafkaTopicPrefx)

@@ -382,7 +382,6 @@ func TestEngineRateLimitsSessionCreate(t *testing.T) {
 		Logger:               slog.Default(),
 		QueryStore:           &testQueryStore{},
 		ExpectedChainID:      97,
-		ExpectedVaultAddress: "0x00000000000000000000000000000000000000bb",
 	}, routerOptions{
 		rateLimiter: newRateLimiter(policies),
 	})
@@ -763,18 +762,6 @@ func (s *testQueryStore) ListSessions(ctx context.Context, req dto.ListSessionsR
 	_ = ctx
 	_ = req
 	return s.listSessionsResp, nil
-}
-
-func (s *testQueryStore) ListDeposits(ctx context.Context, req dto.ListDepositsRequest) ([]dto.DepositResponse, error) {
-	_ = ctx
-	_ = req
-	return nil, nil
-}
-
-func (s *testQueryStore) ListWithdrawals(ctx context.Context, req dto.ListWithdrawalsRequest) ([]dto.WithdrawalResponse, error) {
-	_ = ctx
-	_ = req
-	return nil, nil
 }
 
 func (s *testQueryStore) ListRollupForcedWithdrawals(ctx context.Context, req dto.ListRollupForcedWithdrawalsRequest) ([]dto.RollupForcedWithdrawalResponse, error) {

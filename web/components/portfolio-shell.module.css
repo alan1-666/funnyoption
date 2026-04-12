@@ -280,6 +280,14 @@
   background: rgba(255, 255, 255, 0.03);
 }
 
+.addressLabel {
+  grid-column: 1 / -1;
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.04em;
+  padding-top: 6px;
+}
+
 .addressValue,
 .qrAddress {
   overflow: hidden;
@@ -609,6 +617,13 @@
 
 .qrCopyFeedback {
   justify-self: start;
+}
+
+.qrHint {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.45);
+  text-align: center;
+  line-height: 1.5;
 }
 
 .list {

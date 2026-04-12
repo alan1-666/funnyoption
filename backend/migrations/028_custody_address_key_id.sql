@@ -1,0 +1,1 @@
+ALTER TABLE custody_address_mapping ADD COLUMN IF NOT EXISTS key_id TEXT NOT NULL DEFAULT '';

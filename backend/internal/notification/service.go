@@ -59,12 +59,20 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.ServiceConfig) err
 	marketConsumer.Start(ctx)
 	defer marketConsumer.Close()
 
+	depositConsumer := sharedkafka.NewJSONConsumer(
+		logger, cfg.KafkaBrokers, cfg.KafkaTopics.CustodyDeposit,
+		"funnyoption-notification", p.handleCustodyDeposit,
+	)
+	depositConsumer.Start(ctx)
+	defer depositConsumer.Close()
+
 	health.ListenAndServe(ctx, logger, cfg.HTTPAddr, cfg.Name, cfg.Env)
 
 	logger.Info("notification service started",
 		"trade_topic", cfg.KafkaTopics.TradeMatched,
 		"settlement_topic", cfg.KafkaTopics.SettlementDone,
 		"market_topic", cfg.KafkaTopics.MarketEvent,
+		"deposit_topic", cfg.KafkaTopics.CustodyDeposit,
 		"health_addr", cfg.HTTPAddr,
 	)
 
@@ -149,6 +157,44 @@ func (p *processor) handleMarketEvent(ctx context.Context, msg sharedkafka.Messa
 		}
 	}
 	return nil
+}
+
+func (p *processor) handleCustodyDeposit(ctx context.Context, msg sharedkafka.Message) error {
+	var ev sharedkafka.CustodyDepositEvent
+	if err := json.Unmarshal(msg.Value, &ev); err != nil {
+		p.logger.Error("notification: unmarshal custody deposit event", "err", err)
+		return nil
+	}
+
+	displayAmount := formatAccountingAmount(ev.CreditAmount, 2)
+	var title string
+	if ev.Asset != ev.CreditAsset {
+		title = fmt.Sprintf("Deposit received: %s %s → %s %s",
+			ev.Asset, ev.ChainAmount, displayAmount, ev.CreditAsset)
+	} else {
+		title = fmt.Sprintf("Deposit received: %s %s", displayAmount, ev.CreditAsset)
+	}
+
+	meta := fmt.Sprintf(`{"deposit_id":"%s","asset":"%s","credit_asset":"%s","credit_amount":%d,"tx_hash":"%s"}`,
+		ev.DepositID, ev.Asset, ev.CreditAsset, ev.CreditAmount, ev.TxHash)
+
+	if err := p.insertAndPublish(ctx, ev.UserID, "custody_deposit", title, "", meta); err != nil {
+		p.logger.Error("notification: insert deposit notif", "err", err, "user_id", ev.UserID)
+	}
+	return nil
+}
+
+func formatAccountingAmount(amount int64, digits int) string {
+	if digits <= 0 {
+		return fmt.Sprintf("%d", amount)
+	}
+	divisor := int64(1)
+	for i := 0; i < digits; i++ {
+		divisor *= 10
+	}
+	whole := amount / divisor
+	frac := amount % divisor
+	return fmt.Sprintf("%d.%0*d", whole, digits, frac)
 }
 
 func (p *processor) insertAndPublish(ctx context.Context, userID int64, notifType, title, body, metadata string) error {

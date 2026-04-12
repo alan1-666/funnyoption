@@ -450,66 +450,10 @@ type ListSessionsRequest struct {
 	Limit         int    `form:"limit"`
 }
 
-type ListDepositsRequest struct {
-	UserID        int64  `form:"user_id"`
-	WalletAddress string `form:"wallet_address"`
-	Status        string `form:"status"`
-	Limit         int    `form:"limit"`
-}
-
-type ListWithdrawalsRequest struct {
-	UserID        int64  `form:"user_id"`
-	WalletAddress string `form:"wallet_address"`
-	Status        string `form:"status"`
-	Limit         int    `form:"limit"`
-}
-
 type ListRollupForcedWithdrawalsRequest struct {
 	WalletAddress string `form:"wallet_address"`
 	Status        string `form:"status"`
 	Limit         int    `form:"limit"`
-}
-
-type DepositResponse struct {
-	DepositID     string `json:"deposit_id"`
-	UserID        int64  `json:"user_id"`
-	WalletAddress string `json:"wallet_address"`
-	VaultAddress  string `json:"vault_address"`
-	Asset         string `json:"asset"`
-	Amount        int64  `json:"amount"`
-	ChainName     string `json:"chain_name"`
-	NetworkName   string `json:"network_name"`
-	TxHash        string `json:"tx_hash"`
-	LogIndex      int64  `json:"log_index"`
-	BlockNumber   int64  `json:"block_number"`
-	Status        string `json:"status"`
-	CreditedAt    int64  `json:"credited_at"`
-	CreatedAt     int64  `json:"created_at"`
-	UpdatedAt     int64  `json:"updated_at"`
-}
-
-type WithdrawalResponse struct {
-	WithdrawalID     string `json:"withdrawal_id"`
-	UserID           int64  `json:"user_id"`
-	WalletAddress    string `json:"wallet_address"`
-	RecipientAddress string `json:"recipient_address"`
-	VaultAddress     string `json:"vault_address"`
-	Asset            string `json:"asset"`
-	Amount           int64  `json:"amount"`
-	ChainName        string `json:"chain_name"`
-	NetworkName      string `json:"network_name"`
-	TxHash           string `json:"tx_hash"`
-	LogIndex         int64  `json:"log_index"`
-	BlockNumber      int64  `json:"block_number"`
-	Status           string `json:"status"`
-	ClaimStatus      string `json:"claim_status"`
-	ClaimTxHash      string `json:"claim_tx_hash"`
-	ClaimSubmittedAt int64  `json:"claim_submitted_at"`
-	ClaimedAt        int64  `json:"claimed_at"`
-	LastError        string `json:"last_error"`
-	DebitedAt        int64  `json:"debited_at"`
-	CreatedAt        int64  `json:"created_at"`
-	UpdatedAt        int64  `json:"updated_at"`
 }
 
 type RollupForcedWithdrawalResponse struct {

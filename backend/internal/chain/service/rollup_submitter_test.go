@@ -21,6 +21,10 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
+func privateKeyHex(key *ecdsa.PrivateKey) string {
+	return common.Bytes2Hex(crypto.FromECDSA(key))
+}
+
 type fakeRollupSubmissionStore struct {
 	submissions          []rollup.StoredSubmission
 	prepared             rollup.PreparedShadowSubmission

@@ -131,7 +131,6 @@ func (e *listenerProofEnvironment) listenerConfig(base config.ServiceConfig) con
 	cfg := base
 	cfg.ChainName = e.chainName
 	cfg.NetworkName = e.networkName
-	cfg.VaultAddress = e.vaultAddress.Hex()
 	cfg.Confirmations = int64(e.listenerConfirmations)
 	cfg.StartBlock = int64(e.listenerStartBlock)
 	cfg.PollInterval = 100 * time.Millisecond

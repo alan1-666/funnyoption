@@ -6,7 +6,7 @@ import { VaultConsole } from "@/components/vault-console";
 export function DepositShell() {
   return (
     <>
-      <ShellTopBar searchPlaceholder="充值与提现" />
+      <ShellTopBar searchPlaceholder="资金管理" />
       <VaultConsole />
     </>
   );

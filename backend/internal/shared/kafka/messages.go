@@ -104,39 +104,6 @@ type SettlementCompletedEvent struct {
 	OccurredAtMillis int64  `json:"occurred_at_millis"`
 }
 
-type ChainDepositCreditedEvent struct {
-	EventID          string `json:"event_id"`
-	DepositID        string `json:"deposit_id"`
-	UserID           int64  `json:"user_id"`
-	WalletAddress    string `json:"wallet_address"`
-	VaultAddress     string `json:"vault_address"`
-	Asset            string `json:"asset"`
-	Amount           int64  `json:"amount"`
-	ChainName        string `json:"chain_name"`
-	NetworkName      string `json:"network_name"`
-	TxHash           string `json:"tx_hash"`
-	LogIndex         int64  `json:"log_index"`
-	BlockNumber      int64  `json:"block_number"`
-	OccurredAtMillis int64  `json:"occurred_at_millis"`
-}
-
-type ChainWithdrawalQueuedEvent struct {
-	EventID          string `json:"event_id"`
-	WithdrawalID     string `json:"withdrawal_id"`
-	UserID           int64  `json:"user_id"`
-	WalletAddress    string `json:"wallet_address"`
-	RecipientAddress string `json:"recipient_address"`
-	VaultAddress     string `json:"vault_address"`
-	Asset            string `json:"asset"`
-	Amount           int64  `json:"amount"`
-	ChainName        string `json:"chain_name"`
-	NetworkName      string `json:"network_name"`
-	TxHash           string `json:"tx_hash"`
-	LogIndex         int64  `json:"log_index"`
-	BlockNumber      int64  `json:"block_number"`
-	OccurredAtMillis int64  `json:"occurred_at_millis"`
-}
-
 type QuoteLevel struct {
 	Price    int64 `json:"price"`
 	Quantity int64 `json:"quantity"`
@@ -194,4 +161,15 @@ type NotificationCreatedEvent struct {
 	Type           string `json:"type"`
 	Title          string `json:"title"`
 	CreatedAt      int64  `json:"created_at"`
+}
+
+type CustodyDepositEvent struct {
+	DepositID    string `json:"deposit_id"`
+	UserID       int64  `json:"user_id"`
+	Asset        string `json:"asset"`
+	CreditAsset  string `json:"credit_asset"`
+	CreditAmount int64  `json:"credit_amount"`
+	ChainAmount  string `json:"chain_amount"`
+	TxHash       string `json:"tx_hash"`
+	CreatedAt    int64  `json:"created_at"`
 }

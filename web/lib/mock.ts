@@ -132,21 +132,16 @@ export const mockPositions: Position[] = [
 
 export const mockDeposits: Deposit[] = [
   {
-    deposit_id: "dep_1",
+    deposit_id: "cdep_1",
     user_id: 1001,
-    wallet_address: "0x9f4f6c91c4ce5d7f50da8f2cd2e6a6123ec4e7c1",
-    vault_address: "0x84d9451110f2f3bf4e48c083840fb834f11d44f8",
+    address: "0x9f4f6c91c4ce5d7f50da8f2cd2e6a6123ec4e7c1",
     asset: "USDT",
-    amount: 50000,
-    chain_name: "bsc",
-    network_name: "testnet",
+    chain_amount: "50000000000000000000",
+    credit_amount: 5000,
+    chain_id: 97,
     tx_hash: "0xabcd1",
-    log_index: 2,
-    block_number: 48221010,
     status: "CREDITED",
-    credited_at: 1743476500,
     created_at: 1743476480,
-    updated_at: 1743476500
   }
 ];
 
@@ -168,27 +163,14 @@ export const mockPayouts: Payout[] = [
 
 export const mockWithdrawals: Withdrawal[] = [
   {
-    withdrawal_id: "0x5a8ef7e9ff01cb7e6b8caad2e6b17c42f1770011011011011011011011011011",
+    withdraw_id: "cwdr_1",
     user_id: 1001,
-    wallet_address: "0x9f4f6c91c4ce5d7f50da8f2cd2e6a6123ec4e7c1",
-    recipient_address: "0x9f4f6c91c4ce5d7f50da8f2cd2e6a6123ec4e7c1",
-    vault_address: "0x84d9451110f2f3bf4e48c083840fb834f11d44f8",
+    to_address: "0x9f4f6c91c4ce5d7f50da8f2cd2e6a6123ec4e7c1",
     asset: "USDT",
     amount: 12500,
-    chain_name: "bsc",
-    network_name: "testnet",
+    status: "SUBMITTED",
     tx_hash: "0xw1234",
-    log_index: 1,
-    block_number: 48221118,
-    status: "DEBITED",
-    claim_status: "",
-    claim_tx_hash: "",
-    claim_submitted_at: 0,
-    claimed_at: 0,
-    last_error: "",
-    debited_at: 1743477800,
     created_at: 1743477790,
-    updated_at: 1743477800
   }
 ];
 

@@ -16,13 +16,9 @@ import (
 	"strings"
 	"time"
 
-	accountclient "funnyoption/internal/account/client"
 	"funnyoption/internal/api/dto"
-	chainservice "funnyoption/internal/chain/service"
 	sharedauth "funnyoption/internal/shared/auth"
 	"funnyoption/internal/shared/config"
-	shareddb "funnyoption/internal/shared/db"
-	sharedkafka "funnyoption/internal/shared/kafka"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -331,34 +327,7 @@ func main() {
 	}
 	log.Printf("created sessions buyer=%s maker=%s", buyerSession.SessionID, makerSession.SessionID)
 
-	if proofEnv, ok := depositEnv.(*listenerProofEnvironment); ok {
-		dbConn, err := shareddb.OpenPostgres(ctx, cfg.PostgresDSN)
-		if err != nil {
-			log.Fatalf("open postgres: %v", err)
-		}
-		defer dbConn.Close()
-
-		accountRPC, err := accountclient.NewGRPCClient(cfg.AccountGRPCAddr)
-		if err != nil {
-			log.Fatalf("open account grpc: %v", err)
-		}
-		defer accountRPC.Close()
-
-		publisher := sharedkafka.NewJSONPublisher(logger, cfg.KafkaBrokers)
-		defer publisher.Close()
-
-		store := chainservice.NewSQLStore(dbConn)
-		processor := chainservice.NewProcessor(logger, store, accountRPC, publisher, cfg.KafkaTopics)
-
-		listenerCfg := proofEnv.listenerConfig(cfg)
-		listener, err := chainservice.NewDepositListenerWithReader(logger, listenerCfg, store, processor, proofEnv.logReader())
-		if err != nil {
-			log.Fatalf("bootstrap deposit listener proof: %v", err)
-		}
-		listenerCtx, stopListener := context.WithCancel(ctx)
-		defer stopListener()
-		go listener.Start(listenerCtx)
-	}
+	_ = depositEnv
 
 	initialBuyerUSDT, err := client.fetchUSDTBalance(ctx, buyer.UserID)
 	if err != nil {

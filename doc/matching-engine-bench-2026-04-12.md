@@ -188,30 +188,105 @@ pq: insert or update on table "trades" violates foreign key constraint "trades_t
 
 ## 后续 TODO
 
-- [ ] **阻塞**: 追 `trades_taker_order_id_fkey` 的根因 —— 这是一个 posttrade/sql_store 的真实 bug，cross-match 路径几乎 100% 失败率，生产风险等级很高
-- [ ] 把 `-serverside custody wip` 那个 stash 整理成一个 feature branch 推到 origin，让服务器的 /opt/funnyoption-staging 恢复 clean state
-- [ ] 给 bench 加 `--pg-dsn` + pre-insert orders 行，让 cross-match 路径能拿到大样本 latency
-- [ ] push 一次 commit 到 main 验证 GitHub Actions 能走通整条链路（我修了服务器端，但没实际 push 过东西触发 runner）
-- [ ] 把 cmd/kafka-bench 补个 README 或注释说明怎么跑在 staging compose 网络里
-- [ ] E2E gateway 的单 goroutine decode 路径明显是瓶颈，考虑 fan-out 或换更快的 JSON 库 (goccy/go-json 已经用上了但仍 bottleneck)
-- [x] `83c4eca` vs `e86fca4` in-process 前后对比 — 见下方对比表
-## 前后对比: `3823f1e feat(matching): optimize hot path` 效果
+- [x] ~~**阻塞**: 追 `trades_taker_order_id_fkey` 的根因~~ → **已修复** (slice aliasing bug)
+- [x] ~~把 stash 整理成 feature branch~~ → `salvage/server-custody-wip` 服务器本地分支已创建
+- [x] ~~给 bench 加 `--pg-dsn` + pre-insert~~ → 已实现，cross-match 5000/5000 全部成功
+- [x] ~~push 一次 commit 验证 CI/CD~~ → 全链路打通（known_hosts / safe.directory / stash 三个问题均修复）
+- [x] ~~前后对比~~ → 见下方对比表
+- [x] ~~pprof 采样~~ → Snapshot 是 83% CPU 热点，已修复
+- [x] ~~EmptyBook OOM~~ → bench 改为 fresh engine/iteration，GC 回收正常
+- [ ] E2E gateway fan-out / dispatcher 落库优化 — 后续迭代
+- [ ] CI/CD SSH 偶发 timeout — GitHub runner IP 不固定，需要防火墙放行或改用 self-hosted runner
 
-同一服务器 (2vCPU EPYC, GOMAXPROCS=2) 背靠背跑，排除负载差异。
+---
 
-| Benchmark | e86fca4 ns/op | 83c4eca ns/op | Delta | Allocs | B/op |
-|---|--:|--:|---|---|---|
-| `PlaceOrder_DeepBook` | 1 438 | **632** | **-56% (2.3x faster)** | 16→9 | 1376→490 |
-| `Match_CrossSpread` | 1 633 | **800** | **-51% (2.0x faster)** | 16→9 | 1376→490 |
-| `Match_CrossSpread_WithEpoch` | 1 621 | **749** | **-54% (2.2x faster)** | 16→9 | 1376→490 |
-| `Match_InterleavedAddMatch` | **1 809** | 7 631 | **+322% (4.2x 回退)** | 16→8 | 1200→308 |
-| `CancelOrders` | **936** | 7 597 | **+711% (8.1x 回退)** | 7→6 | 423→407 |
+# 修复总结 (2026-04-12)
 
-**解读**：
-- 简单匹配场景（DeepBook、CrossSpread）**提速 2x+**，allocs 从 16 降到 9，B/op 从 1376 降到 490 — 这是 `OrderBookDirect` (bucket linked-list) 替换旧 map-based 结构的收益
-- InterleavedAddMatch 和 CancelOrders **出现严重回退** (4-8x 慢)，尽管 allocs/B 更低。疑似 Cancel 在新的 linked-list 结构上变成 O(N) 查找，InterleavedAddMatch 因为每对 add+match 都涉及 cancel-by-fill，被同样的 O(N) 拖慢
-- **建议**：查 `OrderBookDirect.RemoveDirectOrder` 路径是否做了线性扫描，考虑加 order-id→node 的 map 做 O(1) cancel
+## 本次修复的 7 个 Commits
 
-- [ ] 多 book 路径 profile — 确认 MultiBook100 的 5.9 µs 是 map lookup 还是 ringbuffer CAS
-- [ ] 用 `pprof` 采样一次 `InterleavedAddMatch`，看 alloc / GC 占比
-- [ ] `EmptyBook` 不可复现 —— 需要 supervisor/engine 内部对空 market 懒加载 (或 benchmark 改造) 才能压它
+| # | Commit | 类型 | 说明 |
+|---|---|---|---|
+| 1 | `d244cb2` | **fix** | **P0: 修复 trade 数据被后续 PlaceOrder 覆写** — `engine.match()` 的 `tradesBuf` reusable slice 通过 channel 传给 dispatcher 时被下一次 PlaceOrder 覆写，导致 `trades_taker_order_id_fkey` FK 100% 失败。修复：return 前 copy 出独立 slice |
+| 2 | `1ddcdd1` | **perf** | Gateway 批量 Kafka commit — `CommitInterval=200ms` + `MaxWait=10ms` + 256 条批量提交，消费速率 460→980/s (2x) |
+| 3 | `fb9307b` | **feat** | 新增 `backend/cmd/kafka-bench` E2E 压测工具 — 直接往 Kafka 灌 OrderCommand，消费 trade.matched 测延迟 |
+| 4 | `8073995` | **docs** | 压测报告 + 前后对比数据 |
+| 5 | `a685820` | **feat** | kafka-bench 加 `--pg-dsn` pre-insert — 确定性 OrderID + 预插 taker 行 + sentAt[] 内存延迟追踪 |
+| 6 | `0e2f559` | **perf** | **Snapshot 用 bitmap 遍历替代线性扫描** — InterleavedAddMatch 7600→1036 ns (7.3x)，CancelOrders 7600→818 ns (9.3x) |
+| 7 | `20169a6` | **fix** | EmptyBook benchmark OOM — 改为 fresh engine/iteration，GC 回收 |
+
+## CI/CD 修复（服务器侧，非 git commit）
+
+| 问题 | 根因 | 修复 |
+|---|---|---|
+| `repo checkout not found or not a git work tree` | `/opt/funnyoption-staging` 被 rsync 改成 `501:staff` owner → git dubious-ownership 拒绝 | 在 `/usr/local/bin/funnyoption-staging-deploy` 加 5 行幂等 `safe.directory` 自愈补丁 |
+| `tracked git changes exist` | 服务器上 51 个 custody 相关 uncommitted 改动 | `git stash push -u` → 创建 `salvage/server-custody-wip` 分支保留 |
+| SSH `install -m 700 -d ~/.ssh` exit 1 | `STAGING_SSH_KNOWN_HOSTS` secret 为空 → `ssh-keyscan` 从 runner 扫服务器被防火墙挡 | 配置 `STAGING_SSH_KNOWN_HOSTS` secret 为服务器的 3 种 host key |
+
+## 最终 Benchmark 对比 (同机 2vCPU EPYC, GOMAXPROCS=2, count=3 均值)
+
+### 三代对比: e86fca4 → 83c4eca → 20169a6
+
+| Benchmark | e86fca4 (旧) | 83c4eca (hot-path优化) | **20169a6 (全部修复)** | 总提速 (vs e86fca4) |
+|---|--:|--:|--:|---|
+| `AddOrder_Fresh` | — | 270 ns | **333 ns** | — |
+| `PlaceOrder_DeepBook` | 1 438 ns | 658 ns | **834 ns** | 1.7x |
+| `Match_CrossSpread` | 1 633 ns | 787 ns | **789 ns** | **2.1x** |
+| `CrossSpread_WithEpoch` | 1 621 ns | 859 ns | **674 ns** | **2.4x** |
+| `IOC_SweepBook` | — | 855 ns | **876 ns** | — |
+| **`InterleavedAddMatch`** | 1 809 ns | ~~7 631 ns~~ (回退) | **1 036 ns** | **1.7x** |
+| **`CancelOrders`** | 936 ns | ~~7 597 ns~~ (回退) | **818 ns** | **1.1x** |
+| `MultiBook100` | — | 5 922 ns | **817 ns** | — |
+| `STPSkip` | — | 5 855 ns | **1 680 ns** | — |
+| `EmptyBook` | OOM | OOM | **218 µs** (含 book 创建) | ✅ 可跑 |
+| `DeterministicTradeID` | — | 31 ns | **35 ns** | — |
+
+> `83c4eca` 的 InterleavedAddMatch/CancelOrders 回退是因为 `Snapshot()` 用 O(maxPrice) 线性扫描。`20169a6` 用 bitmap 遍历修复后，**全面超越 e86fca4**。
+
+### E2E Kafka 压测最终数据 (cross-match 5000 单, `--pg-dsn` pre-insert)
+
+| 指标 | 值 |
+|---|---|
+| orders sent | 5 000 |
+| trades observed | **5 000 (100%)** |
+| disp_errors | **0** |
+| send throughput | 2 287 orders/s (c=8) |
+| matching throughput | 56 trades/s (dispatcher DB limited) |
+| **latency p50** | 43.8 s (队列排队延迟，非引擎延迟) |
+| latency p99 | 1m26.9s |
+
+> 延迟大是因为引擎瞬间处理完 5000 单，但 dispatcher 只有 ~56/s 的 DB fsync 速度。真正的引擎撮合延迟 sub-ms。
+
+### E2E 吞吐分层分析
+
+```
+Client (c=32)  →  6 547 orders/s
+    ↓ Kafka produce
+Gateway        →  ~980 orders/s   ← batch commit 优化后 2x
+    ↓ ringbuffer route
+Engine         →  ~1M+ ops/s      ← 不是瓶颈
+    ↓ output channel
+Dispatcher     →  ~56 trades/s    ← DB fsync，是 E2E 瓶颈
+    ↓ Kafka publish
+Consumer       →  观测到的 trade
+```
+
+## pprof 发现
+
+**InterleavedAddMatch CPU 分布 (优化前)**:
+- `OrderBookDirect.Snapshot` — **83%** (线性扫描 10000 个 bucket slot)
+- `Engine.match` — 5%
+- GC — 8%
+
+**修复后**: Snapshot 使用 `FirstBidBucket/NextBidBucket` bitmap 跳跃，O(limit) 而非 O(maxPrice)
+
+**MultiBook100 CPU 分布**:
+- `Snapshot` — 71%
+- `getOrCreateBook` (map lookup) — 8%
+- `NewOrderBookDirect` — 7%
+
+## 残留问题
+
+1. **CI/CD SSH timeout** — GitHub Actions runner IP 不固定，偶发连不上服务器 port 22。解法：防火墙放行 GitHub Actions IP 段，或改用 self-hosted runner
+2. **Dispatcher 落库 ~56/s** — E2E 真正瓶颈。每笔 cross-match trade 需要 upsert 2 行 orders + insert 1 行 trades + rollup append，受 PG fsync 限制。优化方向：批量 persist、async write-ahead、或 WAL-only 模式
+3. **`salvage/server-custody-wip` 未 push 到 origin** — 服务器没有 GitHub push 权限，需要从本地 fetch 后 push
+4. **Gateway 进一步优化** — 当前单 goroutine fetch 已提到 ~980/s，如需更高可考虑 fan-out decode + 多 partition 并行消费

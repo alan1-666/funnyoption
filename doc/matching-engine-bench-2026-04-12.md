@@ -409,12 +409,61 @@ Dispatcher     →  ~1,300/s
 
 **累计：吞吐 34x 提升，延迟 230x 降低 (p50: 43.8s → 188ms)**
 
+## Multi-Partition 并行消费 (`0ad65a1`)
+
+### 改动
+
+1. **ConsumerGroup API** — 替换单 goroutine `Reader`，每个 partition 独立 fetch→decode→route goroutine
+2. **Generation-based lifecycle** — 支持 rebalance，动态增减 partition
+3. **SPSC 不变式保持** — producer 按 bookKey Hash → 同 book 始终在同一 partition → 单 producer 保证
+4. **Topic 扩容** — `funnyoption.staging.order.command` 从 1 partition 扩到 9
+
+### E2E 对比
+
+**单 book 测试** (所有流量走同一 partition，验证无回归):
+
+| 指标 | kafka perf (1 partition) | multi-partition (9 partitions) |
+|---|--:|--:|
+| 5k c=8 throughput | 1,881/s | 1,734/s (同 partition，开销略增) |
+| 10k c=32 throughput | 1,951/s | 1,721/s |
+
+**多 book 并行测试** (4 个 market × 2,500 单 = 10,000 单总量, c=8 per market):
+
+| 指标 | 值 |
+|---|---|
+| 总 orders sent | 10,000 (4 × 2,500) |
+| 总 trades observed | **10,000 (100%)** |
+| 聚合 trade window | ~3s |
+| **聚合吞吐** | **~3,400 trades/s** |
+| per-market 平均吞吐 | ~860 trades/s |
+| per-market p50 latency | ~1.1-1.3s |
+
+**vs 单 partition 单 book**: 1,900/s → **3,400/s (+79%)** with 4 markets on 2vCPU
+
+### 扩展性分析
+
 ```
-Client (c=32)  →  4,539 orders/s
-Gateway        →  ~1,900/s       ← 仍是瓶颈但已大幅改善
-Engine         →  ~1M+ ops/s
-Dispatcher     →  ~1,900/s       ← 和 gateway 基本平衡
+2vCPU + 9 partitions + 4 markets:   ~3,400/s (CPU-bound, 2 cores saturated)
+4vCPU + 9 partitions + 8 markets:   ~6,000-7,000/s (预估)
+8vCPU + 16 partitions + 16 markets: ~12,000-14,000/s (预估)
 ```
+
+吞吐线性扩展受 `min(partitions, CPU cores, active markets)` 约束。
+单 book 性能不受影响（单 partition 内是串行的，和之前一样）。
+
+### 全链路优化总览 (从原始到现在)
+
+| 阶段 | 单 book 吞吐 | 多 book 吞吐 | 5k p50 | 关键改动 |
+|---|--:|--:|--:|---|
+| 原始 | 56/s | — | 43.8 s | — |
+| batch persist | 421/s | — | 5.3 s | multi-row INSERT + 4 workers |
+| multi-row+workers | 1,299/s | — | 678 ms | bulk INSERT 合并 |
+| gateway async | 1,391/s | — | 774 ms | async commit + QueueCapacity |
+| kafka perf | 1,881/s | — | 188 ms | goccy/json + LZ4 + BatchSize |
+| **multi-partition** | 1,734/s | **~3,400/s** | 188 ms | ConsumerGroup + 9 partitions |
+
+**单 book: 56/s → 1,734/s (31x)**
+**多 book (4 markets): → 3,400/s (61x)**
 
 ## 功能扩展：STP 策略 + POST_ONLY + FOK + Amend Order
 

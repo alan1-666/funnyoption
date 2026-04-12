@@ -373,10 +373,14 @@ func (s *SQLStore) bulkEnsureMarkets(ctx context.Context, tx *sql.Tx, items []po
 }
 
 // bulkUpsertOrders inserts/updates all orders (taker + affected) in one multi-row upsert.
+// Duplicate order_ids are deduplicated — the last occurrence wins (most recent state).
 func (s *SQLStore) bulkUpsertOrders(ctx context.Context, tx *sql.Tx, items []posttrade.PersistItem) error {
 	const pp = 20 // params per row
-	args := make([]any, 0, len(items)*2*pp)
-	n := 0
+
+	// Collect rows, deduplicating by order_id (last write wins).
+	type orderArgs [pp]any
+	dedup := make(map[string]int)     // order_id → index in rows
+	rows := make([]orderArgs, 0, len(items)*2)
 
 	addRow := func(cmd sharedkafka.OrderCommand, order *model.Order, isTaker bool) {
 		if order == nil {
@@ -390,7 +394,7 @@ func (s *SQLStore) bulkUpsertOrders(ctx context.Context, tx *sql.Tx, items []pos
 			freezeAmount = cmd.FreezeAmount
 			commandID = cmd.CommandID
 		}
-		args = append(args,
+		row := orderArgs{
 			order.OrderID, order.ClientOrderID, commandID,
 			order.UserID, order.MarketID,
 			strings.ToUpper(strings.TrimSpace(order.Outcome)),
@@ -399,9 +403,14 @@ func (s *SQLStore) bulkUpsertOrders(ctx context.Context, tx *sql.Tx, items []pos
 			freezeID, normalizeAsset(freezeAsset), freezeAmount,
 			order.Price, order.Quantity, order.FilledQuantity, order.RemainingQuantity(),
 			string(order.Status), string(order.CancelReason),
-			order.CreatedAtMillis/1000,
-		)
-		n++
+			order.CreatedAtMillis / 1000,
+		}
+		if idx, dup := dedup[order.OrderID]; dup {
+			rows[idx] = row // overwrite with latest state
+		} else {
+			dedup[order.OrderID] = len(rows)
+			rows = append(rows, row)
+		}
 	}
 
 	for _, item := range items {
@@ -410,8 +419,14 @@ func (s *SQLStore) bulkUpsertOrders(ctx context.Context, tx *sql.Tx, items []pos
 			addRow(item.Command, affected, false)
 		}
 	}
+	n := len(rows)
 	if n == 0 {
 		return nil
+	}
+
+	args := make([]any, 0, n*pp)
+	for _, row := range rows {
+		args = append(args, row[:]...)
 	}
 
 	var b strings.Builder
